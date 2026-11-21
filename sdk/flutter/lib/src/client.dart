@@ -373,9 +373,8 @@ class _StreamEnded implements Exception {
 
 /// Seen-id LRU (spec §6). Ids compare case-insensitively; expired messages are dropped.
 class _Deduper {
-  final int capacity;
+  static const capacity = 10000;
   final _seen = <String>{}; // LinkedHashSet: insertion order
-  _Deduper([this.capacity = 10000]);
 
   bool accept(Map<String, dynamic> env, int now) {
     final exp = env['expires'];
