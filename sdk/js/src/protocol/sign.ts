@@ -24,7 +24,11 @@ export function deviceIdFromPublicKey(pk: Uint8Array): string {
 
 export function publicKeyFromDeviceId(id: string): Uint8Array {
   if (!DEVICE_ID_RE.test(id)) throw new Error("invalid device id");
-  return base32Decode(id.slice(4));
+  const pk = base32Decode(id.slice(4));
+  // The last base32 character carries 4 unused bits; only the canonical encoding is valid,
+  // so each key has exactly one id (allow/deny lists compare id strings).
+  if (pk.length !== 32 || base32Encode(pk) !== id.slice(4)) throw new Error("non-canonical device id");
+  return pk;
 }
 
 export async function deviceKeyFromSeed(seed: Uint8Array): Promise<DeviceKey> {

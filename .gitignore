@@ -13,3 +13,4 @@ __pycache__/
 site-build/
 .DS_Store
 .claude/worktrees/
+apps/site/public/sdk.js

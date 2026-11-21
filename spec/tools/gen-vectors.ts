@@ -66,6 +66,7 @@ const negative = [
   { name: "wrong sender", envelope: { ...good, sender: devices[0]!.device_id } },
   { name: "sig removed", envelope: { ...good, sig: undefined } },
   { name: "truncated sig", envelope: { ...good, sig: (good.sig as string).slice(0, 50) } },
+  { name: "non-canonical sender id (unused low bits set)", envelope: { ...good, sender: (good.sender as string).slice(0, -1) + String.fromCharCode((good.sender as string).charCodeAt(55) + 1) } },
 ];
 write("signatures.json", {
   description: "Device ids (spec §1.3) and Ed25519 envelope signatures (spec §4). `signed` must verify; signing `unsigned` with `seed` must yield `signed.sig` exactly. Changing `hops` must not affect verification. Every `negative` envelope must fail verification.",

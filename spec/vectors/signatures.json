@@ -299,6 +299,33 @@
         "sender": "dev_hvabpq7iioevvevxbktu2g36xsojqlgpf3cjndgazvk7ckxumyga",
         "sig": "ed25519:twTi7Yssbt4QAEGn5ye-pxgVqkRfpUgRQjMnEJuMYi"
       }
+    },
+    {
+      "name": "non-canonical sender id (unused low bits set)",
+      "envelope": {
+        "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2N",
+        "time": 1763750001,
+        "expires": 1763836400,
+        "topic": "@alice/doorbell",
+        "title": "Front door",
+        "message": "Opened",
+        "priority": 4,
+        "tags": [
+          "door",
+          "warning"
+        ],
+        "hops": 2,
+        "route": {
+          "mode": "any",
+          "max_cost_usd_micros": 20000,
+          "deny": [
+            "sms"
+          ],
+          "deadline_s": 60
+        },
+        "sender": "dev_hvabpq7iioevvevxbktu2g36xsojqlgpf3cjndgazvk7ckxumygb",
+        "sig": "ed25519:twTi7Yssbt4QAEGn5ye-pxgVqkRfpUgRQjMnEJuMYioHXS2w5oCmt7RJTwzJwHJqQaBR-scUsFZVz91LCaTVBQ"
+      }
     }
   ]
 }

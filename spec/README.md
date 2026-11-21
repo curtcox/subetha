@@ -40,7 +40,10 @@ use them unchanged. Global (un-namespaced) names are **not** accepted in v0 (PLA
 ### 1.3 Device id
 `dev_` followed by the device's 32-byte Ed25519 public key in lowercase RFC 4648 base32 without
 padding (52 characters). The public key is recoverable from the id, so any relay, gateway, or
-edge peer can verify a signature without a lookup.
+edge peer can verify a signature without a lookup. The last character carries 4 unused bits,
+which MUST be zero: verifiers reject non-canonical ids so that each key has exactly one id.
+Verifiers SHOULD use strict Ed25519 verification (reject small-order keys and non-canonical
+signatures).
 
 ## 2. Envelope
 
