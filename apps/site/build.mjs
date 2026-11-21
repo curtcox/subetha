@@ -22,6 +22,7 @@ import { dirname, extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import { Marked } from "marked";
+import { parse as parseYaml } from "yaml";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "../..");
@@ -226,6 +227,8 @@ ${legal.map((d) => link(d.slug, d.navTitle, "")).join("\n")}
 `);
 write("llms-full.txt", `# SubEtha documentation (all pages)\n\nSource: ${siteUrl}/docs/\n\n${docs.map((d) => `<!-- ${siteUrl}/docs/${d.slug}.md -->\n\n${d.md.trim()}\n`).join("\n---\n\n")}`);
 copyFileSync(join(repo, "spec/openapi.yaml"), join(out, "openapi.yaml"));
+// JSON copy for the console's API explorer (browsers have no YAML parser).
+write("openapi.json", JSON.stringify(parseYaml(readFileSync(join(repo, "spec/openapi.yaml"), "utf8"), { merge: true })));
 
 // Built-in tools (PLAN §10): pricing calculator and route simulator. src/ → tools/tools.js, which
 // bundles the relay's own price table, planner, and telephony units.
@@ -324,4 +327,4 @@ ${sdks.map(([what, name, v, registry, dir]) => `<tr><td>${what}</td><td><code>${
 </ul>`;
 }
 
-console.log(`built ${docs.length} docs pages, llms.txt, llms-full.txt, openapi.yaml, tools/tools.js${pages ? ", build-info.html, pricing-report.html" : ""} → ${relative(process.cwd(), out) || "."} (base ${base})`);
+console.log(`built ${docs.length} docs pages, llms.txt, llms-full.txt, openapi.yaml, openapi.json, tools/tools.js${pages ? ", build-info.html, pricing-report.html" : ""} → ${relative(process.cwd(), out) || "."} (base ${base})`);

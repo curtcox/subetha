@@ -32,6 +32,7 @@
       <button data-tab="tokens">Tokens</button>
       <button data-tab="billing">Billing</button>
       <button data-tab="traces">Traces</button>
+      <button data-tab="explorer">API explorer</button>
     </div>
 
     <section data-panel="messages">
@@ -46,7 +47,7 @@
             <div><label>Route</label><select id="pubMode"><option>any</option><option>fast</option><option>all</option><option>cheap</option></select></div>
             <div><label>Tags</label><input id="pubTags" placeholder="a,b"></div>
           </div>
-          <p class="row"><button id="pubBtn">Publish</button><button id="dryBtn" class="secondary">Simulate route &amp; cost</button><button id="curlBtn" class="secondary">Copy as curl</button></p>
+          <p class="row"><button id="pubBtn">Publish</button><button id="dryBtn" class="secondary">Simulate route &amp; cost</button><select id="copyLang" aria-label="Copy as"></select><button id="curlBtn" class="secondary">Copy</button></p>
           <pre id="pubOut" hidden></pre>
         </div>
         <div class="card">
@@ -104,6 +105,19 @@
         <div class="card"><h3>Pricing</h3><div id="priceTable" class="muted">Loading…</div></div>
       </div>
       <div class="card"><h3>Ledger</h3><table><thead><tr><th>#</th><th>Kind</th><th>Amount</th><th>Available after</th><th>Ref</th><th>Time</th></tr></thead><tbody id="ledgerRows"></tbody></table></div>
+    </section>
+
+    <section data-panel="explorer" hidden>
+      <div class="card">
+        <h3>API explorer</h3>
+        <p class="muted">Every operation in <a href="/openapi.yaml">the OpenAPI document</a>, sent live with your credential. Metered requests are charged to your balance like any other; add <code>X-Dry-Run: 1</code> to publishes to see the cost first.</p>
+        <div class="row"><input id="exFilter" placeholder="Filter: tokens, publish, /v1/topics…" aria-label="Filter operations"><select id="exOp" aria-label="Operation"></select></div>
+        <p id="exDesc" class="muted"></p>
+        <div id="exParams" class="formgrid"></div>
+        <div id="exBodyWrap" hidden><label for="exBody">Body <span id="exBodyType" class="muted"></span></label><textarea id="exBody" rows="8" spellcheck="false"></textarea></div>
+        <p class="row"><button id="exSend">Send</button><button id="exCurl" class="secondary">Copy as curl</button><span id="exStatus" class="muted"></span></p>
+        <pre id="exOut" hidden></pre>
+      </div>
     </section>
 
     <section data-panel="traces" hidden>

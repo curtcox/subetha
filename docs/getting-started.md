@@ -49,6 +49,17 @@ encryption. It runs in browsers, Node 18+, Deno, Bun, and Workers.
 
 There are also a [Python SDK, a Rust core, a CLI, and drop-in web components](sdks.md).
 
+## Built-in tools
+
+- [Pricing calculator](/tools/pricing.html): a month of usage, priced from the same table the
+  relay charges from, and the top-up that covers it.
+- [Route simulator](/tools/simulator.html): which transports a message would use, in what order,
+  and at what cost. It runs the relay's planner in your browser, so it needs no account.
+- In the [console](https://subetha.org/console/): **Copy as** curl, JavaScript, Python, Swift,
+  Kotlin, or Dart for any message you compose; **Simulate route & cost** (a dry run against your
+  real topic); a token builder; a trace viewer; and an **API explorer** that sends any operation
+  in the [OpenAPI document](/openapi.yaml) with your credential.
+
 ## Next
 
 - Deliver to phones, email, Slack, or SMS: [Transports](transports.md).

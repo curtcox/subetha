@@ -1,4 +1,7 @@
 // The console is an ordinary SDK client (PLAN §11).
+import { LANGUAGES, LANGUAGE_NAMES, snippet } from "./snippets.js";
+import { buildRequest, operations, toCurl } from "./explorer.js";
+
 const $ = (id) => document.getElementById(id);
 const usd = (micros) => `$${(micros / 1e6).toFixed(micros < 10000 ? 6 : 2)}`;
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -62,6 +65,7 @@ async function refresh() {
   $("subTopic").value ||= `${h}test`;
   const hash = new URLSearchParams(location.hash.slice(1));
   if (hash.get("topic")) { $("subTopic").value = hash.get("topic"); subscribe(); }
+  if (hash.get("tab")) showTab(hash.get("tab"));
 }
 
 $("tokenBtn").onclick = () => { store("subetha.token", $("tokenInput").value.trim()); refresh(); };
@@ -71,10 +75,18 @@ $("createBtn").onclick = async () => {
   refresh();
 };
 
-document.querySelectorAll("#tabs button").forEach((b) => b.onclick = () => {
+function showTab(name) {
+  const b = document.querySelector(`#tabs button[data-tab="${name}"]`);
+  if (!b) return;
   document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("active", x === b));
-  document.querySelectorAll("[data-panel]").forEach((p) => p.hidden = p.dataset.panel !== b.dataset.tab);
-  ({ topics: loadTopics, tokens: loadTokens, billing: loadBilling })[b.dataset.tab]?.();
+  document.querySelectorAll("[data-panel]").forEach((p) => p.hidden = p.dataset.panel !== name);
+  ({ topics: loadTopics, tokens: loadTokens, billing: loadBilling, explorer: loadExplorer })[name]?.();
+}
+document.querySelectorAll("#tabs button").forEach((b) => b.onclick = () => {
+  showTab(b.dataset.tab);
+  const hash = new URLSearchParams(location.hash.slice(1));
+  hash.set("tab", b.dataset.tab);
+  history.replaceState(null, "", `#${hash}`);
 });
 
 function pubOpts() {
@@ -100,16 +112,14 @@ $("dryBtn").onclick = async () => {
   } catch (e) { out.textContent = `${e.code}: ${e.message}`; }
 };
 
+$("copyLang").innerHTML = LANGUAGES.map((l) => `<option value="${l}">${LANGUAGE_NAMES[l]}</option>`).join("");
+$("copyLang").value = load("subetha.copyLang") || "curl";
+$("copyLang").onchange = () => store("subetha.copyLang", $("copyLang").value);
 $("curlBtn").onclick = async () => {
   const o = pubOpts();
-  const parts = [`curl`, `-H "Authorization: Bearer $SUBETHA_TOKEN"`];
-  if (o.title) parts.push(`-H "X-Title: ${o.title}"`);
-  if (o.priority !== 3) parts.push(`-H "X-Priority: ${o.priority}"`);
-  if (o.tags.length) parts.push(`-H "X-Tags: ${o.tags.join(",")}"`);
-  if (o.route.mode !== "any") parts.push(`-H "X-Route-Mode: ${o.route.mode}"`);
-  parts.push(`-d '${($("pubMsg").value || "triggered").replace(/'/g, "'\\''")}'`, `${location.origin}/${$("pubTopic").value.trim()}`);
-  await navigator.clipboard?.writeText(parts.join(" \\\n  "));
-  $("pubOut").hidden = false; $("pubOut").textContent = parts.join(" \\\n  ");
+  const text = snippet($("copyLang").value, { baseUrl: location.origin, topic: $("pubTopic").value.trim(), message: $("pubMsg").value || "triggered", title: o.title, priority: o.priority, tags: o.tags, mode: o.route.mode });
+  $("pubOut").hidden = false; $("pubOut").textContent = text;
+  await navigator.clipboard?.writeText(text).catch(() => {});
 };
 
 function subscribe() {
@@ -191,6 +201,89 @@ $("traceBtn").onclick = async () => {
   const out = $("traceOut"); out.hidden = false;
   try { out.textContent = JSON.stringify(await client.trace($("traceTopic").value.trim(), $("traceId").value.trim()), null, 2); }
   catch (e) { out.textContent = `${e.code}: ${e.message}`; }
+};
+
+// ---------- API explorer ----------
+let exOps = null;
+async function loadExplorer() {
+  if (exOps) return;
+  try {
+    const spec = await fetch("/openapi.json").then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
+    exOps = operations(spec);
+  } catch (e) { $("exDesc").textContent = `Couldn't load the OpenAPI document: ${e.message}`; return; }
+  drawOps();
+}
+function drawOps() {
+  const f = $("exFilter").value.trim().toLowerCase();
+  const shown = exOps.filter((o) => !f || `${o.method} ${o.path} ${o.summary} ${o.tag} ${o.id}`.toLowerCase().includes(f));
+  const prev = $("exOp").value;
+  const tags = [...new Set(shown.map((o) => o.tag))];
+  $("exOp").innerHTML = tags.map((t) => `<optgroup label="${esc(t)}">${shown.filter((o) => o.tag === t).map((o) => `<option value="${esc(o.id)}"${o.unsupported ? " disabled" : ""}>${o.method} ${esc(o.path)}${o.summary ? ` — ${esc(o.summary)}` : ""}</option>`).join("")}</optgroup>`).join("");
+  const keep = shown.find((o) => o.id === prev && !o.unsupported) ?? shown.find((o) => !o.unsupported);
+  if (keep) $("exOp").value = keep.id;
+  drawOp();
+}
+function currentOp() { return exOps?.find((o) => o.id === $("exOp").value); }
+function drawOp() {
+  const op = currentOp();
+  $("exOut").hidden = true; $("exStatus").textContent = "";
+  if (!op) { $("exParams").innerHTML = ""; $("exDesc").textContent = "No matching operations."; $("exBodyWrap").hidden = true; return; }
+  $("exDesc").textContent = (op.description || op.summary || "").replace(/`/g, "").split("\n\n")[0] + (op.stream ? " (Streams: the explorer reads for up to 10 seconds; add poll=1 to return at once.)" : "");
+  const h = me?.handle ? `@${me.handle}/test` : "";
+  const guess = (p) => (/topic/i.test(p.name) ? h : p.example ?? p.schema?.example ?? p.schema?.default ?? "");
+  $("exParams").innerHTML = op.params.map((p, i) => `<div><label for="exP${i}">${esc(p.name)} <span class="muted">${p.in}${p.required ? ", required" : ""}</span></label><input id="exP${i}" data-in="${p.in}" data-name="${esc(p.name)}" value="${esc(p.in === "path" ? guess(p) : "")}" placeholder="${esc(p.schema?.enum?.join(" | ") ?? p.schema?.type ?? "")}" title="${esc(p.description ?? "")}"></div>`).join("");
+  $("exBodyWrap").hidden = !op.body;
+  if (op.body) {
+    $("exBodyType").textContent = op.body.type;
+    const text = typeof op.body.example === "string" ? op.body.example : op.body.example == null ? "" : JSON.stringify(op.body.example, null, 2);
+    $("exBody").value = me?.handle ? text.replaceAll("@alice/", `@${me.handle}/`) : text;
+  }
+}
+function exRequest() {
+  const op = currentOp();
+  const values = { path: {}, query: {}, header: {}, body: op.body ? $("exBody").value : undefined };
+  document.querySelectorAll("#exParams input").forEach((el) => { values[el.dataset.in][el.dataset.name] = el.value.trim(); });
+  return { op, req: buildRequest(location.origin, op, values) };
+}
+$("exFilter").oninput = () => exOps && drawOps();
+$("exOp").onchange = drawOp;
+$("exCurl").onclick = async () => {
+  try {
+    const { op, req } = exRequest();
+    const text = toCurl(req, { auth: op.auth });
+    $("exOut").hidden = false; $("exOut").textContent = text;
+    await navigator.clipboard?.writeText(text).catch(() => {});
+  } catch (e) { $("exStatus").textContent = e.message; }
+};
+$("exSend").onclick = async () => {
+  let built;
+  try { built = exRequest(); } catch (e) { $("exStatus").textContent = e.message; return; }
+  const { op, req } = built;
+  const headers = { ...req.headers };
+  const token = op.auth ? await getToken() : null;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), op.stream ? 10_000 : 30_000);
+  const t0 = performance.now();
+  $("exStatus").textContent = "Sending…"; $("exOut").hidden = false; $("exOut").textContent = "";
+  try {
+    const r = await fetch(req.url, { method: req.method, headers, body: req.body, signal: ctrl.signal, redirect: "manual" });
+    const head = `HTTP ${r.status} ${r.statusText}\n${[...r.headers].filter(([k]) => /^(content-type|retry-after|location|x-|idempotency)/i.test(k)).map(([k, v]) => `${k}: ${v}`).join("\n")}\n\n`;
+    $("exOut").textContent = head;
+    if (op.stream && r.body) {
+      const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+      try { for (;;) { const { value, done } = await reader.read(); if (done) break; $("exOut").textContent += value; } } catch (e) { if (e.name !== "AbortError") throw e; }
+    } else {
+      const text = await r.text();
+      let pretty = text;
+      try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch {}
+      $("exOut").textContent += pretty;
+    }
+    $("exStatus").textContent = `${r.status} in ${Math.round(performance.now() - t0)} ms`;
+    if (r.ok && me) client.account().then((a) => { me = a; $("bal").textContent = usd(a.balance_usd_micros); }).catch(() => {});
+  } catch (e) {
+    $("exStatus").textContent = e.name === "AbortError" ? `Stopped after ${Math.round((performance.now() - t0) / 1000)} s` : `Failed: ${e.message}`;
+  } finally { clearTimeout(timer); }
 };
 
 init().catch((e) => { console.error(e); });
