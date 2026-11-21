@@ -215,6 +215,9 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
   app.post("/v1/hooks/twilio/sms", async (c) => {
     const params = await twilioParams(c);
     const from = params.From ?? "", body = (params.Body ?? "").trim();
+    if (/^(help|info)$/i.test(body)) {
+      return twiml(c, "<Response><Message>SubEtha notifications. Manage at subetha.org/console. Reply STOP to opt out. Msg &amp; data rates may apply.</Message></Response>");
+    }
     const ep = await c.env.DB.prepare("SELECT * FROM endpoints WHERE kind = 'sms' AND address = ? AND verified_at IS NOT NULL ORDER BY created_at LIMIT 1").bind(from).first<EndpointRecord>();
     if (!ep) return twiml(c);
     if (/^(stop|stopall|unsubscribe|cancel|end|quit)$/i.test(body)) {
