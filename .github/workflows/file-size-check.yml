@@ -1,0 +1,36 @@
+name: File size check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  file-sizes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check file sizes
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            # Every file added by the PR's commits, using the PR's allowlist.
+            scripts/check-file-sizes.sh --range "$PR_BASE..$PR_HEAD" --allow-from "$PR_HEAD"
+          elif [ -n "$PUSH_BEFORE" ] && ! echo "$PUSH_BEFORE" | grep -qE '^0+$' \
+               && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+            # Ordinary push: the commits it added.
+            scripts/check-file-sizes.sh --range "$PUSH_BEFORE..$PUSH_AFTER" --allow-from "$PUSH_AFTER"
+          else
+            # New branch or force push: check every file in the pushed tree.
+            scripts/check-file-sizes.sh --tree "$PUSH_AFTER"
+          fi

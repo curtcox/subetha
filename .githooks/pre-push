@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Reject pushes that add files over the size limits in scripts/check-file-sizes.sh.
+# Enable with:  git config core.hooksPath .githooks
+exec "$(git rev-parse --show-toplevel)/scripts/check-file-sizes.sh" --pre-push "$@"

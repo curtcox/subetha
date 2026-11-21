@@ -1,0 +1,17 @@
+# Exceptions to the file size limits enforced by scripts/check-file-sizes.sh.
+#
+# One entry per line:   <pattern> <limit>
+#
+#   pattern  A glob. Without a '/', it matches the file name in any directory
+#            (e.g. *.psd). With a '/', it matches the path from the repo root
+#            (e.g. docs/images/*.png); '*' also matches across directories.
+#            Matching is case-sensitive.
+#   limit    e.g. 750KB, 20MB, 1GB (1KB = 1024 bytes), or 'unlimited'.
+#
+# The last matching line wins. Only the committed version of this file is
+# used, so exceptions go through review like any other change.
+#
+# Examples:
+#   assets/hero.png      3MB
+#   *.psd                50MB
+#   vendor/legacy.min.js 1MB
