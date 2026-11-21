@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "subetha": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://subetha.org/mcp",
+        "--header",
+        "Authorization: Bearer ${SUBETHA_TOKEN}"
+      ],
+      "env": {
+        "SUBETHA_TOKEN": "se_replace_me"
+      }
+    }
+  }
+}
