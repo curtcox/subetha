@@ -4,6 +4,7 @@ import { accountStub } from "../durable/account.ts";
 import { topicStub } from "../durable/topic.ts";
 import type { DeliveryJob, Env } from "../types.ts";
 import { senders, PermanentError } from "./index.ts";
+import { CIRCUIT_KEY } from "../cron.ts";
 
 const MAX_ATTEMPTS = 5;
 
@@ -18,6 +19,10 @@ export async function processJob(job: DeliveryJob, env: Env): Promise<"delivered
   const send = senders[job.sub.transport];
   try {
     if (!send) throw new PermanentError(`no sender for transport ${job.sub.transport}`);
+    if (job.sub.transport === "sms" || job.sub.transport === "voice") {
+      const circuit = await env.CACHE.get(CIRCUIT_KEY);
+      if (circuit) throw new PermanentError(`telephony paused: ${circuit}`);
+    }
     const r = await send(job, env);
     await account.settle(job.reservation.ref, Math.min(r.costMicros ?? job.reservation.micros, job.reservation.micros));
     await topic.recordDelivery(job.message.id!, { sub: job.sub.id, transport: job.sub.transport, result: "delivered", detail: r.detail });

@@ -1,0 +1,116 @@
+// Inbound email: <handle>.<name>@in.subetha.org or t_…@in.subetha.org → publish (PLAN §6).
+// Charged to the topic owner as inbound_email + publish; senders must be allowed by the topic's
+// email_senders policy.
+import { isTopic, utf8 } from "@subetha/sdk/protocol";
+import { actionPriceMicros, type PriceTable } from "@subetha/pricing";
+import prices from "@subetha/pricing/prices.json";
+import { accountStub } from "./durable/account.ts";
+import { topicStub } from "./durable/topic.ts";
+import type { Env } from "./types.ts";
+
+const PRICES = prices as unknown as PriceTable;
+const MAX_RAW = 512 * 1024;
+
+export function topicFromAddress(to: string): string | null {
+  const local = to.split("@")[0]!.toLowerCase();
+  if (local.startsWith("t_")) return isTopic(local) ? local : null;
+  const dot = local.indexOf(".");
+  if (dot < 1) return null;
+  // Names may contain upper case; email local parts are case-insensitive in practice, so the
+  // original case is recovered from the To header by the caller when possible.
+  const topic = `@${local.slice(0, dot)}/${to.split("@")[0]!.slice(dot + 1)}`;
+  return isTopic(topic) ? topic : null;
+}
+
+function decodeWords(s: string): string {
+  return s.replace(/=\?([^?]+)\?([bqBQ])\?([^?]*)\?=/g, (_m, _cs: string, enc: string, text: string) => {
+    const bytes = enc.toLowerCase() === "b"
+      ? Uint8Array.from(atob(text), (c) => c.charCodeAt(0))
+      : qpBytes(text.replace(/_/g, " "));
+    return utf8.decode(bytes);
+  });
+}
+
+function qpBytes(s: string): Uint8Array {
+  const out: number[] = [];
+  const t = s.replace(/=\r?\n/g, "");
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] === "=" && /^[0-9A-Fa-f]{2}$/.test(t.slice(i + 1, i + 3))) {
+      out.push(parseInt(t.slice(i + 1, i + 3), 16));
+      i += 2;
+    } else out.push(...utf8.encode(t[i]!));
+  }
+  return new Uint8Array(out);
+}
+
+interface Part { headers: Record<string, string>; body: string }
+
+function splitPart(raw: string): Part {
+  const idx = raw.search(/\r?\n\r?\n/);
+  const head = idx < 0 ? raw : raw.slice(0, idx);
+  const body = idx < 0 ? "" : raw.slice(idx).replace(/^\r?\n\r?\n/, "");
+  const headers: Record<string, string> = {};
+  for (const line of head.replace(/\r?\n[ \t]+/g, " ").split(/\r?\n/)) {
+    const c = line.indexOf(":");
+    if (c > 0) headers[line.slice(0, c).trim().toLowerCase()] = line.slice(c + 1).trim();
+  }
+  return { headers, body };
+}
+
+function decodeBody(p: Part): string {
+  const cte = (p.headers["content-transfer-encoding"] ?? "").toLowerCase();
+  if (cte === "base64") {
+    try { return utf8.decode(Uint8Array.from(atob(p.body.replace(/\s+/g, "")), (c) => c.charCodeAt(0))); } catch { return ""; }
+  }
+  if (cte === "quoted-printable") return utf8.decode(qpBytes(p.body));
+  return p.body;
+}
+
+function findText(p: Part, depth = 0): string | null {
+  const ct = p.headers["content-type"] ?? "text/plain";
+  if (/^text\/plain/i.test(ct)) return decodeBody(p);
+  const boundary = /boundary="?([^";]+)"?/i.exec(ct)?.[1];
+  if (/^multipart\//i.test(ct) && boundary && depth < 5) {
+    const parts = p.body.split(`--${boundary}`).slice(1).filter((x) => !x.startsWith("--"));
+    for (const raw of parts) {
+      const t = findText(splitPart(raw.replace(/^\r?\n/, "")), depth + 1);
+      if (t !== null) return t;
+    }
+    // Fall back to stripped HTML.
+    for (const raw of parts) {
+      const part = splitPart(raw.replace(/^\r?\n/, ""));
+      if (/^text\/html/i.test(part.headers["content-type"] ?? "")) return decodeBody(part).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    }
+  }
+  return null;
+}
+
+export function parseEmail(raw: string): { subject: string; from: string; text: string } {
+  const top = splitPart(raw);
+  const text = (findText(top) ?? "").replace(/\r\n/g, "\n").trim();
+  // Drop quoted replies and signatures, keep it short.
+  const trimmed = text.split(/\n(?:-- \n|On .+ wrote:\n|>)/)[0]!.trim();
+  return { subject: decodeWords(top.headers.subject ?? ""), from: top.headers.from ?? "", text: trimmed };
+}
+
+export async function handleInboundEmail(message: ForwardableEmailMessage, env: Env): Promise<void> {
+  const topic = topicFromAddress(message.to);
+  if (!topic) return message.setReject("unknown topic address");
+  if (message.rawSize > MAX_RAW) return message.setReject("message too large");
+  const meta = await topicStub(env, topic).getMeta();
+  const from = message.from.toLowerCase();
+  const allowed = meta?.policy.email_senders?.some((s) => s === "*" || s.toLowerCase() === from || (s.startsWith("@") && from.endsWith(s.toLowerCase())));
+  if (!meta || !allowed) return message.setReject("sender not allowed for this topic");
+  const raw = await new Response(message.raw).text();
+  const parsed = parseEmail(raw);
+  const msgId = message.headers.get("message-id") ?? `${from}:${Date.now()}`;
+  const charge = await accountStub(env, meta.owner).charge(actionPriceMicros(PRICES, "inbound_email"), `inmail:${msgId}`, null, {});
+  if (!charge.ok) return message.setReject("topic owner's balance is empty");
+  const r = await topicStub(env, topic).publish({
+    envelope: { topic, title: parsed.subject.slice(0, 256) || undefined, message: (parsed.text || "(no text)").slice(0, 4096), tags: ["email"], email_from: from } as never,
+    caller: { accountId: meta.owner, tokenId: null, deviceId: null, caps: { daily: null, total: null }, transports: null },
+    autoCreateOwner: null, idempotencyKey: `email:${msgId}`, bodyHash: msgId, dryRun: false,
+    route: { mode: "any", maxCost: null, deny: [], allow: null },
+  });
+  if (!r.ok) message.setReject(r.error.message);
+}

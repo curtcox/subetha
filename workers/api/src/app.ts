@@ -13,6 +13,7 @@ import { parseFilter, parseHeaderPublish, parseJsonPublish, parseTopicPath, type
 import { createCheckoutSession, verifyStripeSignature } from "./stripe.ts";
 import type { Env, Principal, TopicMeta } from "./types.ts";
 import { registerControlRoutes } from "./control.ts";
+import { registerMcp } from "./mcp.ts";
 
 const PRICES = prices as unknown as PriceTable;
 type C = Context<{ Bindings: Env; Variables: { principal: Principal } }>;
@@ -54,6 +55,12 @@ app.use("*", async (c, next) => {
     c.res.headers.set("access-control-allow-origin", c.req.header("origin") ?? "*");
   }
   c.res.headers.set("access-control-expose-headers", "x-cost-micros, x-message-id, retry-after");
+});
+
+// Device-signed requests must be verified before anything consumes the body.
+app.use("*", async (c, next) => {
+  if (c.req.header("x-device-id")) c.set("principal", await authenticate(c.req.raw, c.env));
+  await next();
 });
 
 const principal = async (c: C) => {
@@ -258,6 +265,7 @@ app.post("/v1/ack", async (c) => {
 });
 
 registerControlRoutes(app, principal);
+registerMcp(app);
 
 // ---------------- local development ----------------
 app.post("/v1/dev/bootstrap", async (c) => {

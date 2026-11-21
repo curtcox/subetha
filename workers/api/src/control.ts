@@ -14,6 +14,7 @@ import { EMAIL_RE, sendEmail } from "./delivery/email.ts";
 import { verifySlackSignature } from "./delivery/slack.ts";
 import { ackToken, makeCall, sendSms, US_E164, verifyTwilioSignature, voiceTwiml } from "./delivery/twilio.ts";
 import type { Env, Principal, QueuedSubscription, SubscriptionFilter } from "./types.ts";
+import { registerDeviceRoutes } from "./devices.ts";
 
 const PRICES = prices as unknown as PriceTable;
 type Vars = { Bindings: Env; Variables: { principal: Principal } };
@@ -79,6 +80,7 @@ async function topicsForEndpoint(env: Env, endpointId: string): Promise<string[]
 }
 
 export function registerControlRoutes(app: App, principal: PrincipalFn) {
+  registerDeviceRoutes(app, principal);
   // ---------------- endpoints ----------------
   app.get("/v1/endpoints", async (c) => {
     const id = requireAccount(await principal(c));

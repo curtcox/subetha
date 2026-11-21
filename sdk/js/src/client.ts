@@ -1,7 +1,7 @@
 // SubEtha client: publish / subscribe over whatever works. Dependency-free; runs in browsers,
 // Node ≥ 18, Deno, Bun, and Workers.
 import {
-  decryptEnvelope, Deduper, encryptEnvelope, signEnvelope, ulid, verifyEnvelope,
+  base64urlEncode, decryptEnvelope, Deduper, hexEncode, utf8, encryptEnvelope, signEnvelope, ulid, verifyEnvelope,
   type DeviceKey, type Envelope, type RouteMode, type Transport,
 } from "./protocol/index.ts";
 
@@ -14,6 +14,8 @@ export interface ClientOptions {
   /** E2EE keys by topic (spec §5). Messages to these topics are encrypted, and received ones decrypted. */
   topicKeys?: Record<string, { kid: string; key: Uint8Array }>;
   WebSocket?: typeof WebSocket;
+  /** Authenticate every request with a device signature (enrolled devices; see /v1/device/code). */
+  signRequests?: boolean;
 }
 
 export interface PublishOptions {
@@ -54,6 +56,21 @@ export interface SubscribeOptions {
 
 export interface Subscription { close(): void; readonly closed: boolean }
 
+/** Headers for a device-signed request (X-Device-Id / X-Device-Time / X-Device-Signature). */
+export async function signRequest(key: DeviceKey, method: string, url: string, body: Uint8Array, nowSec = Math.floor(Date.now() / 1000)): Promise<Record<string, string>> {
+  const u = new URL(url);
+  const digest = hexEncode(new Uint8Array(await crypto.subtle.digest("SHA-256", body as BufferSource)));
+  const input = `subetha-req-v1\n${method.toUpperCase()}\n${u.pathname}${u.search}\n${nowSec}\n${digest}`;
+  const sig = new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, key.privateKey, utf8.encode(input) as BufferSource));
+  return { "x-device-id": key.deviceId, "x-device-time": String(nowSec), "x-device-signature": base64urlEncode(sig) };
+}
+
+/** Proof of key possession for POST /v1/device/code. */
+export async function enrollmentProof(key: DeviceKey, nowSec = Math.floor(Date.now() / 1000)): Promise<{ device_id: string; time: number; proof: string }> {
+  const sig = new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, key.privateKey, utf8.encode(`subetha-enroll-v1\n${key.deviceId}\n${nowSec}`) as BufferSource));
+  return { device_id: key.deviceId, time: nowSec, proof: base64urlEncode(sig) };
+}
+
 export class SubEthaError extends Error {
   readonly code: string;
   readonly status: number;
@@ -71,10 +88,11 @@ const topicPath = (topics: string | string[]) => (Array.isArray(topics) ? topics
 export class SubEtha {
   readonly baseUrl: string;
   private readonly token?: string;
-  private readonly f: typeof fetch;
+  private f: typeof fetch;
   private readonly deviceKey?: DeviceKey;
   private readonly topicKeys: Record<string, { kid: string; key: Uint8Array }>;
   private readonly WS?: typeof WebSocket;
+  private readonly signRequests: boolean;
 
   constructor(opts: ClientOptions = {}) {
     this.baseUrl = (opts.baseUrl ?? "https://subetha.org").replace(/\/+$/, "");
@@ -83,6 +101,19 @@ export class SubEtha {
     this.deviceKey = opts.deviceKey;
     this.topicKeys = opts.topicKeys ?? {};
     this.WS = opts.WebSocket ?? (globalThis as { WebSocket?: typeof WebSocket }).WebSocket;
+    this.signRequests = !!opts.signRequests;
+    if (this.signRequests && !this.deviceKey) throw new Error("signRequests needs a deviceKey");
+    if (this.signRequests) {
+      const inner = this.f;
+      this.f = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        const url = String(input instanceof Request ? input.url : input);
+        const body = typeof init.body === "string" ? utf8.encode(init.body) : new Uint8Array();
+        const headers = new Headers(init.headers);
+        for (const [k, v] of Object.entries(await signRequest(this.deviceKey!, init.method ?? "GET", url, body))) headers.set(k, v);
+        headers.delete("authorization");
+        return inner(input, { ...init, headers });
+      }) as typeof fetch;
+    }
   }
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
@@ -196,7 +227,7 @@ export class SubEtha {
     let abort: AbortController | null = null;
     let backoff = 500;
     const list = Array.isArray(topics) ? topics : [topics];
-    const mode = o.transport === undefined || o.transport === "auto" ? (this.WS && list.length === 1 ? "ws" : "stream") : o.transport;
+    const mode = o.transport === undefined || o.transport === "auto" ? (this.WS && list.length === 1 && !this.signRequests ? "ws" : "stream") : o.transport;
 
     const deliver = async (raw: Envelope) => {
       if (raw.event && raw.event !== "message") {
@@ -231,9 +262,9 @@ export class SubEtha {
         url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
         if (this.token) url.searchParams.set("auth", btoa(`Bearer ${this.token}`).replace(/=+$/, ""));
         ws = new this.WS!(url.toString());
-        ws.onmessage = (e) => void deliver(JSON.parse(String(e.data))).catch((err) => o.onError?.(err));
-        ws.onclose = () => { ws = null; if (!closed) fail(new Error("websocket closed")); };
-        ws.onerror = () => {};
+        ws.addEventListener("message", (e: MessageEvent) => void deliver(JSON.parse(String(e.data))).catch((err) => o.onError?.(err)));
+        ws.addEventListener("close", () => { ws = null; if (!closed) fail(new Error("websocket closed")); });
+        ws.addEventListener("error", () => {});
         return;
       }
       if (mode === "poll") {
@@ -249,7 +280,7 @@ export class SubEtha {
       abort = new AbortController();
       try {
         const r = await this.f(`${this.baseUrl}/${topicPath(list)}/json${q}`, { headers: this.headers(), signal: abort.signal });
-        if (!r.ok || !r.body) throw new SubEthaError(r.status, await r.json().catch(() => ({})));
+        if (!r.ok || !r.body) throw new SubEthaError(r.status, (await r.json().catch(() => ({}))) as Record<string, unknown>);
         const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
         let buf = "";
         for (;;) {
