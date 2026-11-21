@@ -1,23 +1,17 @@
 #!/usr/bin/env bash
-# Enroll a headless device (CLI, Raspberry Pi, ESP32 bridge) with the device flow:
-# the device shows a code, you approve it in the console, the device receives its credentials.
+# The owner's side of device enrollment. (The device's side, which signs a proof with its
+# Ed25519 key, is easiest with an SDK: see samples/ts/devices.ts.)
 set -euo pipefail
 SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+AUTH=(-H "Authorization: Bearer $SUBETHA_TOKEN" -H "Content-Type: application/json")
 
-START=$(curl -sS -H "Content-Type: application/json" \
-  -d '{"name":"garage-pi","capabilities":["ws","lan","ble"]}' \
-  "$SUBETHA_URL/v1/device/code")
-echo "Open $(jq -r .verification_uri <<<"$START") and enter $(jq -r .user_code <<<"$START")"
+# Approve the code a device is showing (the console's "Devices" page does the same):
+curl -sS "${AUTH[@]}" -d '{"user_code":"BCDF-GHJK"}' "$SUBETHA_URL/v1/device/approve"
 
-DEVICE_CODE=$(jq -r .device_code <<<"$START")
-INTERVAL=$(jq -r '.interval // 5' <<<"$START")
-while :; do
-  sleep "$INTERVAL"
-  RESP=$(curl -sS -H "Content-Type: application/json" -d "{\"device_code\":\"$DEVICE_CODE\"}" "$SUBETHA_URL/v1/device/token")
-  case "$(jq -r '.error // empty' <<<"$RESP")" in
-    authorization_pending) continue ;;
-    slow_down) INTERVAL=$((INTERVAL + 5)) ;;
-    "") echo "$RESP"; break ;;
-    *) echo "enrollment failed: $RESP" >&2; exit 1 ;;
-  esac
-done
+# Or register a device directly when you already know its id (e.g. printed by `subetha` on the device):
+curl -sS "${AUTH[@]}" -d '{"device_id":"dev_kxisxbay4mtidk6z454fh3jcjhf3wfpggcprvnuu42wa2fvbeiwa","name":"garage-pi","capabilities":["ws","lan"]}' \
+  "$SUBETHA_URL/v1/devices"
+
+# List and revoke:
+curl -sS "${AUTH[@]}" "$SUBETHA_URL/v1/devices"
+curl -sS "${AUTH[@]}" -X DELETE "$SUBETHA_URL/v1/devices/dev_kxisxbay4mtidk6z454fh3jcjhf3wfpggcprvnuu42wa2fvbeiwa"

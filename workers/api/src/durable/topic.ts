@@ -287,7 +287,7 @@ export class TopicDO extends DurableObject<Env> {
     });
     let publishPrice = actionPriceMicros(PRICES, "publish", this.tier());
     if (input.attachmentBytes) {
-      const mbDays = (input.attachmentBytes / 1_048_576) * ((env.expires! - time) / 86400);
+      const mbDays = (input.attachmentBytes / 1_048_576) * ((expires - time) / 86400);
       publishPrice += actionPriceMicros(PRICES, "attachment_upload", this.tier()) + Math.ceil(rentNanos(PRICES, "attachment_mb_day", mbDays, this.tier()) / 1000);
     }
     const liveCost = plan.deliveries.filter((d) => d.after_s === 0 && d.transport === "ws").reduce((n, d) => n + d.cost_micros, 0);

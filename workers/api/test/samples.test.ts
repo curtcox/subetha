@@ -128,6 +128,28 @@ describe("docs samples (TypeScript)", () => {
     expect(ok.status).toBe(200);
   });
 
+  it("devices.ts", async () => {
+    const r = await run("devices");
+    expect(r.enrolled).toBe(r.deviceId);
+    expect(r.msg.message).toBe("garage door closed");
+  });
+
+  it("mcp.ts", async () => {
+    const r = await run("mcp");
+    expect(r.tools).toContain("wait_for_message");
+    expect(r.estimate.estimate_usd_micros).toBeGreaterThan(0);
+    expect(r.sent.message).toBe("Deploy finished");
+    expect(r.inbox.messages).toHaveLength(1);
+  });
+
+  it("attachment.ts", async () => {
+    const r = await run("attachment");
+    expect(r.status).toBe(200);
+    expect(r.msg.attachment).toMatchObject({ name: "energy.csv", type: "text/csv" });
+    expect(r.msg.message).toBe("Yesterday's energy report");
+    expect(r.downloaded).toContain("2026-11-21,12.9");
+  });
+
   it("trace.ts", async () => {
     const t = await run("trace");
     expect(t.id).toBeTruthy();

@@ -26,7 +26,7 @@ function workerRoutes(): { method: string; path: string; file: string }[] {
   const re = /\bapp\.(get|post|put|patch|delete)\(\s*"([^"]+)"/g;
   for (const file of sourceFiles("workers/api/src")) {
     for (const m of read(file).matchAll(re)) {
-      const path = m[2]!.replace(/:(\w+)(\{[^}]*\})?/g, "{$1}");
+      const path = m[2]!.replace(/:(\w+)(\{[^}]*\})?\??/g, "{$1}"); // ":name?" (optional) is documented as required
       out.push({ method: m[1]!, path, file });
     }
   }

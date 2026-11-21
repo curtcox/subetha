@@ -15,6 +15,9 @@ info:
     * Money is integer micro-dollars (µ$, `*_usd_micros`). Request bodies that take dollars use
       `*_usd` (decimal).
     * Errors are JSON with a stable `error` code (see the `Error` schema and `spec/errors.json`).
+    * Requests are rate limited per credential (600/min) or, without one, per IP (60/min).
+      Over the limit: HTTP 429 `rate_limited` with `Retry-After`. Provider hooks, `/v1/health`, and
+      `/v1/status` are exempt.
 
     **Topic path parameters.** A topic is `@handle/name` or `t_<26 base32 chars>`. In paths it is
     written literally (`/@alice/doorbell/json`); the slash in a namespaced topic is part of the
@@ -43,6 +46,7 @@ security:
   - bearerAuth: []
   - basicAuth: []
   - authQuery: []
+  - deviceSignature: []
   - {}
 tags:
   - name: publish
@@ -136,6 +140,7 @@ paths:
         - $ref: "#/components/parameters/XMarkdown"
         - $ref: "#/components/parameters/XExpires"
         - $ref: "#/components/parameters/XFilename"
+        - $ref: "#/components/parameters/XMessage"
         - $ref: "#/components/parameters/XDelay"
         - $ref: "#/components/parameters/XRouteMode"
         - $ref: "#/components/parameters/XMaxCost"
@@ -153,11 +158,15 @@ paths:
         - $ref: "#/components/parameters/PriorityQuery"
         - $ref: "#/components/parameters/TagsQuery"
       requestBody: &publishBody
-        description: The message text (UTF-8, at most 4096 bytes). Empty bodies use `?message=` or "triggered".
+        description: |
+          The message text (UTF-8, at most 4096 bytes); empty bodies use `X-Message`/`?message=` or
+          "triggered". With `X-Filename`, the body is the attachment (up to 15 MB).
         content:
           text/plain:
             schema: { type: string, maxLength: 4096 }
             example: Backup done
+          application/octet-stream:
+            schema: { type: string, format: binary }
       responses: &publishResponses
         "200": { $ref: "#/components/responses/Published" }
         "400": { $ref: "#/components/responses/Error" }
@@ -324,6 +333,23 @@ paths:
           content:
             application/json:
               schema: { type: object, additionalProperties: true }
+  /v1/status:
+    get:
+      tags: [meta]
+      operationId: status
+      summary: Component health and configured transports (for the status page)
+      security: []
+      responses:
+        "200":
+          description: Healthy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "503":
+          description: A core component (D1 or KV) is failing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
   /v1/config:
     get:
       tags: [meta]
@@ -633,7 +659,7 @@ paths:
       tags: [traces]
       operationId: ack
       summary: Acknowledge a message (stops escalation)
-      security: []
+      description: The caller needs read access to the topic (tokens need its subscribe scope; secret `t_` topics are readable by name).
       requestBody:
         required: true
         content:
@@ -644,7 +670,7 @@ paths:
               properties:
                 topic: { type: string }
                 id: { type: string }
-                via: { type: string, default: http, description: Transport the message arrived by. }
+                via: { type: string, default: http, maxLength: 16, description: Transport the message arrived by. }
       responses:
         "200":
           description: Acknowledged (idempotent).
@@ -652,6 +678,7 @@ paths:
             application/json:
               schema: { type: object, properties: { acked: { const: true } } }
         "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
 
   # ------------------------------------------------------------------ endpoints
   /v1/endpoints:
@@ -864,16 +891,15 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
-  # ------------------------------------------------------------------ devices (in progress)
+  # ------------------------------------------------------------------ devices
   /v1/devices:
-    x-pending: true
     get:
       tags: [devices]
       operationId: listDevices
       summary: Enrolled devices
       responses:
         "200":
-          description: Devices.
+          description: Devices (including revoked ones, with `revoked_at`).
           content:
             application/json:
               schema:
@@ -882,8 +908,35 @@ paths:
                   devices:
                     type: array
                     items: { $ref: "#/components/schemas/Device" }
+    post:
+      tags: [devices]
+      operationId: enrollDevice
+      summary: Enroll a device directly by its id (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id]
+              properties:
+                device_id: { type: string, pattern: "^dev_[a-z2-7]{52}$" }
+                name: { type: string }
+                capabilities: { type: array, items: { $ref: "#/components/schemas/Transport" } }
+      responses:
+        "201":
+          description: Enrolled.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  enrolled: { const: true }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /v1/devices/{id}:
-    x-pending: true
     delete:
       tags: [devices]
       operationId: revokeDevice
@@ -892,23 +945,33 @@ paths:
       responses:
         "200":
           description: Revoked.
+          content:
+            application/json:
+              schema: { type: object, properties: { revoked: { const: true } } }
         "404": { $ref: "#/components/responses/Error" }
   /v1/device/code:
-    x-pending: true
     post:
       tags: [devices]
       operationId: deviceCode
-      summary: Start a device enrollment (RFC 8628 device authorization)
-      description: A device (CLI, TV, ESP32) asks for a code, shows `user_code`, and polls `/v1/device/token` while the owner approves it in the console.
+      summary: "Device flow, step 1: get a user code"
+      description: |
+        The device proves it holds its key by signing
+        `"subetha-enroll-v1\n" + device_id + "\n" + time` (Ed25519, base64url) and gets a
+        `user_code` to show the owner. Codes last 10 minutes. The SDK's `enrollmentProof(key)`
+        builds `device_id`, `time`, and `proof`.
       security: []
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [device_id, time, proof]
               properties:
                 device_id: { type: string, pattern: "^dev_[a-z2-7]{52}$", description: The device's Ed25519 identity. }
-                name: { type: string }
+                time: { type: integer, description: Unix seconds (±300 s). }
+                proof: { type: string, description: base64url Ed25519 signature. }
+                name: { type: string, maxLength: 64 }
                 capabilities: { type: array, items: { $ref: "#/components/schemas/Transport" } }
       responses:
         "200":
@@ -918,20 +981,49 @@ paths:
               schema:
                 type: object
                 properties:
-                  device_code: { type: string }
-                  user_code: { type: string }
+                  device_code: { type: string, description: Secret; the device polls with it. }
+                  user_code: { type: string, examples: [BCDF-GHJK] }
                   verification_uri: { type: string, format: uri }
                   verification_uri_complete: { type: string, format: uri }
                   expires_in: { type: integer }
                   interval: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/device/approve:
+    post:
+      tags: [devices]
+      operationId: deviceApprove
+      summary: "Device flow, step 2: the owner approves the code (admin)"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_code]
+              properties:
+                user_code: { type: string }
+      responses:
+        "200":
+          description: Enrolled.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device_id: { type: string }
+                  name: { type: string }
+                  enrolled: { const: true }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/device/token:
-    x-pending: true
     post:
       tags: [devices]
       operationId: deviceToken
-      summary: Poll for the device's credentials
+      summary: "Device flow, step 3: poll until approved"
+      description: After approval the device authenticates every request with `X-Device-Id`, `X-Device-Time`, and `X-Device-Signature` (see the `deviceSignature` security scheme). No bearer token is issued.
       security: []
       requestBody:
+        required: true
         content:
           application/json:
             schema:
@@ -941,31 +1033,107 @@ paths:
                 device_code: { type: string }
       responses:
         "200":
-          description: Approved; the device's token.
+          description: Approved.
           content:
             application/json:
-              schema: { type: object, additionalProperties: true }
+              schema:
+                type: object
+                properties:
+                  device_id: { type: string }
+                  account_id: { type: string }
+                  auth: { type: string }
         "400":
-          description: "`authorization_pending`, `slow_down`, `expired_token`, or `access_denied` (RFC 8628 §3.5)."
+          description: 'RFC 8628-style poll errors: `{"error": "authorization_pending"}` or `{"error": "expired_token"}`.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { enum: [authorization_pending, expired_token] }
 
-  # ------------------------------------------------------------------ MCP (in progress)
+  # ------------------------------------------------------------------ MCP
   /mcp:
-    x-pending: true
+    get:
+      tags: [mcp]
+      operationId: mcpGet
+      summary: Not supported (no server-initiated streams)
+      responses:
+        "405":
+          description: Use POST.
     post:
       tags: [mcp]
       operationId: mcp
-      summary: Remote MCP server (Streamable HTTP, JSON-RPC 2.0)
+      summary: Remote MCP server (Streamable HTTP, JSON-RPC 2.0, JSON responses)
       description: |
-        Tools: `publish`, `poll`, `wait_for_message`, `list_topics`, `create_topic`,
-        `estimate_cost`. Authenticate with a bearer token (scope it and cap its spend).
+        Methods: `initialize`, `ping`, `tools/list`, `tools/call`, and notifications (202, no body).
+        Batches are accepted. Tools: `publish`, `poll`, `wait_for_message` (long-poll, up to 50 s),
+        `list_topics`, `create_topic`, `estimate_cost`. Tools call the public API in-process with
+        the caller's credentials, so scopes, policies, and prepaid charges apply unchanged.
+        Without `Authorization` the response is 401 with a `WWW-Authenticate` header pointing at
+        `/.well-known/oauth-protected-resource`.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object, additionalProperties: true }
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/JsonRpcRequest"
+                - type: array
+                  items: { $ref: "#/components/schemas/JsonRpcRequest" }
       responses:
         "200":
-          description: JSON-RPC response (`application/json` or `text/event-stream`).
+          description: JSON-RPC response(s).
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "202":
+          description: Notification accepted.
+        "400":
+          description: JSON-RPC parse error.
+        "401":
+          description: Authentication required.
+  /.well-known/oauth-protected-resource:
+    get:
+      tags: [mcp]
+      operationId: oauthProtectedResource
+      summary: OAuth 2.0 protected resource metadata (RFC 9728) for the MCP server
+      security: []
+      responses:
+        "200":
+          description: Metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resource: { type: string, format: uri }
+                  authorization_servers: { type: array, items: { type: string, format: uri } }
+                  bearer_methods_supported: { type: array, items: { type: string } }
+                  resource_documentation: { type: string, format: uri }
+
+  # ------------------------------------------------------------------ attachments
+  /file/{id}/{name}:
+    get:
+      tags: [publish]
+      operationId: downloadAttachment
+      summary: Download an attachment
+      description: |
+        Attachment URLs are returned in `attachment.url` when a file is published with
+        `X-Filename`. Anyone with the URL can download until the message expires; each download is
+        charged to the topic owner as one API request. Images, audio, video, plain text, and PDF are
+        served inline; everything else as a download. `/file/{id}` (without the name) also works.
+      security: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The file.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "402": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 
   # ------------------------------------------------------------------ hooks
   /v1/hooks/stripe:
@@ -1091,6 +1259,16 @@ components:
       type: http
       scheme: basic
       description: For ntfy clients. Empty username, the token as the password.
+    deviceSignature:
+      type: apiKey
+      in: header
+      name: X-Device-Id
+      description: |
+        Enrolled devices sign each request instead of sending a token. Headers:
+        `X-Device-Id: dev_…`, `X-Device-Time: <unix seconds, ±300 s>`, and
+        `X-Device-Signature: base64url(Ed25519(key, "subetha-req-v1\n" + METHOD + "\n" + path?query + "\n" + time + "\n" + hex(sha256(body))))`.
+        Devices can publish and subscribe but not manage the account. The SDK does this with
+        `new SubEtha({ deviceKey, signRequests: true })`.
     authQuery:
       type: apiKey
       in: query
@@ -1191,7 +1369,16 @@ components:
     XFilename:
       name: X-Filename
       in: header
-      description: Attachment uploads in the body are not supported in v0 (`unsupported`). Use `X-Attach` with a URL.
+      description: |
+        Upload the request body as an attachment with this file name (up to 15 MB; aliases
+        `Filename`, `f`). The file is stored in R2 until the message expires and `attachment.url`
+        points at `/file/{id}/{name}`. The publisher pays `attachment_upload` plus storage.
+        Put the message text in `X-Message`.
+      schema: { type: string, maxLength: 200 }
+    XMessage:
+      name: X-Message
+      in: header
+      description: Message text when the body is an attachment or empty. Aliases `Message`, `m`; query `?message=`.
       schema: { type: string }
     XDelay:
       name: X-Delay
@@ -1523,6 +1710,36 @@ components:
       properties:
         id: { type: string, pattern: "^dev_[a-z2-7]{52}$" }
         name: { type: string }
-        capabilities: { type: array, items: { $ref: "#/components/schemas/Transport" } }
-        last_seen: { type: [integer, "null"] }
+        capabilities: { type: array, items: { type: string } }
         created_at: { type: integer }
+        last_seen_at: { type: [integer, "null"] }
+        revoked_at: { type: [integer, "null"] }
+
+    JsonRpcRequest:
+      type: object
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc: { const: "2.0" }
+        id: { type: [string, integer, "null"] }
+        method: { type: string, examples: [initialize, tools/list, tools/call] }
+        params: { type: object, additionalProperties: true }
+
+    Status:
+      type: object
+      properties:
+        ok: { type: boolean }
+        environment: { enum: [local, staging, production] }
+        components:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              ok: { type: boolean }
+              ms: { type: integer }
+              error: { type: string }
+        transports:
+          type: object
+          description: Which relay transports are configured (true) on this deployment.
+          additionalProperties: { type: boolean }
+        telephony_circuit: { type: [string, "null"], description: Set when the SMS/voice circuit breaker has tripped. }
+        time: { type: integer }
