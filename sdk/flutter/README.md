@@ -20,6 +20,9 @@ final sub = client.subscribe(['@me/doorbell'], const SubscribeOptions(since: '10
 // later: await sub.cancel();
 ```
 
+In Flutter apps, `import 'package:flutter/material.dart' hide Route;` (or prefix this package),
+because Flutter's navigator `Route` clashes with SubEtha's message `Route`.
+
 `subscribe` returns a single-subscription `Stream<Message>`. It reconnects with exponential
 backoff (or `Retry-After`) and resumes with `since=<last id>`. It drops duplicate ids and acks
 each message once it has been added to the stream. Errors that retrying can't fix (401, 402, 403,
