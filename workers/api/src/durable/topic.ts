@@ -116,6 +116,17 @@ export class TopicDO extends DurableObject<Env> {
   }
 
   // ---------- money ----------
+  /** Read-side spend (polls, streams, backlog) also counts toward the topic's daily cap. */
+  private async spendOwnerCapped(micros: number): Promise<"ok" | "cap" | "broke"> {
+    const cap = this.meta?.policy.daily_cap_micros;
+    const key = `topic_spend:${today()}`;
+    const spent = this.kvGet<number>(key) ?? 0;
+    if (cap != null && spent + micros > cap) return "cap";
+    if (!(await this.spendOwner(micros))) return "broke";
+    this.kvPut(key, spent + micros);
+    return "ok";
+  }
+
   /** Spend µ$ from the owner's credit leases, taking a new lease if needed. */
   private async spendOwner(micros: number, nanos = 0): Promise<boolean> {
     this.nanoDebt += nanos;
@@ -391,6 +402,15 @@ export class TopicDO extends DurableObject<Env> {
     return { id, ...JSON.parse(r.json), ack: acked ?? null };
   }
 
+  /** Ack from a subscriber: only callers who can read the topic may stop escalation. */
+  async ackAs(id: string, via: string, caller: Caller): Promise<RpcResult<boolean>> {
+    return asResult(async () => {
+      this.checkRead(caller);
+      await this.ack(id, via);
+      return true;
+    });
+  }
+
   async ack(id: string, via: string): Promise<void> {
     this.sql.exec("INSERT OR IGNORE INTO acks (id, time, via) VALUES (?, ?, ?)", id.toUpperCase(), Date.now(), via);
   }
@@ -446,7 +466,9 @@ export class TopicDO extends DurableObject<Env> {
     this.checkRead(params.caller);
     const msgs = this.backlog(params.since ?? "all", params.filter);
     const cost = actionPriceMicros(PRICES, "api_request", this.tier()) + msgs.length * actionPriceMicros(PRICES, "deliver_live", this.tier());
-    if (!(await this.spendOwner(cost))) throw rpcError("insufficient_balance", "topic owner's balance cannot cover delivery", { payer: "topic_owner" });
+    const paid = await this.spendOwnerCapped(cost);
+    if (paid === "cap") throw rpcError("spend_cap_exceeded", "topic daily cap reached", { cap: "topic_daily" });
+    if (paid === "broke") throw rpcError("insufficient_balance", "topic owner's balance cannot cover delivery", { payer: "topic_owner" });
     return msgs;
   }
 
@@ -460,7 +482,9 @@ export class TopicDO extends DurableObject<Env> {
     }
     const backlog = this.backlog(params.since, params.filter);
     const cost = actionPriceMicros(PRICES, "api_request", this.tier()) + backlog.length * actionPriceMicros(PRICES, "deliver_live", this.tier());
-    if (!(await this.spendOwner(cost))) return new Response("ApiError:insufficient_balance:topic owner's balance cannot cover delivery", { status: 402 });
+    const paid = await this.spendOwnerCapped(cost);
+    if (paid === "cap") return new Response("ApiError:spend_cap_exceeded:topic daily cap reached", { status: 403 });
+    if (paid === "broke") return new Response("ApiError:insufficient_balance:topic owner's balance cannot cover delivery", { status: 402 });
     const id = `c_${ulid()}`;
     const openEvt = { id: ulid(), time: Math.floor(Date.now() / 1000), event: "open", topic: this.meta!.name };
     await this.ensureAlarm();
@@ -569,7 +593,7 @@ export class TopicDO extends DurableObject<Env> {
 }
 
 /** Typed RPC surface (Envelope's index signature defeats the generated Rpc types). */
-export type TopicRpc = Pick<TopicDO, "configure" | "getMeta" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "isAcked" | "flushLeases">;
+export type TopicRpc = Pick<TopicDO, "configure" | "getMeta" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "flushLeases">;
 
 export function topicStub(env: Env, topic: string): TopicRpc {
   return env.TOPIC.get(env.TOPIC.idFromName(topic)) as unknown as TopicRpc;

@@ -273,9 +273,11 @@ app.get("/v1/traces/:id", async (c) => {
 });
 
 app.post("/v1/ack", async (c) => {
+  const p = await principal(c);
   const body = (await c.req.json()) as { topic?: string; id?: string; via?: string };
   if (!body.topic || !isTopic(body.topic) || !body.id) throw new ApiError("bad_request", "topic and id are required");
-  await topicStub(c.env, body.topic).ack(body.id, body.via ?? "http");
+  if (p.kind === "token" && !scopeAllows(p.scopes, "subscribe", body.topic)) throw new ApiError("forbidden", "token lacks subscribe scope for this topic");
+  unwrap(await topicStub(c.env, body.topic).ackAs(body.id, String(body.via ?? "http").slice(0, 16), callerOf(p)));
   return c.json({ acked: true });
 });
 
