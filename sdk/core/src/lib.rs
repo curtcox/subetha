@@ -17,7 +17,7 @@ pub mod canonical;
 pub mod crc;
 pub mod dedupe;
 pub mod e2ee;
-// pub mod edge;
+pub mod edge;
 pub mod encoding;
 pub mod envelope;
 // pub mod ffi;
