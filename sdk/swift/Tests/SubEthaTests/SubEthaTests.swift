@@ -198,10 +198,17 @@ final class SubEthaTests: XCTestCase {
     }
 
     func testRequestSigningInput() {
-        XCTAssertEqual(RequestSigning.input(method: "post", url: URL(string: "https://x.test/v1/ack?x=1")!, time: 1763750000, body: Data("{}".utf8)),
-                       "subetha-req-v1\nPOST\n/v1/ack?x=1\n1763750000\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a")
-        XCTAssertEqual(RequestSigning.input(method: "GET", url: URL(string: "https://x.test")!, time: 5, body: Data()),
-                       "subetha-req-v1\nGET\n/\n5\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        let nonce = "nonce_0123456789abcdef"
+        XCTAssertEqual(RequestSigning.input(method: "post", url: URL(string: "https://x.test/v1/ack?x=1")!, time: 1763750000, nonce: nonce, body: Data("{}".utf8)),
+                       "subetha-req-v1\nPOST\nx.test\n/v1/ack?x=1\n1763750000\n\(nonce)\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a")
+        // Host as WHATWG URL.host: lowercase, default port dropped, other ports kept.
+        XCTAssertEqual(RequestSigning.input(method: "GET", url: URL(string: "https://X.test:443")!, time: 5, nonce: nonce, body: Data()),
+                       "subetha-req-v1\nGET\nx.test\n/\n5\n\(nonce)\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        XCTAssertTrue(RequestSigning.input(method: "GET", url: URL(string: "http://127.0.0.1:8080/a%20b?q=1")!, time: 5, nonce: nonce, body: Data())
+            .hasPrefix("subetha-req-v1\nGET\n127.0.0.1:8080\n/a%20b?q=1\n"))
+        let a = RequestSigning.newNonce()
+        XCTAssertEqual(a.count, 22)
+        XCTAssertNotEqual(a, RequestSigning.newNonce())
     }
 
     func testEncodingAndULID() {
@@ -224,7 +231,9 @@ final class SubEthaTests: XCTestCase {
         XCTAssertNil(r.value(forHTTPHeaderField: "Authorization"))
         XCTAssertEqual(r.value(forHTTPHeaderField: "X-Device-Id"), deviceID)
         XCTAssertEqual(r.value(forHTTPHeaderField: "X-Device-Time"), "1763750000")
-        let input = RequestSigning.input(method: "POST", url: r.url!, time: 1763750000, body: r.httpBody!)
+        let nonce = try XCTUnwrap(r.value(forHTTPHeaderField: "X-Device-Nonce"))
+        XCTAssertEqual(nonce.count, 22)
+        let input = RequestSigning.input(method: "POST", url: r.url!, time: 1763750000, nonce: nonce, body: r.httpBody!)
         let pub = try Curve25519.Signing.PublicKey(rawRepresentation: signer.publicKey)
         let sig = Encoding.base64urlDecode(r.value(forHTTPHeaderField: "X-Device-Signature")!)!
         XCTAssertTrue(pub.isValidSignature(sig, for: Data(input.utf8)))

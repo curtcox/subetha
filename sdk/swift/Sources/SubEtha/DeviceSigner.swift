@@ -58,19 +58,36 @@ public struct CryptoKitDeviceSigner: DeviceSigner {
 
 /// Device-signed requests and enrollment proofs (see workers/api/src/devices.ts).
 public enum RequestSigning {
-    /// `subetha-req-v1\nMETHOD\npath?query\ntime\nhex(sha256(body))`.
-    public static func input(method: String, url: URL, time: Int64, body: Data) -> String {
+    /// `URL.host` as WHATWG defines it: lowercase host, plus `:port` unless it is the scheme default.
+    static func host(_ comps: URLComponents?) -> String {
+        var host = comps?.percentEncodedHost?.lowercased() ?? ""
+        if host.contains(":") && !host.hasPrefix("[") { host = "[\(host)]" } // IPv6
+        let defaultPort: Int? = ["http": 80, "ws": 80, "https": 443, "wss": 443][comps?.scheme?.lowercased() ?? ""]
+        if let port = comps?.port, port != defaultPort { return "\(host):\(port)" }
+        return host
+    }
+
+    /// A fresh single-use nonce: base64url of 16 random bytes.
+    public static func newNonce() -> String {
+        var rng = SystemRandomNumberGenerator()
+        return Encoding.base64url(Data((0..<16).map { _ in UInt8.random(in: 0...255, using: &rng) }))
+    }
+
+    /// `subetha-req-v1\nMETHOD\nhost\npath?query\ntime\nnonce\nhex(sha256(body))`.
+    public static func input(method: String, url: URL, time: Int64, nonce: String, body: Data) -> String {
         let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
         var path = comps?.percentEncodedPath ?? "/"
         if path.isEmpty { path = "/" }
         let query = comps?.percentEncodedQuery.map { "?\($0)" } ?? ""
-        return "subetha-req-v1\n\(method.uppercased())\n\(path)\(query)\n\(time)\n\(Encoding.hex(Encoding.sha256(body)))"
+        return "subetha-req-v1\n\(method.uppercased())\n\(host(comps))\n\(path)\(query)\n\(time)\n\(nonce)\n\(Encoding.hex(Encoding.sha256(body)))"
     }
 
-    /// `X-Device-Id`, `X-Device-Time`, `X-Device-Signature`.
-    public static func headers(signer: DeviceSigner, method: String, url: URL, body: Data, time: Int64) throws -> [String: String] {
-        let sig = try signer.sign(Data(input(method: method, url: url, time: time, body: body).utf8))
-        return ["X-Device-Id": signer.deviceId, "X-Device-Time": String(time), "X-Device-Signature": Encoding.base64url(sig)]
+    /// `X-Device-Id`, `X-Device-Time`, `X-Device-Nonce`, `X-Device-Signature`. Relays accept
+    /// each nonce once, so sign every request (and every retry) afresh.
+    public static func headers(signer: DeviceSigner, method: String, url: URL, body: Data, time: Int64, nonce: String = RequestSigning.newNonce()) throws -> [String: String] {
+        let sig = try signer.sign(Data(input(method: method, url: url, time: time, nonce: nonce, body: body).utf8))
+        return ["X-Device-Id": signer.deviceId, "X-Device-Time": String(time), "X-Device-Nonce": nonce,
+                "X-Device-Signature": Encoding.base64url(sig)]
     }
 
     /// Proof of key possession for `POST /v1/device/code`.

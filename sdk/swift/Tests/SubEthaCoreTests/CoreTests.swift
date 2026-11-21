@@ -8,7 +8,8 @@ import SubEthaCore
 final class CoreTests: XCTestCase {
     let seed = Encoding.hexDecode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")!
     // Pinned in sdk/core/src/ffi.rs (request_signing test).
-    let reqSig = "aMS_4A8mZWICmhOQb6w5LxhZ8xXpltw-dtFLPWGWTaGQTZm9PIcwEAUs88n30exIwuAjedPlr2-C20WQadlqBQ"
+    let nonce = "nonce_0123456789abcdef"
+    let reqSig = "hXyR-UJPvVOY_8KJZW1IiAn00acCxmcxs6lMO04YnXBqVMuI4N1oMK5blibRcwE2F-Pb941G_8ik9al432kHAA"
     let enrollSig = "ZTDaaJXLPfCowo3I7bl8k3JvIl5nYldqr4735NNFrw4bGcu-Tl2p2W7jYXZH8NuORBcsaVO-5Em3aahKD1eqDQ"
 
     func vectors(_ name: String) throws -> [String: JSONValue] {
@@ -21,8 +22,9 @@ final class CoreTests: XCTestCase {
     func testRequestSignaturesMatchTheCore() throws {
         let s = try CoreDeviceSigner(seed: seed)
         XCTAssertEqual(s.deviceId, "dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena")
-        let h = try RequestSigning.headers(signer: s, method: "POST", url: URL(string: "https://x.test/v1/ack?x=1")!, body: Data("{}".utf8), time: 1763750000)
+        let h = try RequestSigning.headers(signer: s, method: "POST", url: URL(string: "https://x.test/v1/ack?x=1")!, body: Data("{}".utf8), time: 1763750000, nonce: nonce)
         XCTAssertEqual(h["X-Device-Signature"], reqSig)
+        XCTAssertEqual(h["X-Device-Nonce"], nonce)
         XCTAssertEqual(try RequestSigning.enrollmentProof(signer: s, time: 1763750000).proof, enrollSig)
         let g = CoreDeviceSigner.generate()
         XCTAssertEqual(try CoreDeviceSigner(seed: g.seed).deviceId, g.deviceId)
@@ -39,6 +41,10 @@ final class CoreTests: XCTestCase {
         }
         for n in v["negative"]!.arrayValue! {
             XCTAssertFalse(crypto.verify(n["envelope"]!.jsonString()))
+        }
+        // The relay-set `event` and edge-decremented `hops` are outside the signature.
+        for k in ["hops_change", "event_added"] {
+            XCTAssertEqual(crypto.verify(v[k]!["envelope"]!.jsonString()), v[k]!["valid"]!.boolValue, k)
         }
     }
 

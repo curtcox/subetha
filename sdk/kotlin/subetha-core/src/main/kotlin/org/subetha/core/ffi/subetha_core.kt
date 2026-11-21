@@ -737,6 +737,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -766,13 +768,15 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_subetha_core_fn_func_new_message_id(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_subetha_core_fn_func_request_signing_input(`method`: RustBuffer.ByValue,`pathAndQuery`: RustBuffer.ByValue,`time`: Long,`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_subetha_core_fn_func_new_request_nonce(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_subetha_core_fn_func_request_signing_input(`method`: RustBuffer.ByValue,`host`: RustBuffer.ByValue,`pathAndQuery`: RustBuffer.ByValue,`time`: Long,`nonce`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_subetha_core_fn_func_sign_bytes(`seed`: RustBuffer.ByValue,`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_subetha_core_fn_func_sign_envelope_json(`envelopeJson`: RustBuffer.ByValue,`seed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_subetha_core_fn_func_sign_request(`seed`: RustBuffer.ByValue,`method`: RustBuffer.ByValue,`pathAndQuery`: RustBuffer.ByValue,`time`: Long,`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_subetha_core_fn_func_sign_request(`seed`: RustBuffer.ByValue,`method`: RustBuffer.ByValue,`host`: RustBuffer.ByValue,`pathAndQuery`: RustBuffer.ByValue,`time`: Long,`nonce`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_subetha_core_fn_func_validate_envelope_json(`envelopeJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -904,6 +908,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_subetha_core_checksum_func_new_message_id(
     ): Short
+    fun uniffi_subetha_core_checksum_func_new_request_nonce(
+    ): Short
     fun uniffi_subetha_core_checksum_func_request_signing_input(
     ): Short
     fun uniffi_subetha_core_checksum_func_sign_bytes(
@@ -954,7 +960,10 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_subetha_core_checksum_func_new_message_id() != 46408.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_subetha_core_checksum_func_request_signing_input() != 11746.toShort()) {
+    if (lib.uniffi_subetha_core_checksum_func_new_request_nonce() != 15123.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_subetha_core_checksum_func_request_signing_input() != 42106.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_subetha_core_checksum_func_sign_bytes() != 40005.toShort()) {
@@ -963,7 +972,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_subetha_core_checksum_func_sign_envelope_json() != 16092.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_subetha_core_checksum_func_sign_request() != 10065.toShort()) {
+    if (lib.uniffi_subetha_core_checksum_func_sign_request() != 61337.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_subetha_core_checksum_func_validate_envelope_json() != 42612.toShort()) {
@@ -1223,11 +1232,12 @@ public object FfiConverterTypeEnrollmentProofRecord: FfiConverterRustBuffer<Enro
 
 /**
  * Header values for a device-signed HTTP request (`X-Device-Id`, `X-Device-Time`,
- * `X-Device-Signature`).
+ * `X-Device-Nonce`, `X-Device-Signature`).
  */
 data class SignedRequestRecord (
     var `deviceId`: kotlin.String, 
     var `time`: kotlin.ULong, 
+    var `nonce`: kotlin.String, 
     var `signature`: kotlin.String
 ) {
     
@@ -1243,18 +1253,21 @@ public object FfiConverterTypeSignedRequestRecord: FfiConverterRustBuffer<Signed
             FfiConverterString.read(buf),
             FfiConverterULong.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
         )
     }
 
     override fun allocationSize(value: SignedRequestRecord) = (
             FfiConverterString.allocationSize(value.`deviceId`) +
             FfiConverterULong.allocationSize(value.`time`) +
+            FfiConverterString.allocationSize(value.`nonce`) +
             FfiConverterString.allocationSize(value.`signature`)
     )
 
     override fun write(value: SignedRequestRecord, buf: ByteBuffer) {
             FfiConverterString.write(value.`deviceId`, buf)
             FfiConverterULong.write(value.`time`, buf)
+            FfiConverterString.write(value.`nonce`, buf)
             FfiConverterString.write(value.`signature`, buf)
     }
 }
@@ -1471,13 +1484,27 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
     
 
         /**
-         * The string a device signs for an HTTP request:
-         * `subetha-req-v1\n METHOD \n path?query \n time \n hex(sha256(body))` (no spaces).
-         */ fun `requestSigningInput`(`method`: kotlin.String, `pathAndQuery`: kotlin.String, `time`: kotlin.ULong, `body`: kotlin.ByteArray): kotlin.String {
+         * A fresh single-use request nonce: base64url of 16 random bytes (22 chars).
+         */ fun `newRequestNonce`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_subetha_core_fn_func_new_request_nonce(
+        _status)
+}
+    )
+    }
+    
+
+        /**
+         * The string a device signs for an HTTP request (see workers/api/src/devices.ts):
+         * `subetha-req-v1\n METHOD \n host \n path?query \n time \n nonce \n hex(sha256(body))`
+         * (no spaces). `host` is what WHATWG `URL.host` gives: lowercase, with `:port` only when the
+         * port is not the scheme's default.
+         */ fun `requestSigningInput`(`method`: kotlin.String, `host`: kotlin.String, `pathAndQuery`: kotlin.String, `time`: kotlin.ULong, `nonce`: kotlin.String, `body`: kotlin.ByteArray): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_subetha_core_fn_func_request_signing_input(
-        FfiConverterString.lower(`method`),FfiConverterString.lower(`pathAndQuery`),FfiConverterULong.lower(`time`),FfiConverterByteArray.lower(`body`),_status)
+        FfiConverterString.lower(`method`),FfiConverterString.lower(`host`),FfiConverterString.lower(`pathAndQuery`),FfiConverterULong.lower(`time`),FfiConverterString.lower(`nonce`),FfiConverterByteArray.lower(`body`),_status)
 }
     )
     }
@@ -1510,13 +1537,14 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
     
 
         /**
-         * Signs an HTTP request. `path_and_query` is the URL path plus `?query` if any (no host).
+         * Signs an HTTP request. `path_and_query` is the URL path plus `?query` if any. `nonce`
+         * `None` draws a fresh one ([`new_request_nonce`]); relays accept each nonce once.
          */
-    @Throws(FfiException::class) fun `signRequest`(`seed`: kotlin.ByteArray, `method`: kotlin.String, `pathAndQuery`: kotlin.String, `time`: kotlin.ULong, `body`: kotlin.ByteArray): SignedRequestRecord {
+    @Throws(FfiException::class) fun `signRequest`(`seed`: kotlin.ByteArray, `method`: kotlin.String, `host`: kotlin.String, `pathAndQuery`: kotlin.String, `time`: kotlin.ULong, `nonce`: kotlin.String?, `body`: kotlin.ByteArray): SignedRequestRecord {
             return FfiConverterTypeSignedRequestRecord.lift(
     uniffiRustCallWithError(FfiException) { _status ->
     UniffiLib.INSTANCE.uniffi_subetha_core_fn_func_sign_request(
-        FfiConverterByteArray.lower(`seed`),FfiConverterString.lower(`method`),FfiConverterString.lower(`pathAndQuery`),FfiConverterULong.lower(`time`),FfiConverterByteArray.lower(`body`),_status)
+        FfiConverterByteArray.lower(`seed`),FfiConverterString.lower(`method`),FfiConverterString.lower(`host`),FfiConverterString.lower(`pathAndQuery`),FfiConverterULong.lower(`time`),FfiConverterOptionalString.lower(`nonce`),FfiConverterByteArray.lower(`body`),_status)
 }
     )
     }

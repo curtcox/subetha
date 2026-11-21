@@ -51,6 +51,11 @@ class CoreTest {
             assertTrue(CoreEnvelopeCrypto.verify(o["signed"].toString()))
         }
         for (n in v["negative"]!!.jsonArray) assertFalse(CoreEnvelopeCrypto.verify(n.jsonObject["envelope"].toString()), n.toString())
+        // The relay-set `event` and edge-decremented `hops` are outside the signature.
+        for (k in listOf("hops_change", "event_added")) {
+            val e = v[k]!!.jsonObject
+            assertEquals(e["valid"]!!.jsonPrimitive.content.toBoolean(), CoreEnvelopeCrypto.verify(e["envelope"].toString()), k)
+        }
     }
 
     @Test
@@ -67,13 +72,17 @@ class CoreTest {
         val core = CoreDeviceSigner(seed)
         val jdk = JdkDeviceSigner(seed)
         assertEquals(jdk.deviceId, core.deviceId)
-        val a = signRequest(core, "POST", "https://x.test/v1/ack?x=1", "{}".toByteArray(), 1763750000)
-        val b = signRequest(jdk, "POST", "https://x.test/v1/ack?x=1", "{}".toByteArray(), 1763750000)
+        val nonce = "nonce_0123456789abcdef"
+        val a = signRequest(core, "POST", "https://x.test/v1/ack?x=1", "{}".toByteArray(), 1763750000, nonce)
+        val b = signRequest(jdk, "POST", "https://x.test/v1/ack?x=1", "{}".toByteArray(), 1763750000, nonce)
         assertEquals(b, a)
         assertEquals(
-            org.subetha.requestSigningInput("POST", "https://x.test/v1/ack?x=1", 1763750000, "{}".toByteArray()),
-            requestSigningInput("POST", "/v1/ack?x=1", 1763750000uL, "{}".toByteArray()),
+            org.subetha.requestSigningInput("POST", "https://x.test/v1/ack?x=1", 1763750000, nonce, "{}".toByteArray()),
+            requestSigningInput("POST", "x.test", "/v1/ack?x=1", 1763750000uL, nonce, "{}".toByteArray()),
         )
+        val r = org.subetha.core.ffi.signRequest(seed, "POST", "x.test", "/v1/ack?x=1", 1763750000uL, nonce, "{}".toByteArray())
+        assertEquals(a["X-Device-Signature"], r.signature)
+        assertEquals(22, org.subetha.core.ffi.newRequestNonce().length)
         val g = CoreDeviceSigner.generate()
         assertNotEquals(core.deviceId, g.deviceId)
         assertEquals(g.deviceId, CoreDeviceSigner(g.seed()).deviceId)

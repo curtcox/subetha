@@ -288,9 +288,15 @@ RustBuffer uniffi_subetha_core_fn_func_new_message_id(RustCallStatus *_Nonnull o
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_NEW_REQUEST_NONCE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_NEW_REQUEST_NONCE
+RustBuffer uniffi_subetha_core_fn_func_new_request_nonce(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_REQUEST_SIGNING_INPUT
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_REQUEST_SIGNING_INPUT
-RustBuffer uniffi_subetha_core_fn_func_request_signing_input(RustBuffer method, RustBuffer path_and_query, uint64_t time, RustBuffer body, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_subetha_core_fn_func_request_signing_input(RustBuffer method, RustBuffer host, RustBuffer path_and_query, uint64_t time, RustBuffer nonce, RustBuffer body, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_SIGN_BYTES
@@ -305,7 +311,7 @@ RustBuffer uniffi_subetha_core_fn_func_sign_envelope_json(RustBuffer envelope_js
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_SIGN_REQUEST
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_SIGN_REQUEST
-RustBuffer uniffi_subetha_core_fn_func_sign_request(RustBuffer seed, RustBuffer method, RustBuffer path_and_query, uint64_t time, RustBuffer body, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_subetha_core_fn_func_sign_request(RustBuffer seed, RustBuffer method, RustBuffer host, RustBuffer path_and_query, uint64_t time, RustBuffer nonce, RustBuffer body, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_VALIDATE_ENVELOPE_JSON
@@ -637,6 +643,12 @@ uint16_t uniffi_subetha_core_checksum_func_new_device_key(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_NEW_MESSAGE_ID
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_NEW_MESSAGE_ID
 uint16_t uniffi_subetha_core_checksum_func_new_message_id(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_NEW_REQUEST_NONCE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_NEW_REQUEST_NONCE
+uint16_t uniffi_subetha_core_checksum_func_new_request_nonce(void
     
 );
 #endif
