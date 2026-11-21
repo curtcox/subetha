@@ -1,0 +1,63 @@
+# SubEtha for Swift (iOS 15+, macOS 12+)
+
+```swift
+.package(url: "https://github.com/curtcox/subetha", from: "0.1.0") // path: sdk/swift
+```
+
+| Product | What | Native code |
+|---|---|---|
+| `SubEtha` | async/await client: publish, dry-run estimates, poll, subscribe (`AsyncThrowingStream` or handler) with reconnect from the last id, dedupe and acks; device-signed requests and enrollment; `SubEthaError` | none (URLSession, CryptoKit) |
+| `SubEthaCore` | Rust core through UniFFI: `CoreDeviceSigner` (requests + envelope signatures), `CoreEnvelopeCrypto` (verify, E2EE), canonical JSON, validation | `subetha_coreFFI.xcframework` |
+
+```swift
+import SubEtha
+
+let client = SubEtha(token: token)
+try await client.publish("@me/doorbell", "ding", PublishOptions(title: "Front door", priority: 4))
+
+let est = try await client.estimate("@me/doorbell", "ding", PublishOptions(route: Route(mode: .all, maxCostUSD: 0.05)))
+print("worst case $\(est.estimateUSD)", est.plan)
+
+for try await m in client.messages(["@me/doorbell"], options: SubscribeOptions(since: "10m")) {
+    print(m.title ?? "", m.message ?? "")
+}
+```
+
+`subscribe(_:options:handler:)` acks each message after the handler returns. `messages(_:)` acks
+once a message is yielded. Both reconnect with exponential backoff (or `Retry-After`) and resume
+with `since=<last id>`. 4xx errors other than 408/429 are thrown. Cancelling the task (or leaving
+the `for try await` loop) closes the connection.
+
+### Device keys
+
+```swift
+let signer = CryptoKitDeviceSigner.generate()       // or SubEthaCore.CoreDeviceSigner.generate()
+let client = SubEtha(deviceSigner: signer)
+let code = try await client.startEnrollment(name: UIDevice.current.name)
+// show code.userCode, or open code.verificationURIComplete
+_ = try await client.awaitEnrollment(code)
+let device = SubEtha(deviceSigner: signer, signRequests: true) // X-Device-* headers, no token
+```
+
+Store `signer.seed` in the Keychain. CryptoKit's Ed25519 signatures are randomized (still valid).
+`CoreDeviceSigner` is deterministic and also signs envelopes. E2EE needs
+`crypto: CoreEnvelopeCrypto()` plus `topicKeys`.
+
+## The core XCFramework
+
+```bash
+sdk/core/scripts/gen-bindings.sh            # regenerates Sources/SubEthaCoreFFI + ffi/ (committed)
+sdk/swift/scripts/build-xcframework.sh      # iOS device + simulator + macOS → build/subetha_coreFFI.xcframework
+sdk/swift/scripts/build-xcframework.sh --macos-only   # host slice only, for `swift test`
+cd sdk/swift && swift test                  # SubEthaTests always; SubEthaCoreTests once the XCFramework exists
+```
+
+`Package.swift` declares `SubEthaCore` only when `build/subetha_coreFFI.xcframework` exists, or
+when `SUBETHA_CORE_XCFRAMEWORK_URL` and `SUBETHA_CORE_XCFRAMEWORK_CHECKSUM` name a released zip
+(`build-xcframework.sh --zip` prints the checksum). So the pure client always resolves, and
+nothing in the repo is a binary.
+
+The UniFFI Swift (`Sources/SubEthaCoreFFI/subetha_core.swift`) and its C header/modulemap
+(`ffi/`) are generated and committed. CI checks they match the Rust code.
+
+`samples/ios` is a SwiftUI app that uses this package.
