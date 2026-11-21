@@ -113,6 +113,12 @@ export function parsePriority(v: string | null | undefined): number | undefined 
 
 export const PROTECTED_FIELDS = ["title", "message", "attachment", "click", "actions", "content_type"] as const;
 
+/** Associated data for E2EE (spec §5): canonical envelope without message, sender, sig, hops. */
+export function e2eeAad(env: Envelope): Uint8Array {
+  const { message: _m, sender: _s, ...rest } = env;
+  return utf8.encode(canonicalEnvelope(rest));
+}
+
 export async function encryptEnvelope(env: Envelope, key: Uint8Array, kid: string, nonce?: Uint8Array): Promise<Envelope> {
   if (env.enc) throw new Error("already encrypted");
   const n = nonce ?? crypto.getRandomValues(new Uint8Array(24));
@@ -126,7 +132,7 @@ export async function encryptEnvelope(env: Envelope, key: Uint8Array, kid: strin
   }
   delete out.sig;
   out.enc = { alg: "xchacha20poly1305", kid, nonce: base64urlEncode(n) };
-  const aad = utf8.encode(canonicalEnvelope(out));
+  const aad = e2eeAad(out);
   const ct = xchachaSeal(key, n, utf8.encode(canonicalize(prot as Json)), aad);
   out.message = base64urlEncode(ct);
   return out;
@@ -136,7 +142,7 @@ export async function encryptEnvelope(env: Envelope, key: Uint8Array, kid: strin
 export async function decryptEnvelope(env: Envelope, key: Uint8Array): Promise<Envelope | null> {
   if (!env.enc || typeof env.message !== "string") return null;
   const { message, ...rest } = env;
-  const aad = utf8.encode(canonicalEnvelope(rest));
+  const aad = e2eeAad(env);
   const pt = xchachaOpen(key, base64urlDecode(env.enc.nonce), base64urlDecode(message), aad);
   if (!pt) return null;
   const prot = JSON.parse(utf8.decode(pt)) as Record<string, unknown>;
