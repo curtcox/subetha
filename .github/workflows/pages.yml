@@ -1,0 +1,83 @@
+name: Pages
+
+# GitHub Pages (PLAN §13): docs, build info (commit, CI badges, test counts, SDK versions), the
+# pricing invariant report, and links to the live console and SDK packages.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  # PLAN open question 2: curtcox.github.io/subetha, or a custom domain such as dev.subetha.org.
+  # For a custom domain set the repository variables PAGES_BASE_PATH=/ and PAGES_URL=https://dev.subetha.org.
+  PAGES_BASE_PATH: ${{ vars.PAGES_BASE_PATH || '/subetha/' }}
+  PAGES_URL: ${{ vars.PAGES_URL || 'https://curtcox.github.io/subetha' }}
+  APP_URL: ${{ vars.APP_URL || 'https://subetha.org' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pnpm install --frozen-lockfile
+
+      # Test counts for the build-info page. Failures are reported there (and by ci.yml); they
+      # don't block publishing the docs.
+      - name: Tests (TypeScript)
+        continue-on-error: true
+        run: |
+          mkdir -p test-results
+          for pkg in spec pricing sdk/js workers/api docs/samples; do
+            name=$(echo "$pkg" | tr / -)
+            pnpm --dir "$pkg" exec vitest run --reporter=default --reporter=json \
+              --outputFile.json="$GITHUB_WORKSPACE/test-results/ts-$name.json" || true
+          done
+      - name: Tests (Rust)
+        continue-on-error: true
+        run: cargo test --workspace 2>&1 | tee test-results/rust.txt
+      - name: Tests (Python)
+        continue-on-error: true
+        run: |
+          pip install -e "sdk/python[test]" -e "gateways/reticulum[test]"
+          pytest sdk/python gateways/reticulum --junitxml=test-results/python.xml
+
+      - run: pnpm --filter @subetha/sdk build
+      - name: Build the site
+        run: >
+          node apps/site/build.mjs --pages --out site-build
+          --base "$PAGES_BASE_PATH" --site-url "$PAGES_URL" --app-url "$APP_URL"
+          --test-results test-results
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site-build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

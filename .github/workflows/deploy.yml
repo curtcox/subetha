@@ -1,0 +1,152 @@
+name: Deploy
+
+# Staging on every push to main; production on v* tags (PLAN §13). See infra/README.md for the
+# one-time Cloudflare setup and infra/secrets.md for every secret.
+#
+# Needs, per GitHub Environment (staging, production):
+#   secrets CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, and any Worker secrets to push.
+# Until CLOUDFLARE_API_TOKEN is set and the REPLACE_WITH_* ids in workers/api/wrangler.jsonc are
+# filled in for the target environment, the deploy job only reports what's missing.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging' }}
+      url: ${{ startsWith(github.ref, 'refs/tags/v') && 'https://subetha.org' || 'https://staging.subetha.org' }}
+    env:
+      TARGET: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging' }}
+      BASE_URL: ${{ startsWith(github.ref, 'refs/tags/v') && 'https://subetha.org' || 'https://staging.subetha.org' }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preflight
+        id: preflight
+        run: |
+          missing=""
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if grep -q "REPLACE_WITH_${TARGET^^}_" workers/api/wrangler.jsonc; then
+            missing="$missing wrangler.jsonc:REPLACE_WITH_${TARGET^^}_*"
+          fi
+          if [ -n "$missing" ]; then
+            echo "::warning title=Deploy skipped::$TARGET is not configured yet:$missing (see infra/README.md)"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.preflight.outputs.ready == 'true'
+        uses: pnpm/action-setup@v4
+      - if: steps.preflight.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - if: steps.preflight.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile
+
+      # The Worker serves apps/site/public as static assets: sdk.js and the docs are build outputs.
+      - name: Build sdk.js and the site
+        if: steps.preflight.outputs.ready == 'true'
+        run: |
+          pnpm --filter @subetha/sdk build
+          SITE_URL="$BASE_URL" APP_URL="$BASE_URL" pnpm --filter @subetha/site build
+
+      - name: Apply D1 migrations
+        if: steps.preflight.outputs.ready == 'true'
+        run: pnpm --filter @subetha/api exec wrangler d1 migrations apply DB --env "$TARGET" --remote
+
+      - name: Deploy the Worker
+        if: steps.preflight.outputs.ready == 'true'
+        run: pnpm --filter @subetha/api exec wrangler deploy --env "$TARGET"
+
+      # After the first deploy, so the Worker exists; each secret change rolls out a new version.
+      - name: Push Worker secrets that are set in this environment
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          CLERK_ISSUER: ${{ secrets.CLERK_ISSUER }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          CLERK_JWKS_URL: ${{ secrets.CLERK_JWKS_URL }}
+          CLERK_AUTHORIZED_PARTIES: ${{ secrets.CLERK_AUTHORIZED_PARTIES }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
+          APNS_KEY_P8: ${{ secrets.APNS_KEY_P8 }}
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
+          APNS_TOPIC: ${{ secrets.APNS_TOPIC }}
+          APNS_ENDPOINT: ${{ secrets.APNS_ENDPOINT }}
+          SLACK_CLIENT_ID: ${{ secrets.SLACK_CLIENT_ID }}
+          SLACK_CLIENT_SECRET: ${{ secrets.SLACK_CLIENT_SECRET }}
+          SLACK_SIGNING_SECRET: ${{ secrets.SLACK_SIGNING_SECRET }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          SES_ACCESS_KEY_ID: ${{ secrets.SES_ACCESS_KEY_ID }}
+          SES_SECRET_ACCESS_KEY: ${{ secrets.SES_SECRET_ACCESS_KEY }}
+          SES_REGION: ${{ secrets.SES_REGION }}
+          INBOUND_EMAIL_DOMAIN: ${{ secrets.INBOUND_EMAIL_DOMAIN }}
+          WEBHOOK_SIGNING_SECRET: ${{ secrets.WEBHOOK_SIGNING_SECRET }}
+          LXMF_GATEWAY_URL: ${{ secrets.LXMF_GATEWAY_URL }}
+          LXMF_GATEWAY_SECRET: ${{ secrets.LXMF_GATEWAY_SECRET }}
+        run: |
+          names="CLERK_ISSUER CLERK_PUBLISHABLE_KEY CLERK_JWKS_URL CLERK_AUTHORIZED_PARTIES STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET
+            VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT FCM_SERVICE_ACCOUNT APNS_KEY_P8 APNS_KEY_ID APNS_TEAM_ID APNS_TOPIC APNS_ENDPOINT
+            SLACK_CLIENT_ID SLACK_CLIENT_SECRET SLACK_SIGNING_SECRET SLACK_BOT_TOKEN TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_FROM
+            EMAIL_FROM SES_ACCESS_KEY_ID SES_SECRET_ACCESS_KEY SES_REGION INBOUND_EMAIL_DOMAIN WEBHOOK_SIGNING_SECRET LXMF_GATEWAY_URL LXMF_GATEWAY_SECRET"
+          umask 077
+          NAMES="$names" node -e '
+            const out = {};
+            for (const n of process.env.NAMES.split(/\s+/).filter(Boolean)) if (process.env[n]) out[n] = process.env[n];
+            require("fs").writeFileSync(process.env.RUNNER_TEMP + "/worker-secrets.json", JSON.stringify(out));
+            console.log("secrets to push:", Object.keys(out).join(", ") || "(none)");
+          '
+          if [ "$(cat "$RUNNER_TEMP/worker-secrets.json")" != "{}" ]; then
+            pnpm --filter @subetha/api exec wrangler secret bulk "$RUNNER_TEMP/worker-secrets.json" --env "$TARGET"
+          fi
+          rm -f "$RUNNER_TEMP/worker-secrets.json"
+
+      - name: Smoke test
+        if: steps.preflight.outputs.ready == 'true'
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS "$BASE_URL/v1/health"; then echo; exit 0; fi
+            sleep 10
+          done
+          echo "::error::$BASE_URL/v1/health did not answer"
+          exit 1
