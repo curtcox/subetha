@@ -1,0 +1,12 @@
+{
+  "name": "@subetha/site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@subetha/sdk": "workspace:*"
+  }
+}

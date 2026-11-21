@@ -14,6 +14,7 @@ export interface Env {
   ASSETS?: Fetcher;
   // Clerk
   CLERK_ISSUER?: string;
+  CLERK_PUBLISHABLE_KEY?: string;
   CLERK_JWKS_URL?: string;
   CLERK_JWKS?: string; // inline JWKS JSON (local/test)
   CLERK_AUTHORIZED_PARTIES?: string; // comma-separated

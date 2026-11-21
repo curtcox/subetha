@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SubEtha Console</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="/">SubEtha</a><span class="muted">console</span><span class="spacer"></span>
+  <span id="who" class="muted"></span><span id="bal"></span>
+  <button id="signout" class="secondary" hidden>Sign out</button>
+</header>
+<main>
+  <section id="signin" class="card" hidden>
+    <h2>Sign in</h2>
+    <div id="clerk-signin"></div>
+    <p class="muted">Or use an API token (scripts, local development):</p>
+    <div class="row"><input id="tokenInput" placeholder="se_…" autocomplete="off"><button id="tokenBtn">Use token</button></div>
+  </section>
+
+  <section id="create" class="card" hidden>
+    <h2>Create your account</h2>
+    <p class="muted">Pick a handle. Your topics live under <code>@handle/…</code>.</p>
+    <div class="row"><input id="handleInput" placeholder="handle"><button id="createBtn">Create</button></div>
+  </section>
+
+  <div id="app" hidden>
+    <div class="tabs" id="tabs">
+      <button data-tab="messages" class="active">Send / receive</button>
+      <button data-tab="topics">Topics</button>
+      <button data-tab="tokens">Tokens</button>
+      <button data-tab="billing">Billing</button>
+      <button data-tab="traces">Traces</button>
+    </div>
+
+    <section data-panel="messages">
+      <div class="grid">
+        <div class="card">
+          <h3>Compose</h3>
+          <label>Topic</label><input id="pubTopic" placeholder="@you/doorbell">
+          <label>Title</label><input id="pubTitle">
+          <label>Message</label><textarea id="pubMsg" rows="3"></textarea>
+          <div class="row">
+            <div><label>Priority</label><select id="pubPrio"><option value="1">1 min</option><option value="2">2 low</option><option value="3" selected>3 default</option><option value="4">4 high</option><option value="5">5 urgent</option></select></div>
+            <div><label>Route</label><select id="pubMode"><option>any</option><option>fast</option><option>all</option><option>cheap</option></select></div>
+            <div><label>Tags</label><input id="pubTags" placeholder="a,b"></div>
+          </div>
+          <p class="row"><button id="pubBtn">Publish</button><button id="dryBtn" class="secondary">Simulate route &amp; cost</button><button id="curlBtn" class="secondary">Copy as curl</button></p>
+          <pre id="pubOut" hidden></pre>
+        </div>
+        <div class="card">
+          <h3>Live inbox</h3>
+          <div class="row"><input id="subTopic" placeholder="@you/doorbell,@you/alerts"><button id="subBtn">Subscribe</button></div>
+          <ul class="inbox" id="inbox"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section data-panel="topics" hidden>
+      <div class="card">
+        <h3>Your topics</h3>
+        <table><thead><tr><th>Topic</th><th>Policy</th><th></th></tr></thead><tbody id="topicRows"></tbody></table>
+      </div>
+      <div class="card">
+        <h3>Create or update a topic</h3>
+        <label>Topic</label><input id="topicName" placeholder="@you/alerts or t_… (generate)">
+        <p><button id="genSecret" class="secondary">Generate secret topic name</button></p>
+        <label>Policy (JSON)</label><textarea id="topicPolicy" rows="6">{ "public_publish": false, "retention_s": 43200 }</textarea>
+        <p><button id="topicSave">Save</button> <span id="topicMsg" class="muted"></span></p>
+      </div>
+    </section>
+
+    <section data-panel="tokens" hidden>
+      <div class="card">
+        <h3>API tokens</h3>
+        <table><thead><tr><th>Name</th><th>Scopes</th><th>Caps</th><th>Status</th><th></th></tr></thead><tbody id="tokenRows"></tbody></table>
+      </div>
+      <div class="card">
+        <h3>Token builder</h3>
+        <div class="row">
+          <div><label>Name</label><input id="tokName"></div>
+          <div><label>Scopes (comma-separated)</label><input id="tokScopes" placeholder="publish:@you/*, subscribe:@you/doorbell"></div>
+        </div>
+        <div class="row">
+          <div><label>Daily cap (USD)</label><input id="tokDaily" type="number" step="0.01"></div>
+          <div><label>Transports (blank = all)</label><input id="tokTransports" placeholder="ws,webpush"></div>
+          <div><label>Origins (publishable token)</label><input id="tokOrigins" placeholder="https://example.com"></div>
+        </div>
+        <p><button id="tokCreate">Create token</button></p>
+        <pre id="tokOut" hidden></pre>
+      </div>
+    </section>
+
+    <section data-panel="billing" hidden>
+      <div class="grid">
+        <div class="card">
+          <h3>Top up</h3>
+          <p class="muted">Prepaid balance, no subscription. A top-up fee covers card processing.</p>
+          <div class="row"><input id="topupAmt" type="number" value="10" min="5" step="1"><button id="topupBtn">Pay with Stripe</button></div>
+        </div>
+        <div class="card"><h3>Pricing</h3><div id="priceTable" class="muted">Loading…</div></div>
+      </div>
+      <div class="card"><h3>Ledger</h3><table><thead><tr><th>#</th><th>Kind</th><th>Amount</th><th>Available after</th><th>Ref</th><th>Time</th></tr></thead><tbody id="ledgerRows"></tbody></table></div>
+    </section>
+
+    <section data-panel="traces" hidden>
+      <div class="card">
+        <h3>Message trace</h3>
+        <div class="row"><input id="traceTopic" placeholder="@you/doorbell"><input id="traceId" placeholder="message id"><button id="traceBtn">Show</button></div>
+        <pre id="traceOut" hidden></pre>
+      </div>
+    </section>
+  </div>
+</main>
+<script src="/sdk.js"></script>
+<script type="module" src="/console/console.js"></script>
+</body>
+</html>
