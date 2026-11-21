@@ -23,7 +23,7 @@ const MAX_BACKLOG = 1000;
 
 interface Lease { ref: string; granted: number; remaining: number; at: number }
 type StreamFormat = "json" | "sse" | "raw";
-interface Stream { id: string; format: StreamFormat; filter: SubscriptionFilter; writer: WritableStreamDefaultWriter<Uint8Array> }
+interface Stream { id: string; format: StreamFormat; filter: SubscriptionFilter; send: (b: Uint8Array) => void; close: () => void }
 interface WsAttachment { id: string; filter: SubscriptionFilter }
 
 export interface SubscribeParams {
@@ -499,13 +499,19 @@ export class TopicDO extends DurableObject<Env> {
       return new Response(null, { status: 101, webSocket: client });
     }
 
-    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-    const writer = writable.getWriter();
-    const stream: Stream = { id, format: params.format, filter: params.filter, writer };
-    if (params.format !== "raw") void writer.write(this.frame(params.format, openEvt as Envelope));
-    for (const m of backlog) void writer.write(this.frame(params.format, m));
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const readable = new ReadableStream<Uint8Array>({
+      start: (c) => { controller = c; },
+      cancel: () => { this.streams.delete(id); },
+    });
+    const stream: Stream = {
+      id, format: params.format, filter: params.filter,
+      send: (b) => { try { controller.enqueue(b); } catch { this.streams.delete(id); } },
+      close: () => { try { controller.close(); } catch { /* already closed */ } },
+    };
+    if (params.format !== "raw") stream.send(this.frame(params.format, openEvt as Envelope));
+    for (const m of backlog) stream.send(this.frame(params.format, m));
     this.streams.set(id, stream);
-    writer.closed.catch(() => {}).finally(() => this.streams.delete(id));
     this.startKeepalive();
     const ct = params.format === "sse" ? "text/event-stream" : params.format === "json" ? "application/x-ndjson" : "text/plain";
     return new Response(readable, { headers: { "content-type": `${ct}; charset=utf-8`, "cache-control": "no-cache", "x-accel-buffering": "no" } });
@@ -520,7 +526,7 @@ export class TopicDO extends DurableObject<Env> {
   private broadcast(m: Envelope) {
     for (const s of this.streams.values()) {
       if (!matchesFilter(m, s.filter)) continue;
-      s.writer.write(this.frame(s.format, m)).catch(() => this.streams.delete(s.id));
+      s.send(this.frame(s.format, m));
     }
     const data = JSON.stringify(m);
     for (const ws of this.ctx.getWebSockets()) {
@@ -540,12 +546,12 @@ export class TopicDO extends DurableObject<Env> {
         return;
       }
       const k = { id: ulid(), time: Math.floor(Date.now() / 1000), event: "keepalive", topic: this.meta?.name } as Envelope;
-      for (const s of this.streams.values()) s.writer.write(this.frame(s.format, k)).catch(() => this.streams.delete(s.id));
+      for (const s of this.streams.values()) s.send(this.frame(s.format, k));
     }, KEEPALIVE_MS);
   }
 
   private closeAll(code: number, reason: string) {
-    for (const s of this.streams.values()) s.writer.close().catch(() => {});
+    for (const s of this.streams.values()) s.close();
     this.streams.clear();
     for (const ws of this.ctx.getWebSockets()) {
       try { ws.close(code, reason); } catch { /* already closed */ }
