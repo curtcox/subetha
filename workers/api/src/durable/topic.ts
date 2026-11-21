@@ -243,13 +243,11 @@ export class TopicDO extends DurableObject<Env> {
     const nowMs = Date.now();
     const time = env.time ?? Math.floor(nowMs / 1000);
     const retention = Math.min(meta.policy.retention_s ?? DEFAULT_RETENTION_S, MAX_RETENTION_S);
-    env = {
-      ...env,
-      id: (env.id ?? ulid(nowMs)).toUpperCase(),
-      time,
-      event: "message",
-      expires: Math.min(env.expires ?? time + retention, time + retention),
-    };
+    const expires = Math.min(env.expires ?? time + retention, time + retention);
+    env = { ...env, id: (env.id ?? ulid(nowMs)).toUpperCase(), time };
+    // A signature (spec §4) or E2EE associated data (spec §5) covers every field, so sealed
+    // envelopes are stored exactly as sent; readers treat a missing `event` as "message".
+    if (env.sig === undefined && env.enc === undefined) Object.assign(env, { event: "message", expires });
     if (env.priority === 3) delete env.priority;
 
     const apiPrice = actionPriceMicros(PRICES, "api_request", this.tier());
@@ -279,7 +277,7 @@ export class TopicDO extends DurableObject<Env> {
     const publishPrice = actionPriceMicros(PRICES, "publish", this.tier());
     const liveCost = plan.deliveries.filter((d) => d.after_s === 0 && d.transport === "ws").reduce((n, d) => n + d.cost_micros, 0);
     const queued = plan.deliveries.filter((d) => !(d.after_s === 0 && d.transport === "ws"));
-    const retentionNanos = rentNanos(PRICES, "retention_message_day", (env.expires! - time) / 86400, this.tier());
+    const retentionNanos = rentNanos(PRICES, "retention_message_day", (expires - time) / 86400, this.tier());
 
     if (input.dryRun) {
       if (anonymous) { if (!(await this.spendOwner(apiPrice))) throw rpcError("no_funded_owner"); }
@@ -327,7 +325,7 @@ export class TopicDO extends DurableObject<Env> {
     // Store and fan out.
     const json = JSON.stringify(env);
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec("INSERT INTO messages (id, time, expires, json) VALUES (?, ?, ?, ?)", env.id!, time, env.expires!, json);
+      this.sql.exec("INSERT INTO messages (id, time, expires, json) VALUES (?, ?, ?, ?)", env.id!, time, expires, json);
       if (input.idempotencyKey) this.sql.exec("INSERT OR REPLACE INTO idem (key, body_hash, message_id, created) VALUES (?, ?, ?, ?)", input.idempotencyKey, input.bodyHash, env.id!, nowMs);
     });
     this.broadcast(env);
@@ -341,7 +339,7 @@ export class TopicDO extends DurableObject<Env> {
       const ref = `dlv:${env.id}:${sub.id}`;
       const r = await accountStub(this.env, meta.owner).reserve(d.cost_micros, ref, null, {}, d.transport === "sms" || d.transport === "voice" ? "telephony" : null);
       if (!r.ok) {
-        this.trace(env.id!, {}, env.expires!);
+        this.trace(env.id!, {}, expires);
         await this.recordDelivery(env.id!, { sub: sub.id, transport: d.transport, result: "not sent", error: r.code });
         continue;
       }
@@ -350,7 +348,7 @@ export class TopicDO extends DurableObject<Env> {
     if (jobs.length && this.env.DELIVERY) await this.env.DELIVERY.sendBatch(jobs);
 
     const callerCost = (anonymous ? 0 : publishPrice) + (caller.accountId === meta.owner ? liveCost + queued.reduce((n, d) => n + d.cost_micros, 0) : 0);
-    this.trace(env.id!, { published: nowMs, plan: plan.deliveries, dropped: plan.dropped, cost_micros: { publish: publishPrice, live: liveCost, queued: queued.reduce((n, d) => n + d.cost_micros, 0), retention_nanos: retentionNanos }, publisher: caller.tokenId ?? caller.deviceId ?? caller.accountId ?? "anonymous" }, env.expires!);
+    this.trace(env.id!, { published: nowMs, plan: plan.deliveries, dropped: plan.dropped, cost_micros: { publish: publishPrice, live: liveCost, queued: queued.reduce((n, d) => n + d.cost_micros, 0), retention_nanos: retentionNanos }, publisher: caller.tokenId ?? caller.deviceId ?? caller.accountId ?? "anonymous" }, expires);
     await this.ensureAlarm();
     return { message: env, created_topic: created, duplicate: false, cost_micros: callerCost, plan: caller.accountId === meta.owner ? plan.deliveries : [], dry_run: false };
   }
