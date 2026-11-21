@@ -5,7 +5,8 @@
 // Signed requests carry:
 //   X-Device-Id: dev_…            (Ed25519 public key, spec §1.3)
 //   X-Device-Time: <unix seconds> (±300 s)
-//   X-Device-Signature: base64url(Ed25519("subetha-req-v1\n" + METHOD + "\n" + host + "\n" + path?query + "\n" + time + "\n" + hex(sha256(body))))
+//   X-Device-Nonce: 16–64 random base64url chars (single use)
+//   X-Device-Signature: base64url(Ed25519("subetha-req-v1\n" + METHOD + "\n" + host + "\n" + path?query + "\n" + time + "\n" + nonce + "\n" + hex(sha256(body))))
 // The host binds a signature to one deployment (a staging signature isn't valid in production).
 import type { Context, Hono } from "hono";
 import { base64urlDecode, DEVICE_ID_RE, publicKeyFromDeviceId, utf8 } from "@subetha/sdk/protocol";
@@ -13,6 +14,7 @@ import { audit } from "./accounts.ts";
 import { requireAdmin } from "./auth.ts";
 import { randomBase32, sha256Hex } from "./crypto.ts";
 import { ApiError } from "./errors.ts";
+import { accountStub } from "./durable/account.ts";
 import type { Env, Principal } from "./types.ts";
 
 type Vars = { Bindings: Env; Variables: { principal: Principal } };
@@ -36,9 +38,9 @@ async function ed25519Verify(deviceId: string, sigB64: string, data: string): Pr
   }
 }
 
-export async function requestSigningInput(method: string, url: string, time: string, body: Uint8Array): Promise<string> {
+export async function requestSigningInput(method: string, url: string, time: string, nonce: string, body: Uint8Array): Promise<string> {
   const u = new URL(url);
-  return `${REQ_DOMAIN}${method.toUpperCase()}\n${u.host}\n${u.pathname}${u.search}\n${time}\n${await sha256Hex(body)}`;
+  return `${REQ_DOMAIN}${method.toUpperCase()}\n${u.host}\n${u.pathname}${u.search}\n${time}\n${nonce}\n${await sha256Hex(body)}`;
 }
 
 /** Returns a device principal for a correctly signed request from an enrolled device, null if unsigned. */
@@ -47,11 +49,13 @@ export async function authenticateDevice(req: Request, env: Env, nowSec = Math.f
   if (!id) return null;
   const time = req.headers.get("x-device-time") ?? "";
   const sig = req.headers.get("x-device-signature") ?? "";
-  if (!DEVICE_ID_RE.test(id) || !/^\d+$/.test(time) || Math.abs(nowSec - Number(time)) > SKEW_S) throw new ApiError("unauthorized", "bad device signature headers");
+  const nonce = req.headers.get("x-device-nonce") ?? "";
+  if (!DEVICE_ID_RE.test(id) || !/^\d+$/.test(time) || Math.abs(nowSec - Number(time)) > SKEW_S || !/^[A-Za-z0-9_-]{16,64}$/.test(nonce)) throw new ApiError("unauthorized", "bad device signature headers");
   const body = new Uint8Array(await req.clone().arrayBuffer());
-  if (!(await ed25519Verify(id, sig, await requestSigningInput(req.method, req.url, time, body)))) throw new ApiError("unauthorized", "bad device signature");
+  if (!(await ed25519Verify(id, sig, await requestSigningInput(req.method, req.url, time, nonce, body)))) throw new ApiError("unauthorized", "bad device signature");
   const row = await env.DB.prepare("SELECT account_id FROM devices WHERE id = ? AND revoked_at IS NULL").bind(id).first<{ account_id: string }>();
   if (!row) throw new ApiError("unauthorized", "device not enrolled");
+  if (!(await accountStub(env, row.account_id).claimNonce(`sig:${await sha256Hex(sig)}`, 2 * SKEW_S * 1000))) throw new ApiError("unauthorized", "replayed device signature");
   env.DB.prepare("UPDATE devices SET last_seen_at = ? WHERE id = ?").bind(Date.now(), id).run().catch(() => {});
   return { kind: "device", accountId: row.account_id, deviceId: id };
 }

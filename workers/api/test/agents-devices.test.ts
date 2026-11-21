@@ -108,8 +108,15 @@ describe("devices", () => {
     expect((await dev.poll("@devowner/kitchen")).map((x) => x.message)).toEqual(["temp 21C"]);
     await expect(dev.createToken({ scopes: ["admin"] })).rejects.toMatchObject({ code: "forbidden" });
 
+    // Replaying a captured signed request is refused.
+    const { signRequest } = await import("@subetha/sdk");
+    const url = `${BASE}/@devowner/kitchen/json?poll=1`;
+    const h = await signRequest(key, "GET", url, new Uint8Array());
+    expect((await SELF.fetch(url, { headers: h })).status).toBe(200);
+    expect((await SELF.fetch(url, { headers: h })).status).toBe(401);
+
     // Tampering with the body breaks the signature.
-    const forged = await SELF.fetch(`${BASE}/@devowner/kitchen`, { method: "POST", body: "x", headers: { "x-device-id": key.deviceId, "x-device-time": String(Math.floor(Date.now() / 1000)), "x-device-signature": "A".repeat(86) } });
+    const forged = await SELF.fetch(`${BASE}/@devowner/kitchen`, { method: "POST", body: "x", headers: { "x-device-id": key.deviceId, "x-device-time": String(Math.floor(Date.now() / 1000)), "x-device-nonce": "n".repeat(16), "x-device-signature": "A".repeat(86) } });
     expect(forged.status).toBe(401);
 
     expect((await SELF.fetch(`${BASE}/v1/devices/${key.deviceId}`, { method: "DELETE", headers: auth(a.token) })).status).toBe(200);

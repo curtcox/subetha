@@ -232,12 +232,23 @@ export class AccountDO extends DurableObject<Env> {
     if (this.ctx.storage.sql.exec("SELECT 1 FROM reservations LIMIT 1").toArray().length) void this.ctx.storage.setAlarm(now + 3_600_000);
   }
 
+  /** Single-use claim of a device request signature (replay protection within the skew window). */
+  async claimNonce(key: string, ttlMs: number): Promise<boolean> {
+    const sql = this.ctx.storage.sql;
+    sql.exec("CREATE TABLE IF NOT EXISTS nonces (k TEXT PRIMARY KEY, exp INTEGER NOT NULL)");
+    const now = Date.now();
+    sql.exec("DELETE FROM nonces WHERE exp < ?", now);
+    if (sql.exec("SELECT 1 FROM nonces WHERE k = ?", key).toArray().length) return false;
+    sql.exec("INSERT INTO nonces (k, exp) VALUES (?, ?)", key, now + ttlMs);
+    return true;
+  }
+
   async setAccountId(id: string) {
     await this.ctx.storage.put("account_id", id);
   }
 }
 
-export type AccountRpc = Pick<AccountDO, "balance" | "topup" | "charge" | "reserve" | "settle" | "release" | "lease" | "returnLease" | "adjust" | "entries" | "setAccountId" | "setAutoRecharge" | "autoRechargeFailed" | "trackTokenSpend" | "setControls">;
+export type AccountRpc = Pick<AccountDO, "balance" | "topup" | "charge" | "reserve" | "settle" | "release" | "lease" | "returnLease" | "adjust" | "entries" | "setAccountId" | "setAutoRecharge" | "autoRechargeFailed" | "trackTokenSpend" | "setControls" | "claimNonce">;
 
 export function accountStub(env: Env, accountId: string): AccountRpc {
   return env.ACCOUNT.get(env.ACCOUNT.idFromName(accountId)) as unknown as AccountRpc;
