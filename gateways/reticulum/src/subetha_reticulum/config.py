@@ -35,6 +35,8 @@ class GatewayConfig:
     stamp_cost: int | None = None
     #: Port for a tiny HTTP health endpoint (needed by Cloudflare Containers). None = off.
     health_port: int | None = None
+    #: Shared secret for POST /deliver (relay LXMF_GATEWAY_SECRET). None = /deliver disabled.
+    deliver_secret: str | None = None
     topics: list[TopicMapping] = field(default_factory=list)
 
 
@@ -78,6 +80,7 @@ def parse_config(data: Mapping[str, Any], base_dir: Path = Path("."), env: Mappi
         cfg.stamp_cost = int(data["stamp_cost"])
     if data.get("health_port") is not None:
         cfg.health_port = int(data["health_port"])
+    cfg.deliver_secret = (env or {}).get("SUBETHA_DELIVER_SECRET") or data.get("deliver_secret") or None
 
     topics = data.get("topics", [])
     if not isinstance(topics, list) or not topics:

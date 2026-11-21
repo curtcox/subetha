@@ -67,7 +67,8 @@ See [`gateway.example.toml`](gateway.example.toml). The main keys:
 | `reticulum_config_dir` | Reticulum config directory. |
 | `announce_interval` | Seconds between announces of every topic address (0 = only at startup). |
 | `delivery_method` | `direct`, `opportunistic`, or `propagated` (with `propagation_node`). |
-| `health_port` | Serves `GET /health` with the topic → address map. |
+| `health_port` | Serves `GET /health` with the topic → address map, and `POST /deliver` when `deliver_secret` is set. |
+| `deliver_secret` (or env `SUBETHA_DELIVER_SECRET`) | Shared secret with the relay's `LXMF_GATEWAY_SECRET`. The relay pushes deliveries for `lxmf` endpoints (any LXMF address an account has subscribed to a topic) to `POST /deliver`, HMAC-signed as `X-SubEtha-Signature: t=…,v1=…`. They are sent from the topic's destination if it is mapped here, otherwise from the first mapped topic. |
 | `[[topics]]` | `topic`, `name` (announced display name), `publish` (LXMF → topic), `deliver` (topic → LXMF), `allow` (LXMF addresses allowed to use it; empty means anyone). |
 
 The gateway publishes with its own token, so the token's account pays for what mesh users publish.

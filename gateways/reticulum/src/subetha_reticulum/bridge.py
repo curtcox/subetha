@@ -241,6 +241,19 @@ class Bridge:
                 log.exception("LXMF delivery of %s to %s failed", id_, sub)
 
 
+    def deliver_direct(self, destination: str, msg: dict[str, Any], default_topic: str | None = None) -> None:
+        """Relay-pushed delivery to one LXMF address (endpoint subscriptions). Sent from the
+        destination of the message's topic if it is mapped here, else from `default_topic`."""
+        topic = msg.get("topic") if msg.get("topic") in self.mappings else default_topic or next(iter(self.mappings), None)
+        if topic is None:
+            raise RuntimeError("no topic destination to send from")
+        key = {"id": f"{msg.get('id')}:{destination}"} if msg.get("id") else {}
+        if key and not self._relay_seen.accept(key):
+            return
+        title, content = format_for_lxmf(msg)
+        self.lxmf.send(topic, destination, content, title=title)
+
+
 def format_for_lxmf(msg: dict[str, Any]) -> tuple[str, str]:
     """Builds (title, content) for an LXMF message from a relay envelope."""
     title = msg.get("title") if isinstance(msg.get("title"), str) else None
