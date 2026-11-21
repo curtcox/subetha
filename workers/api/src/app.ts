@@ -63,6 +63,21 @@ app.use("*", async (c, next) => {
   await next();
 });
 
+// Rate limits (PLAN §9): per credential for authenticated callers, per IP otherwise.
+// Provider hooks are exempt (they're signature-checked and must not be dropped).
+app.use("*", async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (path.startsWith("/v1/hooks/") || path === "/v1/health") return next();
+  const cred = c.req.header("authorization") ?? c.req.header("x-device-id") ?? new URL(c.req.url).searchParams.get("auth");
+  const limiter = cred ? c.env.RL_AUTH : c.env.RL_ANON;
+  if (limiter) {
+    const key = cred ? (await sha256Hex(cred)).slice(0, 32) : c.req.header("cf-connecting-ip") ?? "unknown";
+    const { success } = await limiter.limit({ key });
+    if (!success) throw new ApiError("rate_limited", "too many requests");
+  }
+  await next();
+});
+
 const principal = async (c: C) => {
   let p = c.get("principal");
   if (!p) {

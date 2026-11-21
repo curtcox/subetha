@@ -12,6 +12,8 @@ export interface Env {
   ACCOUNT: DurableObjectNamespace<AccountDO>;
   DELIVERY?: Queue<DeliveryJob>;
   ASSETS?: Fetcher;
+  RL_AUTH?: RateLimit;
+  RL_ANON?: RateLimit;
   // Clerk
   CLERK_ISSUER?: string;
   CLERK_PUBLISHABLE_KEY?: string;
