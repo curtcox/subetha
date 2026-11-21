@@ -1,7 +1,7 @@
 // HTTP API: ntfy-compatible publish/subscribe plus the /v1 control plane (spec §8, PLAN §7).
 import { Hono, type Context } from "hono";
 import { canonicalize, isTopic, validateEnvelope, ulid, type Envelope, type Json } from "@subetha/sdk/protocol";
-import { topupSplit, tierFor, type PriceTable } from "@subetha/pricing";
+import { actionPriceMicros, topupSplit, tierFor, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { audit, autoCreateOwnerFor, createAccount, getAccount, invalidateAccount, recordTopic, validateHandle, validatePolicy } from "./accounts.ts";
 import { authenticate, callerOf, invalidateToken, newTokenSecret, requireAccount, requireAdmin, scopeAllows, validateScopes, validateTransports } from "./auth.ts";
@@ -289,21 +289,62 @@ async function doPublish(c: C, parsed: ParsedPublish): Promise<Response> {
   const problems = validateEnvelope(env);
   if (problems.length) throw new ApiError("invalid_message", problems.join("; "));
   const caller = callerOf(p);
-  const bodyHash = await sha256Hex(canonicalize({ ...env, route: parsed.route } as unknown as Json));
-  const result = unwrap(await topicStub(c.env, env.topic).publish({
-    envelope: env,
-    caller,
-    autoCreateOwner: await autoCreateOwnerFor(c.env, caller.accountId, env.topic),
-    idempotencyKey: parsed.idempotencyKey,
-    bodyHash,
-    dryRun: parsed.dryRun,
-    route: parsed.route,
-  }));
+  // Attachments go to R2 first; the publish (which charges for them) references the file.
+  let fileId: string | null = null;
+  if (parsed.file) {
+    if (!c.env.FILES) throw new ApiError("unsupported", "attachments are not enabled");
+    fileId = ulid().toLowerCase();
+    env.attachment = { name: parsed.file.name, url: `${c.env.BASE_URL}/file/${fileId}/${encodeURIComponent(parsed.file.name)}`, size: parsed.file.bytes.length, type: parsed.file.type };
+    if (!parsed.dryRun) await c.env.FILES.put(`att/${fileId}`, parsed.file.bytes, { httpMetadata: { contentType: parsed.file.type } });
+  }
+  const bodyHash = await sha256Hex(canonicalize({ ...env, route: parsed.route, file: parsed.file ? await sha256Hex(parsed.file.bytes) : undefined } as unknown as Json));
+  let result;
+  try {
+    result = unwrap(await topicStub(c.env, env.topic).publish({
+      envelope: env,
+      caller,
+      autoCreateOwner: await autoCreateOwnerFor(c.env, caller.accountId, env.topic),
+      idempotencyKey: parsed.idempotencyKey,
+      bodyHash,
+      dryRun: parsed.dryRun,
+      attachmentBytes: parsed.file?.bytes.length,
+      route: parsed.route,
+    }));
+  } catch (e) {
+    if (fileId && !parsed.dryRun) await c.env.FILES!.delete(`att/${fileId}`);
+    throw e;
+  }
+  if (fileId && !parsed.dryRun) {
+    if (result.duplicate) await c.env.FILES!.delete(`att/${fileId}`);
+    else {
+      const meta = await topicStub(c.env, env.topic).getMeta();
+      await c.env.DB.prepare("INSERT INTO files (id, topic, owner_account_id, name, type, size, message_id, expires, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(fileId, env.topic, meta!.owner, parsed.file!.name, parsed.file!.type, parsed.file!.bytes.length, result.message.id, result.message.expires, Date.now()).run();
+    }
+  }
   if (result.created_topic) c.executionCtx.waitUntil(recordTopic(c.env, { name: env.topic, owner: caller.accountId!, policy: {}, created_at: Date.now() }));
   const headers = { "x-cost-micros": String(result.cost_micros), "x-message-id": result.message.id ?? "" };
   if (result.dry_run) return c.json({ dry_run: true, estimate_usd_micros: result.cost_micros, plan: result.plan, message: result.message }, 200, headers);
   return c.json(result.message, 200, result.duplicate ? { ...headers, "x-duplicate": "1" } : headers);
 }
+
+app.get("/file/:id/:name?", async (c) => {
+  const row = await c.env.DB.prepare("SELECT * FROM files WHERE id = ?").bind(c.req.param("id")).first<{ id: string; owner_account_id: string; name: string; type: string; expires: number }>();
+  if (!row || !c.env.FILES || row.expires < Math.floor(Date.now() / 1000)) throw new ApiError("not_found", "attachment expired or not found");
+  // Downloads are metered like any other request, paid by the topic owner.
+  const charge = await accountStub(c.env, row.owner_account_id).charge(actionPriceMicros(PRICES, "api_request"), `dl:${row.id}:${ulid()}`, null, {});
+  if (!charge.ok) throw new ApiError("insufficient_balance", "the topic owner's balance can't cover this download");
+  const obj = await c.env.FILES.get(`att/${row.id}`);
+  if (!obj) throw new ApiError("not_found");
+  const inline = /^(image|video|audio)\/|^text\/plain|^application\/pdf/.test(row.type);
+  return new Response(obj.body, { headers: {
+    "content-type": inline ? row.type : "application/octet-stream",
+    "content-disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(row.name)}`,
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; sandbox",
+    "cache-control": "private, max-age=3600",
+  } });
+});
 
 app.post("/", async (c) => {
   if (!(c.req.header("content-type") ?? "").includes("json") && !(await c.req.raw.clone().text()).trim().startsWith("{")) throw new ApiError("bad_request", "POST / expects a JSON message");

@@ -276,7 +276,11 @@ export class TopicDO extends DurableObject<Env> {
       nowMs,
       units: { sms: smsSegments(smsBody(env)), voice: voiceMinutes(renderText(env, 1500)) },
     });
-    const publishPrice = actionPriceMicros(PRICES, "publish", this.tier());
+    let publishPrice = actionPriceMicros(PRICES, "publish", this.tier());
+    if (input.attachmentBytes) {
+      const mbDays = (input.attachmentBytes / 1_048_576) * ((env.expires! - time) / 86400);
+      publishPrice += actionPriceMicros(PRICES, "attachment_upload", this.tier()) + Math.ceil(rentNanos(PRICES, "attachment_mb_day", mbDays, this.tier()) / 1000);
+    }
     const liveCost = plan.deliveries.filter((d) => d.after_s === 0 && d.transport === "ws").reduce((n, d) => n + d.cost_micros, 0);
     const queued = plan.deliveries.filter((d) => !(d.after_s === 0 && d.transport === "ws"));
     const retentionNanos = rentNanos(PRICES, "retention_message_day", (env.expires! - time) / 86400, this.tier());

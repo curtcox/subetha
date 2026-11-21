@@ -16,6 +16,7 @@ export async function runCron(cron: string, env: Env, now: number) {
     await meterRent(env, now);
     await reconcile(env, now);
     await checkTwilioPrices(env);
+    await deleteExpiredFiles(env, now);
   }
 }
 
@@ -80,4 +81,12 @@ export async function checkTwilioPrices(env: Env) {
   } catch (e) {
     console.error("twilio repricing failed", e);
   }
+}
+
+export async function deleteExpiredFiles(env: Env, now: number) {
+  if (!env.FILES) return;
+  const { results } = await env.DB.prepare("SELECT id FROM files WHERE expires < ? LIMIT 1000").bind(Math.floor(now / 1000)).all<{ id: string }>();
+  if (!results.length) return;
+  await env.FILES.delete(results.map((r) => `att/${r.id}`));
+  await env.DB.batch(results.map((r) => env.DB.prepare("DELETE FROM files WHERE id = ?").bind(r.id)));
 }

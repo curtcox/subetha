@@ -124,6 +124,8 @@ export interface PublishInput {
   idempotencyKey: string | null;
   bodyHash: string;
   dryRun: boolean;
+  /** Size of an attachment uploaded with this publish (charged upload + retention to the publisher). */
+  attachmentBytes?: number;
   route: { mode: RouteMode; maxCost: number | null; deny: Transport[]; allow: Transport[] | null };
 }
 
