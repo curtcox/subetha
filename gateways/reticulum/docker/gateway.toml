@@ -1,0 +1,12 @@
+# Default config baked into the container image. Mount your own at /config/gateway.toml.
+relay_url = "https://subetha.org"
+token_env = "SUBETHA_TOKEN"
+data_dir = "/data"
+reticulum_config_dir = "/config/reticulum"
+announce_interval = 1800
+delivery_method = "direct"
+health_port = 8080
+
+[[topics]]
+topic = "@example/lxmf"
+name = "SubEtha example"
