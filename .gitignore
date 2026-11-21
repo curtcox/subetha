@@ -12,3 +12,4 @@ __pycache__/
 .pytest_cache/
 site-build/
 .DS_Store
+.claude/worktrees/
