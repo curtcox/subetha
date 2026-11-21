@@ -82,8 +82,8 @@ pub fn is_device_id(s: &str) -> bool {
 
 /// Recovers the public key from a device id.
 ///
-/// Stricter than the TS reference: the id must be the *canonical* encoding (the 4 unused
-/// trailing bits of the last base32 character must be zero), so one key has exactly one id.
+/// The id must be the *canonical* encoding (spec §1.3: the 4 unused trailing bits of the
+/// last base32 character must be zero), so one key has exactly one id.
 pub fn public_key_from_device_id(id: &str) -> Result<[u8; 32], Error> {
     if !is_device_id(id) {
         return Err(Error::InvalidDeviceId);

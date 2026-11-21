@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use serde_json::{Map, Value};
 use subetha_core::canonical::{canonical_envelope, canonicalize, canonicalize_str};
-use subetha_core::e2ee::{decrypt_map, decrypt_signed_map, encrypt_map};
+use subetha_core::e2ee::{aad, decrypt_map, encrypt_map};
 use subetha_core::encoding::{base64url_encode, hex_decode, hex_encode};
 use subetha_core::envelope::validate_envelope;
 use subetha_core::sign::{sign_map, signing_input, verify_map, DeviceKey};
@@ -110,6 +110,14 @@ fn negative_signatures_fail() {
     for n in arr(&v, "negative") {
         assert!(!verify_map(obj(&n["envelope"])), "{} must fail", n["name"]);
     }
+    // Spec §1.3: non-canonical device ids are rejected outright.
+    let nc = arr(&v, "negative")
+        .iter()
+        .find(|n| n["name"].as_str().unwrap().starts_with("non-canonical sender"))
+        .expect("non-canonical sender vector");
+    let sender = nc["envelope"]["sender"].as_str().unwrap();
+    assert!(subetha_core::sign::is_device_id(sender));
+    assert!(subetha_core::sign::public_key_from_device_id(sender).is_err());
 }
 
 #[test]
@@ -122,9 +130,7 @@ fn e2ee_vectors() {
 
     let enc = encrypt_map(obj(&v["plaintext"]), &key, kid, Some(nonce)).unwrap();
     assert_eq!(Value::Object(enc.clone()), v["encrypted"], "ciphertext must match exactly");
-    let mut aad_env = enc.clone();
-    aad_env.remove("message");
-    assert_eq!(canonical_envelope(&aad_env).unwrap(), v["aad"].as_str().unwrap());
+    assert_eq!(aad(&enc).unwrap(), v["aad"].as_str().unwrap());
 
     let dec = decrypt_map(obj(&v["encrypted"]), &key).unwrap();
     assert_eq!(Value::Object(dec), v["plaintext"]);
@@ -136,21 +142,18 @@ fn e2ee_vectors() {
     let sigs = load("signatures.json");
     let k0 = DeviceKey::from_seed(&seed(&sigs["devices"][0]["seed"]));
     assert_eq!(Value::Object(sign_map(obj(&v["encrypted"]), &k0).unwrap()), *es);
+    // The AAD excludes sender and sig, so the signed form has the same AAD and decrypts.
+    assert_eq!(aad(obj(es)).unwrap(), v["aad"].as_str().unwrap());
 }
 
-/// Spec gap (reported, not a vector edit): §5 says signing happens after encryption, but the
-/// AAD is canonical(envelope minus message), which includes the `sender` that signing adds.
-/// So spec-exact decryption of `encrypted_signed` fails, in the TS reference too (its test
-/// never decrypts `encrypted_signed`). `decrypt_signed_map` is the tolerant workaround.
 #[test]
-fn e2ee_encrypted_signed_needs_sender_tolerant_decrypt() {
+fn e2ee_decrypted_signed() {
     let v = load("e2ee.json");
     let key = seed(&v["key"]);
-    let es = obj(&v["encrypted_signed"]);
-    assert!(decrypt_map(es, &key).is_none());
-    let dec = decrypt_signed_map(es, &key).unwrap();
-    let mut expected = obj(&v["plaintext"]).clone();
-    expected.insert("sender".into(), es["sender"].clone());
-    expected.insert("sig".into(), es["sig"].clone());
-    assert_eq!(dec, expected);
+    let dec = decrypt_map(obj(&v["encrypted_signed"]), &key).expect("encrypted_signed must decrypt");
+    assert_eq!(Value::Object(dec.clone()), v["decrypted_signed"]);
+    // sender and sig are kept as received.
+    assert_eq!(dec["sender"], v["encrypted_signed"]["sender"]);
+    assert_eq!(dec["sig"], v["encrypted_signed"]["sig"]);
+    assert!(dec.get("enc").is_none());
 }

@@ -3,8 +3,13 @@
 //! 1. Move the protected fields that are present (`title`, `message`, `attachment`, `click`,
 //!    `actions`, `content_type`) into a canonical JSON object `P`.
 //! 2. Drop any stale `sig`, set `enc = {alg, kid, nonce}`.
-//! 3. `ct = XChaCha20-Poly1305(key, nonce, P, aad = canonical(envelope without message))`.
+//! 3. `ct = XChaCha20-Poly1305(key, nonce, P, aad = A)`, where `A` is the canonical form of the
+//!    envelope with `enc` set and `message`, `sender`, `sig` and `hops` removed (`sender` is
+//!    excluded because signing, which adds it, happens after encryption).
 //! 4. `message = base64url(ct)`.
+//!
+//! Decryption restores the protected fields, removes `enc`, and leaves every other field
+//! (including `sender` and `sig`) as received.
 //!
 //! Mirrors `encryptEnvelope` / `decryptEnvelope` in the TS reference.
 
@@ -12,7 +17,7 @@ use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use serde_json::{json, Map, Value};
 
-use crate::canonical::{canonical_envelope, canonicalize};
+use crate::canonical::{canonical_object_without, canonicalize};
 use crate::encoding::{base64url_decode, base64url_encode};
 use crate::envelope::Envelope;
 use crate::random::random_bytes;
@@ -20,6 +25,14 @@ use crate::Error;
 
 pub const ALG: &str = "xchacha20poly1305";
 pub const PROTECTED_FIELDS: [&str; 6] = ["title", "message", "attachment", "click", "actions", "content_type"];
+/// Top-level fields excluded from the AAD (spec §5 step 4).
+pub const AAD_EXCLUDED_FIELDS: [&str; 4] = ["message", "sender", "sig", "hops"];
+
+/// The associated data for an envelope: its canonical form without `message`, `sender`,
+/// `sig` and `hops`.
+pub fn aad(env: &Map<String, Value>) -> Result<String, Error> {
+    canonical_object_without(env, &AAD_EXCLUDED_FIELDS)
+}
 
 /// A fresh random 32-byte topic key.
 pub fn generate_topic_key() -> [u8; 32] {
@@ -53,7 +66,7 @@ pub fn encrypt_map(env: &Map<String, Value>, key: &[u8; 32], kid: &str, nonce: O
     }
     out.remove("sig");
     out.insert("enc".into(), json!({"alg": ALG, "kid": kid, "nonce": base64url_encode(&nonce)}));
-    let aad = canonical_envelope(&out)?;
+    let aad = aad(&out)?;
     let pt = canonicalize(&Value::Object(prot))?;
     let ct = xchacha_seal(key, &nonce, pt.as_bytes(), aad.as_bytes())?;
     out.insert("message".into(), Value::String(base64url_encode(&ct)));
@@ -61,12 +74,8 @@ pub fn encrypt_map(env: &Map<String, Value>, key: &[u8; 32], kid: &str, nonce: O
 }
 
 /// Decrypts an envelope object. `None` if it isn't encrypted, the key is wrong, or it was
-/// tampered with.
-///
-/// Note (spec gap, reported): the AAD is the canonical envelope minus `message`, `sig` and
-/// `hops`, so a `sender` added by signing *after* encryption changes the AAD and decryption
-/// of a signed encrypted envelope fails unless the sender was set before encrypting. This
-/// function follows the spec and the TS reference exactly; see [`decrypt_signed_map`].
+/// tampered with. Works on envelopes signed after encryption: `sender` and `sig` are outside
+/// the AAD and are kept in the result.
 pub fn decrypt_map(env: &Map<String, Value>, key: &[u8; 32]) -> Option<Map<String, Value>> {
     let enc = env.get("enc")?.as_object()?;
     let message = env.get("message")?.as_str()?;
@@ -74,34 +83,16 @@ pub fn decrypt_map(env: &Map<String, Value>, key: &[u8; 32]) -> Option<Map<Strin
         return None;
     }
     let nonce: [u8; 24] = base64url_decode(enc.get("nonce")?.as_str()?).ok()?.try_into().ok()?;
+    let aad = aad(env).ok()?;
+    let pt = xchacha_open(key, &nonce, &base64url_decode(message).ok()?, aad.as_bytes())?;
     let mut rest = env.clone();
     rest.remove("message");
-    let aad = canonical_envelope(&rest).ok()?;
-    let pt = xchacha_open(key, &nonce, &base64url_decode(message).ok()?, aad.as_bytes())?;
     let prot: Value = serde_json::from_slice(&pt).ok()?;
     let mut out = rest;
     for (k, v) in prot.as_object()? {
         out.insert(k.clone(), v.clone());
     }
     out.remove("enc");
-    Some(out)
-}
-
-/// Decrypts an envelope that was encrypted and then signed: tries the spec AAD first, then
-/// the AAD without the `sender` that signing added. The result keeps `sender` and `sig`
-/// (the signature still covers the ciphertext form, not the decrypted one).
-pub fn decrypt_signed_map(env: &Map<String, Value>, key: &[u8; 32]) -> Option<Map<String, Value>> {
-    if let Some(m) = decrypt_map(env, key) {
-        return Some(m);
-    }
-    let mut stripped = env.clone();
-    let sender = stripped.remove("sender")?;
-    let sig = stripped.remove("sig");
-    let mut out = decrypt_map(&stripped, key)?;
-    out.insert("sender".into(), sender);
-    if let Some(s) = sig {
-        out.insert("sig".into(), s);
-    }
     Some(out)
 }
 
@@ -159,24 +150,28 @@ mod tests {
         assert_ne!(a["message"], b["message"]);
     }
 
+    fn nonce_of(env: &Map<String, Value>) -> [u8; 24] {
+        base64url_decode(env["enc"]["nonce"].as_str().unwrap()).unwrap().try_into().unwrap()
+    }
+
     #[test]
     fn encrypt_then_sign() {
         let key = generate_topic_key();
         let dk = DeviceKey::generate();
         let signed = sign_map(&encrypt_map(&plain(), &key, "k", None).unwrap(), &dk).unwrap();
         assert!(verify_map(&signed));
-        // Spec-exact decryption fails because `sender` joined the AAD after encryption ...
-        assert!(decrypt_map(&signed, &key).is_none());
-        // ... the tolerant helper recovers it.
-        let d = decrypt_signed_map(&signed, &key).unwrap();
-        assert_eq!(d["message"], json!("secret"));
-        assert_eq!(d["sender"], json!(dk.device_id()));
-        // Setting sender *before* encrypting makes the spec path work.
+        // `sender` and `sig` are outside the AAD, so the signed form decrypts and keeps them.
+        let d = decrypt_map(&signed, &key).unwrap();
+        let mut expected = plain();
+        expected.insert("sender".into(), json!(dk.device_id()));
+        expected.insert("sig".into(), signed["sig"].clone());
+        assert_eq!(d, expected);
+        // A sender set before encrypting is also outside the AAD.
         let mut p = plain();
         p.insert("sender".into(), json!(dk.device_id()));
-        let signed = sign_map(&encrypt_map(&p, &key, "k", None).unwrap(), &dk).unwrap();
-        assert!(verify_map(&signed));
-        assert!(decrypt_map(&signed, &key).is_some());
+        let enc = encrypt_map(&p, &key, "k", None).unwrap();
+        assert_eq!(aad(&enc).unwrap(), aad(&encrypt_map(&plain(), &key, "k", Some(nonce_of(&enc))).unwrap()).unwrap());
+        assert_eq!(decrypt_map(&enc, &key).unwrap(), p);
     }
 
     #[test]

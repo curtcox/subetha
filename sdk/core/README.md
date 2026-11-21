@@ -34,16 +34,14 @@ Signing and E2EE work on `serde_json::Map` (`sign_map`, `encrypt_map`, …), so 
 be lost or reordered. The typed `Envelope` wrappers (`sign_envelope`, `encrypt_envelope`, …)
 convert through the map form.
 
-## Differences from the TS reference
+## Notes
 
-- **Device ids must be canonical.** `public_key_from_device_id` rejects an id whose unused
-  trailing base32 bits are not zero. Otherwise up to 16 ids could alias one key and slip
-  past allow/deny lists keyed on the id string.
-- **Signature verification uses `verify_strict`.** It rejects small-order keys and
-  non-canonical signatures.
-- **Decrypting an envelope that was signed after encryption.** Signing adds `sender` to an
-  envelope that is already encrypted, so spec-exact decryption (`decrypt_map`) fails. This is
-  a spec gap that the TS reference shares. `decrypt_signed_map` retries without `sender`, and
-  the `ffi` decrypt uses it.
+- **Device ids must be canonical** (spec §1.3): `public_key_from_device_id` rejects an id
+  whose 4 unused trailing bits are not zero, so each key has exactly one id.
+- **Signature verification uses `verify_strict`**, the spec's SHOULD. It rejects small-order
+  keys and non-canonical signatures.
+- **E2EE AAD** (spec §5) is the canonical envelope without `message`, `sender`, `sig` and `hops`
+  (`e2ee::aad`). Envelopes signed after encryption therefore decrypt as-is, and `sender`/`sig`
+  are kept in the result.
 - **Integral non-integer literals are accepted.** `canonicalize` accepts `1.0`, `1e2` and
   `-0` as integers. This matches what the TS reference sees after `JSON.parse`.

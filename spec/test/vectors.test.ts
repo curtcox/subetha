@@ -61,6 +61,7 @@ describe("e2ee vectors", () => {
     expect(enc).toEqual(v.encrypted);
     expect(await decryptEnvelope(v.encrypted, hexDecode(v.key))).toEqual(v.plaintext);
     expect(await verifyEnvelope(v.encrypted_signed)).toBe(true);
+    expect(await decryptEnvelope(v.encrypted_signed, hexDecode(v.key))).toEqual(v.decrypted_signed);
     expect(validateSchema(v.encrypted_signed)).toBe(true);
   });
 });

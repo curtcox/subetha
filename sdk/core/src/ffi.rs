@@ -109,11 +109,11 @@ pub fn encrypt_envelope_json(envelope_json: String, key: Vec<u8>, kid: String) -
 }
 
 /// Decrypts an envelope; `None` if the key is wrong or the message was tampered with.
-/// Also accepts envelopes signed after encryption (see `e2ee::decrypt_signed_map`).
+/// `sender` and `sig` (outside the AAD) are kept as received.
 #[cfg_attr(feature = "uniffi", uniffi::export)]
 pub fn decrypt_envelope_json(envelope_json: String, key: Vec<u8>) -> Result<Option<String>, FfiError> {
     let m = parse_object(&envelope_json)?;
-    Ok(e2ee::decrypt_signed_map(&m, &key32(&key)?).map(|d| to_json(&d)))
+    Ok(e2ee::decrypt_map(&m, &key32(&key)?).map(|d| to_json(&d)))
 }
 
 #[cfg(test)]

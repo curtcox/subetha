@@ -117,6 +117,13 @@ pub fn canonical_envelope(env: &Map<String, Value>) -> Result<String, Error> {
     Ok(out)
 }
 
+/// Canonical form of an object with the given top-level fields removed.
+pub fn canonical_object_without(obj: &Map<String, Value>, skip: &[&str]) -> Result<String, Error> {
+    let mut out = String::new();
+    write_object(&mut out, obj, skip)?;
+    Ok(out)
+}
+
 /// Parses JSON text and canonicalizes it.
 pub fn canonicalize_str(json: &str) -> Result<String, Error> {
     let v: Value = serde_json::from_str(json).map_err(|e| Error::Canonical(e.to_string()))?;

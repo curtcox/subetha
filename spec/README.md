@@ -40,7 +40,10 @@ use them unchanged. Global (un-namespaced) names are **not** accepted in v0 (PLA
 ### 1.3 Device id
 `dev_` followed by the device's 32-byte Ed25519 public key in lowercase RFC 4648 base32 without
 padding (52 characters). The public key is recoverable from the id, so any relay, gateway, or
-edge peer can verify a signature without a lookup.
+edge peer can verify a signature without a lookup. The last character carries 4 unused bits,
+which MUST be zero: verifiers reject non-canonical ids so that each key has exactly one id.
+Verifiers SHOULD use strict Ed25519 verification (reject small-order keys and non-canonical
+signatures).
 
 ## 2. Envelope
 
@@ -93,12 +96,14 @@ Topic keys are 32 random bytes identified by a `kid` string. To encrypt:
 2. Serialize them as a canonical JSON object `P`.
 3. Remove them from the envelope, then set
    `enc = { "alg": "xchacha20poly1305", "kid": <kid>, "nonce": base64url(24 random bytes) }`.
-4. Compute `ct = XChaCha20-Poly1305(key, nonce, plaintext = P, aad = canonical(envelope_without_message))`
-   where the AAD envelope has `enc` set and no `message`.
+4. Compute `ct = XChaCha20-Poly1305(key, nonce, plaintext = P, aad = A)` where `A` is the canonical
+   form (§3) of the envelope with `enc` set and the fields `message`, `sender`, `sig`, and `hops`
+   removed. (`sender` is excluded because signing, which adds it, happens after encryption.)
 5. Set `message = base64url_nopad(ct)`.
 
 Relays route ciphertext and never see keys. Signing happens **after** encryption, so signatures
-cover the ciphertext.
+cover the ciphertext. Decryption restores the protected fields, removes `enc`, and leaves every
+other field (including `sender` and `sig`) as received.
 
 ## 6. Dedupe
 
