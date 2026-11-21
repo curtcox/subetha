@@ -22,9 +22,9 @@ pub mod encoding;
 pub mod envelope;
 // pub mod ffi;
 pub mod random;
-// pub mod routing;
+pub mod routing;
 pub mod sign;
-// pub mod store;
+pub mod store;
 pub mod topic;
 pub mod ulid;
 
