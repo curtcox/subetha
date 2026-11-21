@@ -67,7 +67,7 @@ const principal = async (c: C) => {
 
 app.get("/v1/health", (c) => c.json({ ok: true, environment: c.env.ENVIRONMENT, time: Math.floor(Date.now() / 1000) }));
 app.get("/v1/prices", (c) => c.json(PRICES));
-app.get("/v1/config", (c) => c.json({ environment: c.env.ENVIRONMENT, clerk_publishable_key: c.env.CLERK_PUBLISHABLE_KEY ?? null }));
+app.get("/v1/config", (c) => c.json({ environment: c.env.ENVIRONMENT, clerk_publishable_key: c.env.CLERK_PUBLISHABLE_KEY ?? null, vapid_public_key: c.env.VAPID_PUBLIC_KEY ?? null }));
 
 // ---------------- accounts ----------------
 app.get("/v1/account", async (c) => {
