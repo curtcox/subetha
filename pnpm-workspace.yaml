@@ -2,6 +2,9 @@ packages:
   - spec
   - pricing
   - sdk/js
+  - sdk/react-native
   - workers/*
   - apps/*
   - samples/*
+  # The Expo sample installs its own React Native toolchain (see samples/react-native/README.md).
+  - "!samples/react-native"
