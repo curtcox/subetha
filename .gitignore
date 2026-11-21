@@ -14,3 +14,10 @@ site-build/
 .DS_Store
 .claude/worktrees/
 apps/site/public/sdk.js
+
+# Generated docs site (pnpm --filter @subetha/site build)
+apps/site/public/docs/
+apps/site/public/llms.txt
+apps/site/public/llms-full.txt
+apps/site/public/openapi.yaml
+test-results/

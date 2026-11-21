@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header><a class="brand" href="/">SubEtha</a><nav><a href="/docs/">Docs</a><a href="/docs/pricing.html">Pricing</a><a href="/llms.txt">llms.txt</a><a href="https://github.com/curtcox/subetha">GitHub</a></nav><span class="spacer"></span><a href="/console/">Console →</a></header>
+<header><a class="brand" href="/">SubEtha</a><nav><a href="/docs/">Docs</a><a href="/docs/pricing.html">Pricing</a><a href="/docs/api.html">API</a><a href="/llms.txt">llms.txt</a><a href="https://github.com/curtcox/subetha">GitHub</a></nav><span class="spacer"></span><a href="/console/">Console →</a></header>
 <main>
   <h1>Messages between any devices, over any transport.</h1>
   <p class="muted">Publish to a topic. Every subscribed device gets it over whatever works — WebSocket, push, email, Slack, SMS, voice, MCP, Reticulum, Bluetooth, audio, or QR — without knowing who else is listening or how they're reached.</p>
@@ -20,6 +20,8 @@ se.subscribe("@me/door", (m) => console.log(m.message));
 await se.publish("@me/door", "opened");</pre></div>
     <div class="card"><h3>Prepaid, never surprising</h3><p>Top up a balance; every action is priced above its cost and checked before it runs. <code>X-Dry-Run: 1</code> shows the route and the price first. Edge transports (BLE, audio, QR, LAN) are free.</p></div>
   </div>
+  <p><a href="/docs/getting-started.html">Get started →</a> · <a href="/docs/agents.html">Connect an AI agent (MCP)</a> · <a href="/openapi.yaml">OpenAPI</a></p>
 </main>
+<footer class="site muted"><a href="/docs/legal/terms.html">Terms</a> · <a href="/docs/legal/privacy.html">Privacy</a> · <a href="/docs/legal/aup.html">Acceptable use</a> (drafts) · <a href="https://curtcox.github.io/subetha/build-info.html">Build info</a></footer>
 </body>
 </html>
