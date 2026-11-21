@@ -145,6 +145,10 @@ export class AccountDO extends DurableObject<Env> {
     });
   }
 
+  async trackTokenSpend(tokenId: string, amount: number, caps: Caps): Promise<ReserveResult> {
+    return this.tx(() => this.ledger.trackTokenSpend(tokenId, amount, caps));
+  }
+
   async settle(ref: string, actual: number) {
     return this.tx(() => this.ledger.settle(ref, actual));
   }
@@ -195,7 +199,7 @@ export class AccountDO extends DurableObject<Env> {
   }
 }
 
-export type AccountRpc = Pick<AccountDO, "balance" | "topup" | "charge" | "reserve" | "settle" | "release" | "lease" | "returnLease" | "adjust" | "entries" | "setAccountId" | "setAutoRecharge" | "autoRechargeFailed">;
+export type AccountRpc = Pick<AccountDO, "balance" | "topup" | "charge" | "reserve" | "settle" | "release" | "lease" | "returnLease" | "adjust" | "entries" | "setAccountId" | "setAutoRecharge" | "autoRechargeFailed" | "trackTokenSpend">;
 
 export function accountStub(env: Env, accountId: string): AccountRpc {
   return env.ACCOUNT.get(env.ACCOUNT.idFromName(accountId)) as unknown as AccountRpc;

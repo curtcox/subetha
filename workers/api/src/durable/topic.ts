@@ -20,6 +20,8 @@ const MAX_RETENTION_S = 30 * 86400;
 const ALARM_MS = 60_000;
 const KEEPALIVE_MS = 45_000;
 const MAX_BACKLOG = 1000;
+const MAX_CLOCK_SKEW_S = 300;
+const MAX_MESSAGE_AGE_S = 7 * 86400;
 
 interface Lease { ref: string; granted: number; remaining: number; at: number }
 type StreamFormat = "json" | "sse" | "raw";
@@ -127,8 +129,21 @@ export class TopicDO extends DurableObject<Env> {
     return "ok";
   }
 
+  /** Lease bookkeeping spans awaits (input gates stay open during RPC), so it is serialized. */
+  private moneyLock: Promise<unknown> = Promise.resolve();
+  private withMoney<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.moneyLock.then(fn, fn);
+    this.moneyLock = run.catch(() => {});
+    return run;
+  }
+
   /** Spend µ$ from the owner's credit leases, taking a new lease if needed. */
-  private async spendOwner(micros: number, nanos = 0): Promise<boolean> {
+  private spendOwner(micros: number, nanos = 0): Promise<boolean> {
+    if (!Number.isSafeInteger(micros) || micros < 0 || !Number.isFinite(nanos) || nanos < 0) throw new Error(`invalid spend: ${micros} µ$ ${nanos} n$`);
+    return this.withMoney(() => this.spendOwnerLocked(micros, Math.ceil(nanos)));
+  }
+
+  private async spendOwnerLocked(micros: number, nanos: number): Promise<boolean> {
     this.nanoDebt += nanos;
     const fromNanos = Math.floor(this.nanoDebt / 1000);
     const total = micros + fromNanos;
@@ -152,18 +167,24 @@ export class TopicDO extends DurableObject<Env> {
       need -= take;
       if (!need) break;
     }
+    if (need !== 0) throw new Error(`lease accounting error: ${need} µ$ unpaid`);
     this.nanoDebt -= fromNanos * 1000;
     this.persistMoney();
     await this.ensureAlarm();
     return true;
   }
 
-  private refundOwner(micros: number) {
-    const l = this.leases[this.leases.length - 1];
-    if (l) {
-      l.remaining = Math.min(l.granted, l.remaining + micros);
-      this.persistMoney();
+  /** Give back owner spend for an action that didn't happen (spread across leases, newest first). */
+  private refundOwner(micros: number, nanos = 0) {
+    let left = micros;
+    for (let i = this.leases.length - 1; i >= 0 && left > 0; i--) {
+      const l = this.leases[i]!;
+      const back = Math.min(left, l.granted - l.remaining);
+      l.remaining += back;
+      left -= back;
     }
+    this.nanoDebt -= Math.ceil(nanos);
+    this.persistMoney();
   }
 
   private async takeLease(min: number): Promise<boolean> {
@@ -176,22 +197,24 @@ export class TopicDO extends DurableObject<Env> {
     return true;
   }
 
-  private async returnLeases(all: boolean) {
-    if (!this.meta) return;
-    const now = Date.now();
-    const keep: Lease[] = [];
-    for (const l of this.leases) {
-      if (all || now - l.at > LEASE_IDLE_MS || l.remaining === 0) {
+  private returnLeases(all: boolean): Promise<void> {
+    return this.withMoney(async () => {
+      if (!this.meta) return;
+      const now = Date.now();
+      // Detach first, so nothing can spend from a lease while its return is in flight.
+      const out = this.leases.filter((l) => all || now - l.at > LEASE_IDLE_MS || l.remaining === 0);
+      this.leases = this.leases.filter((l) => !out.includes(l));
+      this.persistMoney();
+      for (const l of out) {
         try {
           await accountStub(this.env, this.meta.owner).returnLease(l.ref, l.remaining, `topic=${this.meta.name}`);
         } catch (e) {
           console.error("returnLease failed", e);
-          keep.push(l);
+          this.leases.push(l);
+          this.persistMoney();
         }
-      } else keep.push(l);
-    }
-    this.leases = keep;
-    this.persistMoney();
+      }
+    });
   }
 
   private async chargeCaller(caller: Caller, micros: number, ref: string): Promise<void> {
@@ -236,7 +259,9 @@ export class TopicDO extends DurableObject<Env> {
       if (env.sig === undefined) throw rpcError("signature_required");
       if (!(await verifyEnvelope(env))) throw rpcError("bad_signature");
     }
-    const signer: Caller = env.sender ? { ...caller, deviceId: env.sender as string } : caller;
+    const signed = env.sig !== undefined;
+    if (env.sender !== undefined && !signed) throw rpcError("invalid_message", "sender is only accepted on signed messages");
+    const signer: Caller = signed ? { ...caller, deviceId: env.sender as string } : caller;
     if (!this.canPublish(signer)) throw rpcError("forbidden", "not allowed to publish to this topic");
     const anonymous = caller.accountId === null;
 
@@ -250,23 +275,31 @@ export class TopicDO extends DurableObject<Env> {
       }
     }
 
-    // Finalize the envelope.
+    // Finalize the envelope. Times come from clients, so bound them: they drive retention charges.
     const nowMs = Date.now();
-    const time = env.time ?? Math.floor(nowMs / 1000);
+    const nowSec = Math.floor(nowMs / 1000);
+    if (env.time !== undefined && (env.time > nowSec + MAX_CLOCK_SKEW_S || env.time < nowSec - MAX_MESSAGE_AGE_S)) {
+      throw rpcError("invalid_message", "time must be within 5 minutes in the future and 7 days in the past");
+    }
+    if (env.expires !== undefined && env.expires <= nowSec) throw rpcError("invalid_message", "message has already expired");
+    const time = env.time ?? nowSec;
     const retention = Math.min(meta.policy.retention_s ?? DEFAULT_RETENTION_S, MAX_RETENTION_S);
-    env = {
-      ...env,
-      id: (env.id ?? ulid(nowMs)).toUpperCase(),
-      time,
-      event: "message",
-      expires: Math.min(env.expires ?? time + retention, time + retention),
-    };
-    if (env.priority === 3) delete env.priority;
+    // Storage expiry: never longer than the topic's retention from now.
+    const storeUntil = Math.min(env.expires ?? nowSec + retention, nowSec + retention);
+    if (signed || env.enc) {
+      // Signed or encrypted envelopes are delivered exactly as sent: any rewrite would break the
+      // signature or the E2EE associated data (event is outside both).
+      if (!env.id || env.time === undefined) throw rpcError("invalid_message", "signed and encrypted messages must carry id and time");
+      env = { ...env, event: "message" };
+    } else {
+      env = { ...env, id: (env.id ?? ulid(nowMs)).toUpperCase(), time, event: "message", expires: storeUntil };
+      if (env.priority === 3) delete env.priority;
+    }
 
     const apiPrice = actionPriceMicros(PRICES, "api_request", this.tier());
     const dup = this.messageById(env.id!);
     if (dup) {
-      if (anonymous) { if (!(await this.spendOwner(apiPrice))) throw rpcError("no_funded_owner"); }
+      if (anonymous) { this.anonRateLimit(nowMs); if (!(await this.spendOwnerCapped(apiPrice).then((r) => r === "ok"))) throw rpcError("no_funded_owner"); }
       else await this.chargeCaller(caller, apiPrice, `dup:${env.id}:${ulid()}`);
       return { message: dup, created_topic: created, duplicate: true, cost_micros: anonymous ? 0 : apiPrice, plan: [], dry_run: input.dryRun };
     }
@@ -286,19 +319,20 @@ export class TopicDO extends DurableObject<Env> {
       tier: this.tier(),
       nowMs,
       units: { sms: smsSegments(smsBody(env)), voice: voiceMinutes(renderText(env, 1500)) },
+      tags: env.tags ?? [],
     });
     let publishPrice = actionPriceMicros(PRICES, "publish", this.tier());
     if (input.attachmentBytes) {
-      const mbDays = (input.attachmentBytes / 1_048_576) * ((env.expires! - time) / 86400);
+      const mbDays = (input.attachmentBytes / 1_048_576) * ((storeUntil - nowSec) / 86400);
       publishPrice += actionPriceMicros(PRICES, "attachment_upload", this.tier()) + Math.ceil(rentNanos(PRICES, "attachment_mb_day", mbDays, this.tier()) / 1000);
     }
     const liveCost = plan.deliveries.filter((d) => d.after_s === 0 && d.transport === "ws").reduce((n, d) => n + d.cost_micros, 0);
     const queued = plan.deliveries.filter((d) => !(d.after_s === 0 && d.transport === "ws"));
-    const retentionNanos = rentNanos(PRICES, "retention_message_day", (env.expires! - time) / 86400, this.tier());
+    const retentionNanos = rentNanos(PRICES, "retention_message_day", (storeUntil - nowSec) / 86400, this.tier());
 
     if (input.dryRun) {
-      if (anonymous) { if (!(await this.spendOwner(apiPrice))) throw rpcError("no_funded_owner"); }
-      else await this.chargeCaller(caller, apiPrice, `dry:${env.id}`);
+      if (anonymous) throw rpcError("unauthorized", "dry runs need an account (they're charged as an API request)");
+      await this.chargeCaller(caller, apiPrice, `dry:${env.id}`);
       const estimate = publishPrice + plan.costMicros + Math.ceil(retentionNanos / 1000);
       return { message: env, created_topic: created, duplicate: false, cost_micros: estimate, plan: caller.accountId === meta.owner ? plan.deliveries : [], dry_run: true };
     }
@@ -306,10 +340,7 @@ export class TopicDO extends DurableObject<Env> {
     // Anonymous limits.
     let ownerCost = liveCost;
     if (anonymous) {
-      const minute = Math.floor(nowMs / 60000);
-      if (this.anonWindow.minute !== minute) this.anonWindow = { minute, count: 0 };
-      if (this.anonWindow.count >= (meta.policy.anon_rate_per_min ?? 60)) throw rpcError("rate_limited");
-      this.anonWindow.count++;
+      this.anonRateLimit(nowMs);
       ownerCost += publishPrice;
       const spentKey = `anon_spend:${today()}`;
       const spent = this.kvGet<number>(spentKey) ?? 0;
@@ -325,6 +356,12 @@ export class TopicDO extends DurableObject<Env> {
       throw rpcError("spend_cap_exceeded", "topic daily cap reached", { cap: "topic_daily" });
     }
 
+    // A token of the owner's own account is capped on everything it causes, not just the publish.
+    if (caller.tokenId && caller.accountId === meta.owner) {
+      const r = await accountStub(this.env, meta.owner).trackTokenSpend(caller.tokenId, ownerTotal + Math.ceil(retentionNanos / 1000), { tokenDaily: caller.caps.daily, tokenTotal: caller.caps.total });
+      if (!r.ok && r.code === "spend_cap_exceeded") throw rpcError("spend_cap_exceeded", `spend cap reached: ${r.cap}`, { cap: r.cap, remaining_usd_micros: r.remaining });
+    }
+
     // Pay: owner first (lease), then the publisher (direct, with token caps).
     if (!(await this.spendOwner(ownerCost, retentionNanos))) {
       throw rpcError(anonymous ? "no_funded_owner" : "insufficient_balance", "topic owner's balance cannot cover delivery", { payer: "topic_owner" });
@@ -333,7 +370,7 @@ export class TopicDO extends DurableObject<Env> {
       try {
         await this.chargeCaller(caller, publishPrice, `pub:${env.id}`);
       } catch (e) {
-        this.refundOwner(ownerCost);
+        this.refundOwner(ownerCost, retentionNanos);
         throw e;
       }
     }
@@ -342,7 +379,7 @@ export class TopicDO extends DurableObject<Env> {
     // Store and fan out.
     const json = JSON.stringify(env);
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec("INSERT INTO messages (id, time, expires, json) VALUES (?, ?, ?, ?)", env.id!, time, env.expires!, json);
+      this.sql.exec("INSERT INTO messages (id, time, expires, json) VALUES (?, ?, ?, ?)", env.id!, time, storeUntil, json);
       if (input.idempotencyKey) this.sql.exec("INSERT OR REPLACE INTO idem (key, body_hash, message_id, created) VALUES (?, ?, ?, ?)", input.idempotencyKey, input.bodyHash, env.id!, nowMs);
     });
     this.broadcast(env);
@@ -350,24 +387,38 @@ export class TopicDO extends DurableObject<Env> {
     // Queued (paid) transports: reserve per job; the delivery consumer settles.
     const jobs: { body: DeliveryJob; delaySeconds?: number }[] = [];
     const subs = new Map(this.queuedSubs().map((s) => [s.id, s]));
+    const owner = accountStub(this.env, meta.owner);
+    try {
     for (const d of queued) {
       const sub = subs.get(d.subscriber);
       if (!sub || !this.env.DELIVERY) continue;
-      const ref = `dlv:${env.id}:${sub.id}`;
+      const ref = `dlv:${env.id}:${sub.id}:${ulid()}`;
       const r = await accountStub(this.env, meta.owner).reserve(d.cost_micros, ref, null, {}, d.transport === "sms" || d.transport === "voice" ? "telephony" : null);
       if (!r.ok) {
-        this.trace(env.id!, {}, env.expires!);
+        this.trace(env.id!, {}, storeUntil);
         await this.recordDelivery(env.id!, { sub: sub.id, transport: d.transport, result: "not sent", error: r.code });
         continue;
       }
       jobs.push({ body: { topic: meta.name, owner: meta.owner, message: env, sub, reservation: { ref, micros: d.cost_micros }, attempt: 0 }, delaySeconds: d.after_s || undefined });
     }
     if (jobs.length && this.env.DELIVERY) await this.env.DELIVERY.sendBatch(jobs);
+    } catch (e) {
+      // Nothing was queued: give every reservation back rather than leaving it stranded.
+      for (const j of jobs) await owner.release(j.body.reservation.ref).catch(() => {});
+      await this.recordDelivery(env.id!, { result: "queue failed", error: String((e as Error).message ?? e) });
+    }
 
     const callerCost = (anonymous ? 0 : publishPrice) + (caller.accountId === meta.owner ? liveCost + queued.reduce((n, d) => n + d.cost_micros, 0) : 0);
-    this.trace(env.id!, { published: nowMs, plan: plan.deliveries, dropped: plan.dropped, cost_micros: { publish: publishPrice, live: liveCost, queued: queued.reduce((n, d) => n + d.cost_micros, 0), retention_nanos: retentionNanos }, publisher: caller.tokenId ?? caller.deviceId ?? caller.accountId ?? "anonymous" }, env.expires!);
+    this.trace(env.id!, { published: nowMs, plan: plan.deliveries, dropped: plan.dropped, cost_micros: { publish: publishPrice, live: liveCost, queued: queued.reduce((n, d) => n + d.cost_micros, 0), retention_nanos: retentionNanos }, publisher: caller.tokenId ?? caller.deviceId ?? caller.accountId ?? "anonymous" }, storeUntil);
     await this.ensureAlarm();
     return { message: env, created_topic: created, duplicate: false, cost_micros: callerCost, plan: caller.accountId === meta.owner ? plan.deliveries : [], dry_run: false };
+  }
+
+  private anonRateLimit(nowMs: number) {
+    const minute = Math.floor(nowMs / 60000);
+    if (this.anonWindow.minute !== minute) this.anonWindow = { minute, count: 0 };
+    if (this.anonWindow.count >= (this.meta?.policy.anon_rate_per_min ?? 60)) throw rpcError("rate_limited");
+    this.anonWindow.count++;
   }
 
   private messageById(id: string): Envelope | null {

@@ -26,7 +26,7 @@ use crate::Error;
 pub const ALG: &str = "xchacha20poly1305";
 pub const PROTECTED_FIELDS: [&str; 6] = ["title", "message", "attachment", "click", "actions", "content_type"];
 /// Top-level fields excluded from the AAD (spec §5 step 4).
-pub const AAD_EXCLUDED_FIELDS: [&str; 4] = ["message", "sender", "sig", "hops"];
+pub const AAD_EXCLUDED_FIELDS: [&str; 5] = ["message", "sender", "sig", "hops", "event"];
 
 /// The associated data for an envelope: its canonical form without `message`, `sender`,
 /// `sig` and `hops`.

@@ -124,7 +124,8 @@ export class Ledger {
   settle(ref: string, actual: number): { charged: number; released: number } {
     assertAmount(actual);
     const r = this.s.getReservation(ref);
-    if (!r) throw new Error(`unknown reservation ${ref}`);
+    // Already settled (e.g. a retried delivery job): settling twice is a no-op, never a charge.
+    if (!r) return { charged: 0, released: 0 };
     const charged = Math.min(actual, r.amount);
     const released = r.amount - charged;
     this.s.deleteReservation(ref);
@@ -153,6 +154,26 @@ export class Ledger {
       if (opts.once) this.s.addRef(`charge:${ref}`);
     }
     return r.ok ? { ok: true, available: this.available } : r;
+  }
+
+  /**
+   * Count spend that moves through leases or owner reservations against a token's caps,
+   * without moving money (money moves when the lease/reservation is taken).
+   */
+  trackTokenSpend(tokenId: string, amount: number, caps: Caps): ReserveResult {
+    assertAmount(amount);
+    const today = day(this.now());
+    if (caps.tokenDaily != null) {
+      const spent = this.s.getSpend(`t:${tokenId}`, today);
+      if (spent + amount > caps.tokenDaily) return { ok: false, code: "spend_cap_exceeded", cap: "token_daily", remaining: Math.max(0, caps.tokenDaily - spent) };
+    }
+    if (caps.tokenTotal != null) {
+      const spent = this.s.getSpend(`t:${tokenId}`, "total");
+      if (spent + amount > caps.tokenTotal) return { ok: false, code: "spend_cap_exceeded", cap: "token_total", remaining: Math.max(0, caps.tokenTotal - spent) };
+    }
+    this.s.addSpend(`t:${tokenId}`, today, amount);
+    this.s.addSpend(`t:${tokenId}`, "total", amount);
+    return { ok: true, available: this.available };
   }
 
   /**

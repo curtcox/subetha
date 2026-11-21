@@ -63,7 +63,7 @@ JSON. Rules beyond the schema:
 ## 3. Canonical form
 
 The canonical form of an envelope is used for signatures and E2EE associated data. It is the
-envelope with the fields `sig` and `hops` removed, serialized as JSON with:
+envelope with the fields `sig`, `hops`, and `event` removed (`event` is set by the relay), serialized as JSON with:
 
 1. object keys sorted by code point (ASCII keys, so byte order == UTF-16 order == RFC 8785 order);
 2. no insignificant whitespace;
@@ -82,7 +82,9 @@ sig = "ed25519:" + base64url_nopad( Ed25519_sign(device_sk, "subetha-sig-v1\n" |
 ```
 
 - `sender` MUST be set to the signer's device id, and it is covered by the signature.
-- `hops` is excluded so edge relays can decrement it.
+- `hops` is excluded so edge relays can decrement it, and `event` because the relay sets it.
+- Relays MUST NOT add, remove, or change any other field of a signed or encrypted envelope
+  (they track storage expiry separately instead of rewriting `expires`).
 - Verifiers derive the public key from `sender` (§1.3).
 - A topic policy may require signatures; the relay then rejects unsigned or badly signed
   messages with HTTP 401 `signature_required` / `bad_signature`.
@@ -97,8 +99,8 @@ Topic keys are 32 random bytes identified by a `kid` string. To encrypt:
 3. Remove them from the envelope, then set
    `enc = { "alg": "xchacha20poly1305", "kid": <kid>, "nonce": base64url(24 random bytes) }`.
 4. Compute `ct = XChaCha20-Poly1305(key, nonce, plaintext = P, aad = A)` where `A` is the canonical
-   form (§3) of the envelope with `enc` set and the fields `message`, `sender`, `sig`, and `hops`
-   removed. (`sender` is excluded because signing, which adds it, happens after encryption.)
+   form (§3) of the envelope with `enc` set and the fields `message`, `sender`, `sig`, `hops`, and
+   `event` removed. (`sender` is excluded because signing, which adds it, happens after encryption.)
 5. Set `message = base64url_nopad(ct)`.
 
 Relays route ciphertext and never see keys. Signing happens **after** encryption, so signatures
