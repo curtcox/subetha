@@ -3,12 +3,25 @@
 // POST /v1/endpoints {"kind": "webpush", "address": <returned string>}.
 import { base64urlDecode, base64urlEncode } from "./protocol/index.ts";
 
+// Structural types so the SDK type-checks outside the DOM (Workers, Node).
+interface PushSubscriptionLike {
+  options?: { applicationServerKey?: ArrayBuffer | null };
+  unsubscribe(): Promise<boolean>;
+  toJSON(): { endpoint?: string; keys?: Record<string, string> };
+}
+export interface ServiceWorkerRegistrationLike {
+  pushManager: {
+    getSubscription(): Promise<PushSubscriptionLike | null>;
+    subscribe(options: { userVisibleOnly: boolean; applicationServerKey: BufferSource }): Promise<PushSubscriptionLike>;
+  };
+}
+
 /**
  * Returns the PushSubscription JSON string ({endpoint, keys: {p256dh, auth}}). Reuses an existing
  * subscription made with the same key; replaces one made with a different key. Call it from a user
  * gesture so the browser can ask for notification permission.
  */
-export async function subscribeWebPush(registration: ServiceWorkerRegistration, vapidPublicKey: string): Promise<string> {
+export async function subscribeWebPush(registration: ServiceWorkerRegistrationLike, vapidPublicKey: string): Promise<string> {
   const key = base64urlDecode(vapidPublicKey);
   let sub = await registration.pushManager.getSubscription();
   const current = sub?.options?.applicationServerKey;
