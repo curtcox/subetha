@@ -138,8 +138,23 @@ app.post("/v1/account", async (c) => {
 
 app.patch("/v1/account", async (c) => {
   const id = requireAdmin(await principal(c));
-  const body = (await c.req.json()) as { handle?: string; daily_cap_micros?: number | null; paused?: boolean };
+  const body = (await c.req.json()) as { handle?: string; daily_cap_micros?: number | null; paused?: boolean; auto_recharge?: { threshold_usd: number; amount_usd: number } | null };
   const acct = await getAccount(c.env, id);
+  if (body.auto_recharge !== undefined) {
+    if (body.auto_recharge === null) {
+      await accountStub(c.env, id).setAutoRecharge(null);
+      await c.env.DB.prepare("UPDATE accounts SET auto_recharge = NULL WHERE id = ?").bind(id).run();
+    } else {
+      const customer = (acct as { stripe_customer_id?: string | null } | null)?.stripe_customer_id;
+      if (!customer) throw new ApiError("conflict", "top up once with save_card: true to store a card first");
+      const threshold = Math.round(Number(body.auto_recharge.threshold_usd) * 1e6), amount = Math.round(Number(body.auto_recharge.amount_usd) * 1e6);
+      try { topupSplit(PRICES, amount); } catch { throw new ApiError("bad_request", "amount_usd is outside the allowed top-up range"); }
+      if (!(threshold >= 0 && threshold < amount)) throw new ApiError("bad_request", "threshold_usd must be ≥ 0 and below amount_usd");
+      const cfg = { threshold_micros: threshold, amount_micros: amount };
+      await accountStub(c.env, id).setAutoRecharge({ ...cfg, customer });
+      await c.env.DB.prepare("UPDATE accounts SET auto_recharge = ? WHERE id = ?").bind(JSON.stringify(cfg), id).run();
+    }
+  }
   if (body.handle !== undefined) {
     if (acct?.handle) throw new ApiError("conflict", "handle can't be changed once set");
     await c.env.DB.prepare("UPDATE accounts SET handle = ? WHERE id = ?").bind(validateHandle(body.handle), id).run().catch((e) => {
@@ -168,7 +183,7 @@ app.get("/v1/ledger", async (c) => {
 // ---------------- billing ----------------
 app.post("/v1/billing/checkout", async (c) => {
   const id = requireAdmin(await principal(c));
-  const body = (await c.req.json()) as { amount_usd?: number; success_url?: string; cancel_url?: string };
+  const body = (await c.req.json()) as { amount_usd?: number; success_url?: string; cancel_url?: string; save_card?: boolean };
   const amountMicros = Math.round(Number(body.amount_usd) * 1e6);
   try {
     topupSplit(PRICES, amountMicros);
@@ -177,7 +192,7 @@ app.post("/v1/billing/checkout", async (c) => {
   }
   const acct = await getAccount(c.env, id);
   const base = c.env.BASE_URL;
-  const s = await createCheckoutSession(c.env, { accountId: id, amountMicros, successUrl: body.success_url ?? `${base}/console/#billing?ok=1`, cancelUrl: body.cancel_url ?? `${base}/console/#billing`, email: acct?.email });
+  const s = await createCheckoutSession(c.env, { accountId: id, amountMicros, successUrl: body.success_url ?? `${base}/console/#billing?ok=1`, cancelUrl: body.cancel_url ?? `${base}/console/#billing`, email: acct?.email, saveCard: !!body.save_card, customer: (acct as { stripe_customer_id?: string | null } | null)?.stripe_customer_id ?? null });
   return c.json({ id: s.id, url: s.url, ...topupSplit(PRICES, amountMicros) });
 });
 
@@ -198,8 +213,22 @@ app.post("/v1/hooks/stripe", async (c) => {
     await accountStub(c.env, accountId).topup(creditMicros, String(obj.id), `stripe amount=${amountMicros} fee=${feeMicros}`);
     await c.env.DB.batch([
       c.env.DB.prepare("INSERT INTO stripe_events (id, type, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?, ?)").bind(evt.id, evt.type, accountId, amountMicros, Date.now()),
-      c.env.DB.prepare("UPDATE accounts SET topups_12mo_micros = topups_12mo_micros + ? WHERE id = ?").bind(amountMicros, accountId),
+      c.env.DB.prepare("UPDATE accounts SET topups_12mo_micros = topups_12mo_micros + ?, stripe_customer_id = COALESCE(?, stripe_customer_id) WHERE id = ?").bind(amountMicros, typeof obj.customer === "string" ? obj.customer : null, accountId),
     ]);
+    await invalidateAccount(c.env, accountId);
+  } else if ((evt.type === "payment_intent.succeeded" || evt.type === "payment_intent.payment_failed") && (obj.metadata as Record<string, string> | undefined)?.auto_recharge === "1") {
+    const accountId = (obj.metadata as Record<string, string>).account_id!;
+    const amountMicros = Number(obj.amount) * 10_000;
+    if (evt.type === "payment_intent.succeeded") {
+      const { creditMicros, feeMicros } = topupSplit(PRICES, amountMicros);
+      await accountStub(c.env, accountId).topup(creditMicros, String(obj.id), `auto-recharge amount=${amountMicros} fee=${feeMicros}`);
+      await c.env.DB.prepare("UPDATE accounts SET topups_12mo_micros = topups_12mo_micros + ? WHERE id = ?").bind(amountMicros, accountId).run();
+    } else {
+      await accountStub(c.env, accountId).autoRechargeFailed("card declined");
+      await c.env.DB.prepare("UPDATE accounts SET auto_recharge = NULL WHERE id = ?").bind(accountId).run();
+      await audit(c.env, accountId, "stripe", "auto_recharge.failed", { pi: obj.id });
+    }
+    await c.env.DB.prepare("INSERT INTO stripe_events (id, type, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?, ?)").bind(evt.id, evt.type, accountId, amountMicros, Date.now()).run();
     await invalidateAccount(c.env, accountId);
   } else if (evt.type === "charge.dispute.created" || evt.type === "charge.refunded") {
     const accountId = ((obj.metadata as Record<string, string> | undefined)?.account_id) ?? null;

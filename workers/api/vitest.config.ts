@@ -17,6 +17,7 @@ export default defineConfig(async () => {
           bindings: {
             TEST_MIGRATIONS: migrations,
             STRIPE_WEBHOOK_SECRET: "whsec_test",
+            STRIPE_SECRET_KEY: "sk_test_x",
             ENVIRONMENT: "local",
             DEV_BOOTSTRAP_SECRET: "test-secret",
             CLERK_ISSUER: "https://clerk.test",
