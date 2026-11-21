@@ -1,0 +1,14 @@
+node_modules/
+dist/
+target/
+.wrangler/
+.dev.vars
+*.log
+.turbo/
+coverage/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+site-build/
+.DS_Store

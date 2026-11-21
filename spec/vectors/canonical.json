@@ -1,0 +1,98 @@
+{
+  "description": "Canonical JSON (spec §3). Valid inputs must serialize to `canonical`; invalid ones must be rejected.",
+  "valid": [
+    {
+      "name": "empty object",
+      "input": {},
+      "canonical": "{}"
+    },
+    {
+      "name": "key order",
+      "input": {
+        "1": 4,
+        "b": 2,
+        "a": 1,
+        "A": 0,
+        "_": 3
+      },
+      "canonical": "{\"1\":4,\"A\":0,\"_\":3,\"a\":1,\"b\":2}"
+    },
+    {
+      "name": "nested",
+      "input": {
+        "z": {
+          "y": [
+            3,
+            {
+              "b": null,
+              "a": "x"
+            }
+          ],
+          "x": true
+        },
+        "a": false
+      },
+      "canonical": "{\"a\":false,\"z\":{\"x\":true,\"y\":[3,{\"a\":\"x\"}]}}"
+    },
+    {
+      "name": "nulls dropped in objects, kept in arrays",
+      "input": {
+        "a": null,
+        "b": [
+          null,
+          1
+        ]
+      },
+      "canonical": "{\"b\":[null,1]}"
+    },
+    {
+      "name": "escapes",
+      "input": {
+        "s": "quote\" backslash\\ nl\n cr\r tab\t bs\b ff\f nul\u0000 us\u001f del"
+      },
+      "canonical": "{\"s\":\"quote\\\" backslash\\\\ nl\\n cr\\r tab\\t bs\\b ff\\f nul\\u0000 us\\u001f del\"}"
+    },
+    {
+      "name": "non-ascii raw",
+      "input": {
+        "s": "héllo 🚪 日本  "
+      },
+      "canonical": "{\"s\":\"héllo 🚪 日本  \"}"
+    },
+    {
+      "name": "integers",
+      "input": {
+        "a": 0,
+        "b": -1,
+        "c": 9007199254740991,
+        "d": -9007199254740991
+      },
+      "canonical": "{\"a\":0,\"b\":-1,\"c\":9007199254740991,\"d\":-9007199254740991}"
+    },
+    {
+      "name": "slash not escaped",
+      "input": {
+        "u": "https://subetha.org/@a/b"
+      },
+      "canonical": "{\"u\":\"https://subetha.org/@a/b\"}"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "float",
+      "input_json": "{\"a\":1.5}"
+    },
+    {
+      "name": "unsafe integer",
+      "input_json": "{\"a\":9007199254740993}"
+    },
+    {
+      "name": "exponent float",
+      "input_json": "{\"a\":1e-7}"
+    },
+    {
+      "name": "non-ascii key",
+      "input_json": "{\"é\":1}"
+    }
+  ]
+}

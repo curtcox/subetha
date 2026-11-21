@@ -1,0 +1,29 @@
+{
+  "description": "Topic grammar (spec §1.2).",
+  "valid": [
+    "@alice/doorbell",
+    "@a/b",
+    "@a1-b2/Name_with-dash",
+    "@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/x",
+    "@alice/nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+    "t_mfrggzdfmztwq2lknnwg23tpoa",
+    "t_aaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "invalid": [
+    "doorbell",
+    "@Alice/x",
+    "@alice-/x",
+    "@-alice/x",
+    "@alice",
+    "@alice/",
+    "@alice/a/b",
+    "@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/x",
+    "@alice/nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+    "t_MFRGGZDFMZTWQ2LKNNWG23TPOA",
+    "t_mfrggzdfmztwq2lknnwg23tpo",
+    "t_mfrggzdfmztwq2lknnwg23tpoa1",
+    "t_mfrggzdfmztwq2lknnwg23tp01",
+    "@alice/door bell",
+    ""
+  ]
+}

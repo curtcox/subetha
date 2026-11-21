@@ -1,0 +1,52 @@
+{
+  "description": "E2EE (spec §5). Encrypting `plaintext` with `key`, `kid`, and `nonce` must yield `encrypted` exactly; decrypting must restore `plaintext`. `encrypted_signed` is `encrypted` signed with signatures.devices[0].",
+  "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "kid": "topic-key-3",
+  "nonce": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7",
+  "nonce_b64": "oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3",
+  "plaintext": {
+    "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2Q",
+    "time": 1763750003,
+    "topic": "@alice/secret",
+    "title": "Vault",
+    "message": "The code is 1234",
+    "priority": 5,
+    "tags": [
+      "lock"
+    ],
+    "click": "https://example.com/x"
+  },
+  "aad": "{\"enc\":{\"alg\":\"xchacha20poly1305\",\"kid\":\"topic-key-3\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3\"},\"id\":\"01JD5A2Z3K8Q9V6X7W4T1R0S2Q\",\"priority\":5,\"tags\":[\"lock\"],\"time\":1763750003,\"topic\":\"@alice/secret\"}",
+  "encrypted": {
+    "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2Q",
+    "time": 1763750003,
+    "topic": "@alice/secret",
+    "priority": 5,
+    "tags": [
+      "lock"
+    ],
+    "enc": {
+      "alg": "xchacha20poly1305",
+      "kid": "topic-key-3",
+      "nonce": "oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3"
+    },
+    "message": "Ps5pcd4-z45bTUX9BUDQ-hSF-lTLa7q1eG7oiIqMhhT9pcdKNTUdq8DJVHTPXMoOxklCnPoBo4fLhTLeCw1Q9w8GihmO0Upr-BkmGFog88puafmujjDIgZkOj1FJrQ"
+  },
+  "encrypted_signed": {
+    "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2Q",
+    "time": 1763750003,
+    "topic": "@alice/secret",
+    "priority": 5,
+    "tags": [
+      "lock"
+    ],
+    "enc": {
+      "alg": "xchacha20poly1305",
+      "kid": "topic-key-3",
+      "nonce": "oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3"
+    },
+    "message": "Ps5pcd4-z45bTUX9BUDQ-hSF-lTLa7q1eG7oiIqMhhT9pcdKNTUdq8DJVHTPXMoOxklCnPoBo4fLhTLeCw1Q9w8GihmO0Upr-BkmGFog88puafmujjDIgZkOj1FJrQ",
+    "sender": "dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena",
+    "sig": "ed25519:9-zuifb4_MvIOYVr_AeRarNA618dHGt4uczKBGBNSiTZQfEyq_xNK-PgU2Acdbny7pcxBoUwHxQwL0mCN4VDDw"
+  }
+}

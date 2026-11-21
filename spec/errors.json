@@ -1,0 +1,21 @@
+{
+  "bad_request": { "http": 400, "description": "Malformed request." },
+  "invalid_topic": { "http": 400, "description": "Topic name does not match the topic grammar." },
+  "invalid_message": { "http": 400, "description": "Envelope failed validation." },
+  "message_too_large": { "http": 413, "description": "Message body exceeds 4096 bytes (use an attachment)." },
+  "unsupported": { "http": 400, "description": "Feature not supported in this version (e.g. X-Delay)." },
+  "unauthorized": { "http": 401, "description": "Missing or invalid credentials." },
+  "signature_required": { "http": 401, "description": "Topic policy requires a device signature." },
+  "bad_signature": { "http": 401, "description": "Signature does not verify against the sender id." },
+  "insufficient_balance": { "http": 402, "description": "Payer balance cannot cover the worst-case cost. Body carries shortfall_usd_micros." },
+  "no_funded_owner": { "http": 402, "description": "Anonymous publish to a topic with no funded owner." },
+  "forbidden": { "http": 403, "description": "Token scope or policy forbids this action." },
+  "spend_cap_exceeded": { "http": 403, "description": "A token, topic, or account spend cap would be exceeded." },
+  "transport_denied": { "http": 403, "description": "Policy leaves no allowed transport for a required delivery." },
+  "topic_paused": { "http": 403, "description": "Topic, device, or account kill switch is on." },
+  "not_found": { "http": 404, "description": "No such resource." },
+  "conflict": { "http": 409, "description": "Resource already exists or idempotency key reused with a different body." },
+  "rate_limited": { "http": 429, "description": "Rate or burst limit reached. Retry-After is set." },
+  "internal": { "http": 500, "description": "Unexpected error." },
+  "provider_unavailable": { "http": 503, "description": "An upstream provider is unavailable." }
+}

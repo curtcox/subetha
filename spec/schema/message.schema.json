@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://subetha.org/spec/v0/message.schema.json",
+  "title": "SubEtha message envelope (v0)",
+  "type": "object",
+  "required": ["topic"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$" },
+    "time": { "type": "integer", "minimum": 0 },
+    "expires": { "type": "integer", "minimum": 0 },
+    "event": { "enum": ["message", "open", "keepalive", "poll_request"] },
+    "topic": {
+      "type": "string",
+      "pattern": "^(@[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?/[A-Za-z0-9_-]{1,64}|t_[a-z2-7]{26})$"
+    },
+    "title": { "type": "string", "maxLength": 256 },
+    "message": { "type": "string", "maxLength": 4096 },
+    "priority": { "type": "integer", "minimum": 1, "maximum": 5 },
+    "tags": { "type": "array", "items": { "type": "string", "maxLength": 64 }, "maxItems": 16 },
+    "click": { "type": "string", "maxLength": 2048 },
+    "icon": { "type": "string", "maxLength": 2048 },
+    "actions": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["action", "label"],
+        "properties": {
+          "action": { "enum": ["view", "http", "broadcast"] },
+          "label": { "type": "string" },
+          "url": { "type": "string" },
+          "clear": { "type": "boolean" }
+        }
+      }
+    },
+    "attachment": {
+      "type": "object",
+      "required": ["name", "url"],
+      "properties": {
+        "name": { "type": "string" },
+        "url": { "type": "string" },
+        "size": { "type": "integer", "minimum": 0 },
+        "type": { "type": "string" },
+        "expires": { "type": "integer" }
+      }
+    },
+    "content_type": { "enum": ["text/plain", "text/markdown", "application/json", "application/octet-stream"] },
+    "sender": { "type": "string", "pattern": "^dev_[a-z2-7]{52}$" },
+    "sig": { "type": "string", "pattern": "^ed25519:[A-Za-z0-9_-]{86}$" },
+    "enc": {
+      "type": "object",
+      "required": ["alg", "kid", "nonce"],
+      "properties": {
+        "alg": { "const": "xchacha20poly1305" },
+        "kid": { "type": "string", "maxLength": 64 },
+        "nonce": { "type": "string", "pattern": "^[A-Za-z0-9_-]{32}$" }
+      }
+    },
+    "route": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["any", "fast", "all", "cheap"] },
+        "max_cost_usd_micros": { "type": "integer", "minimum": 0 },
+        "deny": { "type": "array", "items": { "$ref": "#/$defs/transport" } },
+        "allow": { "type": "array", "items": { "$ref": "#/$defs/transport" } },
+        "deadline_s": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "hops": { "type": "integer", "minimum": 0, "maximum": 16 }
+  },
+  "$defs": {
+    "transport": {
+      "enum": ["ws", "sse", "poll", "webpush", "apns", "fcm", "webhook", "email", "slack", "sms", "voice", "mcp", "lxmf", "ble", "audio", "qr", "lan"]
+    }
+  }
+}

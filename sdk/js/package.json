@@ -1,0 +1,24 @@
+{
+  "name": "@subetha/sdk",
+  "version": "0.0.1",
+  "description": "SubEtha TypeScript SDK: publish and subscribe over any transport.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./protocol": "./src/protocol/index.ts"
+  },
+  "bin": { "subetha": "./bin/subetha.js" },
+  "files": ["src", "bin", "dist"],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p .",
+    "build": "node scripts/build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
+    "@types/node": "^22.10.0"
+  }
+}

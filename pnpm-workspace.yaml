@@ -1,0 +1,7 @@
+packages:
+  - spec
+  - pricing
+  - sdk/js
+  - workers/*
+  - apps/*
+  - samples/*

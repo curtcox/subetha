@@ -1,0 +1,304 @@
+{
+  "description": "Device ids (spec §1.3) and Ed25519 envelope signatures (spec §4). `signed` must verify; signing `unsigned` with `seed` must yield `signed.sig` exactly. Changing `hops` must not affect verification. Every `negative` envelope must fail verification.",
+  "devices": [
+    {
+      "seed": "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "device_id": "dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena"
+    },
+    {
+      "seed": "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
+      "public_key": "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+      "device_id": "dev_hvabpq7iioevvevxbktu2g36xsojqlgpf3cjndgazvk7ckxumyga"
+    },
+    {
+      "seed": "0000000000000000000000000000000000000000000000000000000000000001",
+      "public_key": "4cb5abf6ad79fbf5abbccafcc269d85cd2651ed4b885b5869f241aedf0a5ba29",
+      "device_id": "dev_js22x5vnph57lk54zl6me2oyltjgkhwuxcc3lbu7eqno34ffxiuq"
+    }
+  ],
+  "cases": [
+    {
+      "seed": "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+      "unsigned": {
+        "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2M",
+        "time": 1763750000,
+        "topic": "@alice/doorbell",
+        "message": "Opened"
+      },
+      "canonical": "{\"id\":\"01JD5A2Z3K8Q9V6X7W4T1R0S2M\",\"message\":\"Opened\",\"sender\":\"dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena\",\"time\":1763750000,\"topic\":\"@alice/doorbell\"}",
+      "signing_input": "subetha-sig-v1\n{\"id\":\"01JD5A2Z3K8Q9V6X7W4T1R0S2M\",\"message\":\"Opened\",\"sender\":\"dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena\",\"time\":1763750000,\"topic\":\"@alice/doorbell\"}",
+      "signed": {
+        "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2M",
+        "time": 1763750000,
+        "topic": "@alice/doorbell",
+        "message": "Opened",
+        "sender": "dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena",
+        "sig": "ed25519:edb01vchjnHTmZNhS3g3eejbns6kqJy1qK5cZ90vxHwUXAwndp4UQqLNJa-ZnqmurVaGkq_9nBsqW-eMvsuEBQ"
+      }
+    },
+    {
+      "seed": "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
+      "unsigned": {
+        "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2N",
+        "time": 1763750001,
+        "expires": 1763836400,
+        "topic": "@alice/doorbell",
+        "title": "Front door",
+        "message": "Opened",
+        "priority": 4,
+        "tags": [
+          "door",
+          "warning"
+        ],
+        "hops": 2,
+        "route": {
+          "mode": "any",
+          "max_cost_usd_micros": 20000,
+          "deny": [
+            "sms"
+          ],
+          "deadline_s": 60
+        }
+      },
+      "canonical": "{\"expires\":1763836400,\"id\":\"01JD5A2Z3K8Q9V6X7W4T1R0S2N\",\"message\":\"Opened\",\"priority\":4,\"route\":{\"deadline_s\":60,\"deny\":[\"sms\"],\"max_cost_usd_micros\":20000,\"mode\":\"any\"},\"sender\":\"dev_hvabpq7iioevvevxbktu2g36xsojqlgpf3cjndgazvk7ckxumyga\",\"tags\":[\"door\",\"warning\"],\"time\":1763750001,\"title\":\"Front door\",\"topic\":\"@alice/doorbell\"}",
+      "signing_input": "subetha-sig-v1\n{\"expires\":1763836400,\"id\":\"01JD5A2Z3K8Q9V6X7W4T1R0S2N\",\"message\":\"Opened\",\"priority\":4,\"route\":{\"deadline_s\":60,\"deny\":[\"sms\"],\"max_cost_usd_micros\":20000,\"mode\":\"any\"},\"sender\":\"dev_hvabpq7iioevvevxbktu2g36xsojqlgpf3cjndgazvk7ckxumyga\",\"tags\":[\"door\",\"warning\"],\"time\":1763750001,\"title\":\"Front door\",\"topic\":\"@alice/doorbell\"}",
+      "signed": {
+        "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2N",
+        "time": 1763750001,
+        "expires": 1763836400,
+        "topic": "@alice/doorbell",
+        "title": "Front door",
+        "message": "Opened",
+        "priority": 4,
+        "tags": [
+          "door",
+          "warning"
+        ],
+        "hops": 2,
+        "route": {
+          "mode": "any",
+          "max_cost_usd_micros": 20000,
+          "deny": [
+            "sms"
+          ],
+          "deadline_s": 60
+        },
+        "sender": "dev_hvabpq7iioevvevxbktu2g36xsojqlgpf3cjndgazvk7ckxumyga",
+        "sig": "ed25519:twTi7Yssbt4QAEGn5ye-pxgVqkRfpUgRQjMnEJuMYioHXS2w5oCmt7RJTwzJwHJqQaBR-scUsFZVz91LCaTVBQ"
+      }
+    },
+    {
+      "seed": "0000000000000000000000000000000000000000000000000000000000000001",
+      "unsigned": {
+        "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2P",
+        "time": 1763750002,
+        "topic": "t_mfrggzdfmztwq2lknnwg23tpoa",
+        "message": "héllo 🚪\nline2",
+        "content_type": "text/plain",
+        "actions": [
+          {
+            "action": "view",
+            "label": "Open",
+            "url": "https://example.com"
+          }
+        ],
+        "x_future_field": {
+          "nested": [
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "canonical": "{\"actions\":[{\"action\":\"view\",\"label\":\"Open\",\"url\":\"https://example.com\"}],\"content_type\":\"text/plain\",\"id\":\"01JD5A2Z3K8Q9V6X7W4T1R0S2P\",\"message\":\"héllo 🚪\\nline2\",\"sender\":\"dev_js22x5vnph57lk54zl6me2oyltjgkhwuxcc3lbu7eqno34ffxiuq\",\"time\":1763750002,\"topic\":\"t_mfrggzdfmztwq2lknnwg23tpoa\",\"x_future_field\":{\"nested\":[1,2,3]}}",
+      "signing_input": "subetha-sig-v1\n{\"actions\":[{\"action\":\"view\",\"label\":\"Open\",\"url\":\"https://example.com\"}],\"content_type\":\"text/plain\",\"id\":\"01JD5A2Z3K8Q9V6X7W4T1R0S2P\",\"message\":\"héllo 🚪\\nline2\",\"sender\":\"dev_js22x5vnph57lk54zl6me2oyltjgkhwuxcc3lbu7eqno34ffxiuq\",\"time\":1763750002,\"topic\":\"t_mfrggzdfmztwq2lknnwg23tpoa\",\"x_future_field\":{\"nested\":[1,2,3]}}",
+      "signed": {
+        "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2P",
+        "time": 1763750002,
+        "topic": "t_mfrggzdfmztwq2lknnwg23tpoa",
+        "message": "héllo 🚪\nline2",
+        "content_type": "text/plain",
+        "actions": [
+          {
+            "action": "view",
+            "label": "Open",
+            "url": "https://example.com"
+          }
+        ],
+        "x_future_field": {
+          "nested": [
+            1,
+            2,
+            3
+          ]
+        },
+        "sender": "dev_js22x5vnph57lk54zl6me2oyltjgkhwuxcc3lbu7eqno34ffxiuq",
+        "sig": "ed25519:hdWcY5ubWrpP8tksv_hZQijPejU3ccsG76uPABHCrnwa0Vb685BM_ugyg3ZpmaH5v3Srtx7v-y9lQfwrmrsYBA"
+      }
+    }
+  ],
+  "hops_change": {
+    "envelope": {
+      "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2N",
+      "time": 1763750001,
+      "expires": 1763836400,
+      "topic": "@alice/doorbell",
+      "title": "Front door",
+      "message": "Opened",
+      "priority": 4,
+      "tags": [
+        "door",
+        "warning"
+      ],
+      "hops": 0,
+      "route": {
+        "mode": "any",
+        "max_cost_usd_micros": 20000,
+        "deny": [
+          "sms"
+        ],
+        "deadline_s": 60
+      },
+      "sender": "dev_hvabpq7iioevvevxbktu2g36xsojqlgpf3cjndgazvk7ckxumyga",
+      "sig": "ed25519:twTi7Yssbt4QAEGn5ye-pxgVqkRfpUgRQjMnEJuMYioHXS2w5oCmt7RJTwzJwHJqQaBR-scUsFZVz91LCaTVBQ"
+    },
+    "valid": true
+  },
+  "negative": [
+    {
+      "name": "tampered message",
+      "envelope": {
+        "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2N",
+        "time": 1763750001,
+        "expires": 1763836400,
+        "topic": "@alice/doorbell",
+        "title": "Front door",
+        "message": "Closed",
+        "priority": 4,
+        "tags": [
+          "door",
+          "warning"
+        ],
+        "hops": 2,
+        "route": {
+          "mode": "any",
+          "max_cost_usd_micros": 20000,
+          "deny": [
+            "sms"
+          ],
+          "deadline_s": 60
+        },
+        "sender": "dev_hvabpq7iioevvevxbktu2g36xsojqlgpf3cjndgazvk7ckxumyga",
+        "sig": "ed25519:twTi7Yssbt4QAEGn5ye-pxgVqkRfpUgRQjMnEJuMYioHXS2w5oCmt7RJTwzJwHJqQaBR-scUsFZVz91LCaTVBQ"
+      }
+    },
+    {
+      "name": "tampered priority",
+      "envelope": {
+        "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2N",
+        "time": 1763750001,
+        "expires": 1763836400,
+        "topic": "@alice/doorbell",
+        "title": "Front door",
+        "message": "Opened",
+        "priority": 5,
+        "tags": [
+          "door",
+          "warning"
+        ],
+        "hops": 2,
+        "route": {
+          "mode": "any",
+          "max_cost_usd_micros": 20000,
+          "deny": [
+            "sms"
+          ],
+          "deadline_s": 60
+        },
+        "sender": "dev_hvabpq7iioevvevxbktu2g36xsojqlgpf3cjndgazvk7ckxumyga",
+        "sig": "ed25519:twTi7Yssbt4QAEGn5ye-pxgVqkRfpUgRQjMnEJuMYioHXS2w5oCmt7RJTwzJwHJqQaBR-scUsFZVz91LCaTVBQ"
+      }
+    },
+    {
+      "name": "wrong sender",
+      "envelope": {
+        "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2N",
+        "time": 1763750001,
+        "expires": 1763836400,
+        "topic": "@alice/doorbell",
+        "title": "Front door",
+        "message": "Opened",
+        "priority": 4,
+        "tags": [
+          "door",
+          "warning"
+        ],
+        "hops": 2,
+        "route": {
+          "mode": "any",
+          "max_cost_usd_micros": 20000,
+          "deny": [
+            "sms"
+          ],
+          "deadline_s": 60
+        },
+        "sender": "dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena",
+        "sig": "ed25519:twTi7Yssbt4QAEGn5ye-pxgVqkRfpUgRQjMnEJuMYioHXS2w5oCmt7RJTwzJwHJqQaBR-scUsFZVz91LCaTVBQ"
+      }
+    },
+    {
+      "name": "sig removed",
+      "envelope": {
+        "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2N",
+        "time": 1763750001,
+        "expires": 1763836400,
+        "topic": "@alice/doorbell",
+        "title": "Front door",
+        "message": "Opened",
+        "priority": 4,
+        "tags": [
+          "door",
+          "warning"
+        ],
+        "hops": 2,
+        "route": {
+          "mode": "any",
+          "max_cost_usd_micros": 20000,
+          "deny": [
+            "sms"
+          ],
+          "deadline_s": 60
+        },
+        "sender": "dev_hvabpq7iioevvevxbktu2g36xsojqlgpf3cjndgazvk7ckxumyga"
+      }
+    },
+    {
+      "name": "truncated sig",
+      "envelope": {
+        "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2N",
+        "time": 1763750001,
+        "expires": 1763836400,
+        "topic": "@alice/doorbell",
+        "title": "Front door",
+        "message": "Opened",
+        "priority": 4,
+        "tags": [
+          "door",
+          "warning"
+        ],
+        "hops": 2,
+        "route": {
+          "mode": "any",
+          "max_cost_usd_micros": 20000,
+          "deny": [
+            "sms"
+          ],
+          "deadline_s": 60
+        },
+        "sender": "dev_hvabpq7iioevvevxbktu2g36xsojqlgpf3cjndgazvk7ckxumyga",
+        "sig": "ed25519:twTi7Yssbt4QAEGn5ye-pxgVqkRfpUgRQjMnEJuMYi"
+      }
+    }
+  ]
+}
