@@ -13,7 +13,7 @@ import { parseFilter, parseHeaderPublish, parseJsonPublish, parseTopicPath, type
 import { createCheckoutSession, verifyStripeSignature } from "./stripe.ts";
 import type { Env, Principal, TopicMeta } from "./types.ts";
 import { registerControlRoutes } from "./control.ts";
-import { registerMcp } from "./mcp.ts";
+import { mcpChallenge, registerMcp } from "./mcp.ts";
 
 const PRICES = prices as unknown as PriceTable;
 type C = Context<{ Bindings: Env; Variables: { principal: Principal } }>;
@@ -27,7 +27,14 @@ app.onError((err, c) => {
   } catch (revived) {
     e = revived;
   }
-  if (e instanceof ApiError) return e.toResponse(e.code === "rate_limited" ? { "retry-after": "60" } : {});
+  if (e instanceof ApiError) {
+    const headers: Record<string, string> = e.code === "rate_limited" ? { "retry-after": "60" } : {};
+    // MCP clients discover the authorization server from this challenge (RFC 9728), and
+    // error="invalid_token" tells an OAuth client to refresh or sign in again.
+    const url = new URL(c.req.url);
+    if (e.code === "unauthorized" && url.pathname === "/mcp") headers["www-authenticate"] = mcpChallenge(url.origin, c.req.header("authorization") ? "invalid_token" : undefined);
+    return e.toResponse(headers);
+  }
   console.error(e);
   return new ApiError("internal").toResponse();
 });
@@ -121,7 +128,7 @@ app.get("/v1/account", async (c) => {
   const acct = await getAccount(c.env, id);
   if (!acct) throw new ApiError("not_found");
   const bal = await accountStub(c.env, id).balance();
-  return c.json({ id: acct.id, handle: acct.handle, email: acct.email, tier: tierFor(PRICES, acct.topups_12mo_micros), balance_usd_micros: bal.available, reserved_usd_micros: bal.reserved, created_at: acct.created_at });
+  return c.json({ id: acct.id, handle: acct.handle, email: acct.email, tier: tierFor(PRICES, acct.topups_12mo_micros), balance_usd_micros: bal.available, reserved_usd_micros: bal.reserved, daily_cap_micros: acct.daily_cap_micros, oauth_daily_cap_micros: acct.oauth_daily_cap_micros ?? null, paused: !!acct.paused, created_at: acct.created_at });
 });
 
 app.post("/v1/account", async (c) => {
@@ -138,7 +145,7 @@ app.post("/v1/account", async (c) => {
 
 app.patch("/v1/account", async (c) => {
   const id = requireAdmin(await principal(c));
-  const body = (await c.req.json()) as { handle?: string; daily_cap_micros?: number | null; paused?: boolean; auto_recharge?: { threshold_usd: number; amount_usd: number } | null };
+  const body = (await c.req.json()) as { handle?: string; daily_cap_micros?: number | null; oauth_daily_cap_micros?: number | null; paused?: boolean; auto_recharge?: { threshold_usd: number; amount_usd: number } | null };
   const acct = await getAccount(c.env, id);
   if (body.auto_recharge !== undefined) {
     if (body.auto_recharge === null) {
@@ -163,6 +170,11 @@ app.patch("/v1/account", async (c) => {
   }
   if (body.daily_cap_micros !== undefined) await c.env.DB.prepare("UPDATE accounts SET daily_cap_micros = ? WHERE id = ?").bind(body.daily_cap_micros, id).run();
   if (body.paused !== undefined) await c.env.DB.prepare("UPDATE accounts SET paused = ? WHERE id = ?").bind(body.paused ? 1 : 0, id).run();
+  if (body.oauth_daily_cap_micros !== undefined) {
+    const v = body.oauth_daily_cap_micros;
+    if (v !== null && !(Number.isInteger(v) && v >= 0)) throw new ApiError("bad_request", "oauth_daily_cap_micros must be a non-negative integer or null");
+    await c.env.DB.prepare("UPDATE accounts SET oauth_daily_cap_micros = ? WHERE id = ?").bind(v, id).run();
+  }
   if (body.daily_cap_micros !== undefined || body.paused !== undefined) {
     const row = await c.env.DB.prepare("SELECT paused, daily_cap_micros FROM accounts WHERE id = ?").bind(id).first<{ paused: number; daily_cap_micros: number | null }>();
     await accountStub(c.env, id).setControls({ paused: !!row?.paused, dailyCapMicros: row?.daily_cap_micros ?? null });

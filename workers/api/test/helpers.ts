@@ -22,12 +22,12 @@ export async function balance(token: string): Promise<number> {
   return ((await r.json()) as { available_usd_micros: number }).available_usd_micros;
 }
 
-export async function clerkJwt(sub: string, opts: { exp?: number; iss?: string } = {}): Promise<string> {
+export async function clerkJwt(sub: string, opts: { exp?: number; iss?: string; typ?: string; claims?: Record<string, unknown> } = {}): Promise<string> {
   const jwk = JSON.parse((env as unknown as { TEST_CLERK_PRIVATE_JWK: string }).TEST_CLERK_PRIVATE_JWK);
   const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
   const enc = (o: unknown) => base64urlEncode(utf8.encode(JSON.stringify(o)));
-  const head = enc({ alg: "RS256", kid: "test-kid", typ: "JWT" });
-  const body = enc({ sub, iss: opts.iss ?? "https://clerk.test", exp: opts.exp ?? Math.floor(Date.now() / 1000) + 600, iat: Math.floor(Date.now() / 1000) });
+  const head = enc({ alg: "RS256", kid: "test-kid", typ: opts.typ ?? "JWT" });
+  const body = enc({ sub, iss: opts.iss ?? "https://clerk.test", exp: opts.exp ?? Math.floor(Date.now() / 1000) + 600, iat: Math.floor(Date.now() / 1000), ...opts.claims });
   const sig = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, utf8.encode(`${head}.${body}`)));
   return `${head}.${body}.${base64urlEncode(sig)}`;
 }

@@ -17,25 +17,43 @@ async function getJwks(env: Env): Promise<Jwk[]> {
   return keys;
 }
 
-export interface ClerkClaims { sub: string; iss: string; exp: number; nbf?: number; azp?: string; org_id?: string; email?: string }
+export interface ClerkClaims {
+  sub: string;
+  iss: string;
+  exp: number;
+  nbf?: number;
+  azp?: string;
+  org_id?: string;
+  email?: string;
+  /** OAuth access tokens (RFC 9068): the client the token was issued to, its scopes, and audience. */
+  client_id?: string;
+  scope?: string;
+  aud?: string | string[];
+  /** JOSE header `typ` (`at+jwt` for OAuth access tokens). */
+  typ?: string;
+}
+
+/** An OAuth access token (for an MCP client or other OAuth app), as opposed to a browser session. */
+export const isOAuthAccessToken = (c: ClerkClaims) => c.typ?.toLowerCase() === "at+jwt" || typeof c.client_id === "string";
 
 /** Returns verified claims, or null if the token is not a valid Clerk session for this instance. */
 export async function verifyClerkJwt(token: string, env: Env, nowSec = Math.floor(Date.now() / 1000)): Promise<ClerkClaims | null> {
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   try {
-    const header = b64urlJson<{ alg: string; kid: string }>(parts[0]!);
+    const header = b64urlJson<{ alg: string; kid: string; typ?: string }>(parts[0]!);
     if (header.alg !== "RS256") return null;
     const jwk = (await getJwks(env)).find((k) => k.kid === header.kid);
     if (!jwk) return null;
     const key = await crypto.subtle.importKey("jwk", { kty: "RSA", n: jwk.n, e: jwk.e, alg: "RS256", ext: true }, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
     const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, base64urlDecode(parts[2]!) as BufferSource, utf8.encode(`${parts[0]}.${parts[1]}`) as BufferSource);
     if (!ok) return null;
-    const claims = b64urlJson<ClerkClaims>(parts[1]!);
+    const claims: ClerkClaims = { ...b64urlJson<ClerkClaims>(parts[1]!), typ: header.typ };
     if (env.CLERK_ISSUER && claims.iss !== env.CLERK_ISSUER) return null;
     if (typeof claims.exp !== "number" || claims.exp < nowSec - 5) return null;
     if (claims.nbf && claims.nbf > nowSec + 5) return null;
-    if (env.CLERK_AUTHORIZED_PARTIES && claims.azp && !env.CLERK_AUTHORIZED_PARTIES.split(",").includes(claims.azp)) return null;
+    // azp is the browser origin of a session; OAuth access tokens are bound by audience instead (oauth.ts).
+    if (!isOAuthAccessToken(claims) && env.CLERK_AUTHORIZED_PARTIES && claims.azp && !env.CLERK_AUTHORIZED_PARTIES.split(",").includes(claims.azp)) return null;
     return claims;
   } catch {
     return null;

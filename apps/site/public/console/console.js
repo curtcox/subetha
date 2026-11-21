@@ -209,7 +209,20 @@ $("tokCreate").onclick = async () => {
   } catch (e) { out.textContent = `${e.code}: ${e.message}`; }
 };
 
+const toUsdInput = (micros) => (micros == null ? "" : String(micros / 1e6));
+const fromUsdInput = (v) => (v.trim() === "" ? null : Math.round(Number(v) * 1e6));
+$("capSave").onclick = async () => {
+  try {
+    await client.request("PATCH", "/v1/account", { daily_cap_micros: fromUsdInput($("capDaily").value), oauth_daily_cap_micros: fromUsdInput($("capOauth").value), paused: $("capPaused").checked });
+    me = await client.account();
+    $("capMsg").textContent = "Saved.";
+  } catch (e) { $("capMsg").textContent = `${e.code}: ${e.message}`; }
+};
+
 async function loadBilling() {
+  $("capDaily").value = toUsdInput(me.daily_cap_micros);
+  $("capOauth").value = toUsdInput(me.oauth_daily_cap_micros);
+  $("capPaused").checked = !!me.paused;
   const [{ entries }, prices] = await Promise.all([client.ledger(), client.prices()]);
   $("ledgerRows").innerHTML = entries.slice().reverse().map((e) => `<tr><td>${e.seq}</td><td>${e.kind}</td><td>${usd(e.amount)}</td><td>${usd(e.available_after)}</td><td><code>${esc(e.ref)}</code></td><td>${new Date(e.time).toLocaleString()}</td></tr>`).join("");
   $("priceTable").innerHTML = `<table>${Object.entries(prices.skus).map(([id, s]) => `<tr><td>${esc(s.description)}</td><td>$${(s.price_nanos.standard / 1e9).toPrecision(3)} / ${esc(s.unit)}</td></tr>`).join("")}</table>`;

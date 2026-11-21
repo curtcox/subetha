@@ -46,6 +46,11 @@ instance, a separate Firebase project) for staging.
 | `CLERK_JWKS_URL` | `<issuer>/.well-known/jwks.json`. |
 | `CLERK_AUTHORIZED_PARTIES` | Comma-separated origins allowed as the JWT `azp`, e.g. `https://subetha.org`. |
 | `CLERK_JWKS` | Inline JWKS JSON. Tests and local development only. |
+| `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` | Optional. Credentials the relay uses to introspect **opaque** OAuth access tokens (RFC 7662) from MCP clients. Create them for the relay in Clerk (Configure → OAuth applications). Without them, only JWT access tokens are accepted. |
+| `OAUTH_INTROSPECTION_URL` | Optional. Defaults to `<CLERK_ISSUER>/oauth/token_info`. |
+
+For "Sign in with OAuth" in MCP clients, also enable dynamic client registration for OAuth
+applications in the Clerk dashboard, so clients can register themselves.
 
 ### Payments (Stripe)
 

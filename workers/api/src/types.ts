@@ -23,6 +23,10 @@ export interface Env {
   CLERK_JWKS_URL?: string;
   CLERK_JWKS?: string; // inline JWKS JSON (local/test)
   CLERK_AUTHORIZED_PARTIES?: string; // comma-separated
+  // OAuth resource server (MCP): RFC 7662 introspection of opaque access tokens (oauth.ts)
+  OAUTH_INTROSPECTION_URL?: string; // default ${CLERK_ISSUER}/oauth/token_info
+  OAUTH_CLIENT_ID?: string;
+  OAUTH_CLIENT_SECRET?: string;
   // Stripe
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;

@@ -175,7 +175,15 @@
           <p class="muted">Prepaid balance, no subscription. A top-up fee covers card processing.</p>
           <div class="row"><input id="topupAmt" type="number" value="10" min="5" step="1"><button id="topupBtn">Pay with Stripe</button></div>
         </div>
-        <div class="card"><h3>Pricing</h3><div id="priceTable" class="muted">Loading…</div></div>
+        <div class="card"><h3>Pricing</h3><div id="priceTable" class="muted">Loading…</div><p><a href="/tools/pricing.html">Pricing calculator →</a></p></div>
+        <div class="card">
+          <h3>Limits</h3>
+          <label for="capDaily">Account daily cap (USD, blank = none)</label><input id="capDaily" type="number" min="0" step="0.01">
+          <label for="capOauth">Per OAuth client per day (USD, blank = $1, 0 = off)</label><input id="capOauth" type="number" min="0" step="0.01">
+          <small class="muted">For MCP clients that sign in with OAuth instead of using a token.</small>
+          <label><input id="capPaused" type="checkbox" style="width:auto"> Pause the account (kill switch)</label>
+          <p><button id="capSave">Save limits</button> <span id="capMsg" class="muted"></span></p>
+        </div>
       </div>
       <div class="card"><h3>Ledger</h3><table><thead><tr><th>#</th><th>Kind</th><th>Amount</th><th>Available after</th><th>Ref</th><th>Time</th></tr></thead><tbody id="ledgerRows"></tbody></table></div>
     </section>

@@ -1,6 +1,7 @@
 // Request authentication: API tokens, Clerk session JWTs, anonymous (PLAN §9).
 import { TRANSPORTS, type Transport } from "@subetha/sdk/protocol";
 import { verifyClerkJwt } from "./clerk.ts";
+import { fromJwt, introspect, introspectionConfigured, oauthPrincipal } from "./oauth.ts";
 import { authenticateDevice } from "./devices.ts";
 import { randomBase32, sha256Hex, timingSafeEqual } from "./crypto.ts";
 import { ApiError } from "./errors.ts";
@@ -101,9 +102,17 @@ export async function authenticate(req: Request, env: Env): Promise<Principal> {
   if (cred.startsWith("eyJ")) {
     const claims = await verifyClerkJwt(cred, env);
     if (!claims) throw new ApiError("unauthorized", "invalid session");
+    const oauth = fromJwt(claims);
+    if (oauth) return await oauthPrincipal(env, oauth, new URL(req.url).origin);
     const clerkId = claims.org_id ?? claims.sub;
     const row = await env.DB.prepare("SELECT id FROM accounts WHERE clerk_id = ?").bind(clerkId).first<{ id: string }>();
     return { kind: "user", accountId: row?.id ?? null, clerkId };
+  }
+  // Anything else may be an opaque OAuth access token from the authorization server.
+  if (introspectionConfigured(env) && /^[\x21-\x7e]{16,4096}$/.test(cred)) {
+    const t = await introspect(env, cred);
+    if (!t) throw new ApiError("unauthorized", "invalid or expired access token");
+    return await oauthPrincipal(env, t, new URL(req.url).origin);
   }
   throw new ApiError("unauthorized", "unrecognized credential");
 }

@@ -31,11 +31,29 @@ Clients that read an `mcp.json` (or similar) configuration:
 
 <!-- include: samples/mcp/mcp.json -->
 
-Give the agent its **own token**: scoped to the topics it needs, with a daily cap and no
-`sms`/`voice` unless you mean it. For example
+There are two ways to authenticate.
+
+**An API token (recommended for unattended agents).** Give the agent its own token: scoped to
+the topics it needs, with a daily cap and no `sms`/`voice` unless you mean it. For example
 `{"scopes": ["publish:@me/agent-out", "subscribe:@me/agent-in"], "daily_cap_usd": 0.5}`.
-Unauthenticated requests get a 401 whose `WWW-Authenticate` header points at
-`/.well-known/oauth-protected-resource` (RFC 9728).
+
+**Sign in with OAuth.** MCP clients that support the
+[MCP authorization spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
+can connect with no token at all. An unauthenticated request gets a 401 whose
+`WWW-Authenticate` header points at `/.well-known/oauth-protected-resource` (RFC 9728); that
+names SubEtha's authorization server (Clerk), where you sign in with your SubEtha login and
+approve the client. The client then sends the access token it got as a bearer token.
+
+An OAuth-connected client is deliberately limited:
+
+- It can **publish and subscribe** on your topics (so `publish`, `poll`, `wait_for_message`, and
+  `estimate_cost` work), but not manage the account: `list_topics`, `create_topic`, tokens,
+  endpoints, and billing need an admin token.
+- Each client has its own **daily spend cap**: $1 by default. Change it, or set it to 0 to turn
+  OAuth access off, with `PATCH /v1/account {"oauth_daily_cap_micros": 5000000}` or in the
+  console's Billing tab.
+- A token that names an audience must name this server (`https://subetha.org/mcp`); one issued
+  for another resource gets `401` with `error="invalid_token"`, as does an expired one.
 
 ### On the wire
 

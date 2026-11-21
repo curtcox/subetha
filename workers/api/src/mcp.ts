@@ -137,9 +137,16 @@ async function runTool(name: string, a: Args, call: Call): Promise<unknown> {
 
 interface RpcRequest { jsonrpc: "2.0"; id?: string | number | null; method: string; params?: Record<string, unknown> }
 
+/** RFC 6750 / RFC 9728 challenge pointing MCP clients at the protected-resource metadata. */
+export function mcpChallenge(origin: string, error?: string): string {
+  return `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"${error ? `, error="${error}"` : ""}`;
+}
+
 export function registerMcp(app: App) {
+  // The resource is the URL the client used (subetha.org/mcp or mcp.subetha.org/mcp); access
+  // tokens that name an audience must name it (oauth.ts).
   app.get("/.well-known/oauth-protected-resource", (c) => c.json({
-    resource: `${c.env.BASE_URL}/mcp`,
+    resource: `${new URL(c.req.url).origin}/mcp`,
     authorization_servers: c.env.CLERK_ISSUER ? [c.env.CLERK_ISSUER] : [],
     bearer_methods_supported: ["header"],
     resource_documentation: `${c.env.BASE_URL}/docs/agents.html`,
@@ -149,11 +156,8 @@ export function registerMcp(app: App) {
 
   app.post("/mcp", async (c) => {
     const authz = c.req.header("authorization");
-    if (!authz) {
-      return c.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "authentication required" } }, 401, {
-        "www-authenticate": `Bearer resource_metadata="${c.env.BASE_URL}/.well-known/oauth-protected-resource"`,
-      });
-    }
+    // Invalid credentials are rejected (with the same challenge) by the auth middleware.
+    if (!authz) return c.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "authentication required" } }, 401, { "www-authenticate": mcpChallenge(new URL(c.req.url).origin) });
     let body: RpcRequest | RpcRequest[];
     try {
       body = await c.req.json();

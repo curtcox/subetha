@@ -420,6 +420,10 @@ paths:
               properties:
                 handle: { type: string }
                 daily_cap_micros: { type: [integer, "null"], minimum: 0 }
+                oauth_daily_cap_micros:
+                  type: [integer, "null"]
+                  minimum: 0
+                  description: Daily spend cap per OAuth client (MCP agents signed in through the authorization server). `null` = $1; `0` turns OAuth access off.
                 paused: { type: boolean, description: Account-wide kill switch. }
                 auto_recharge:
                   description: |
@@ -1348,7 +1352,11 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: An API token (`se_…`), a device token, or a Clerk session JWT.
+      description: |
+        An API token (`se_…`), a Clerk session JWT, or an OAuth access token from the
+        authorization server named in `/.well-known/oauth-protected-resource` (JWT access tokens
+        per RFC 9068, or opaque tokens checked by RFC 7662 introspection). OAuth access tokens
+        get publish + subscribe only, under the account's `oauth_daily_cap_micros` per client.
     basicAuth:
       type: http
       scheme: basic
@@ -1722,6 +1730,9 @@ components:
         tier: { type: string, description: Markup tier from trailing-12-month top-ups. }
         balance_usd_micros: { type: integer }
         reserved_usd_micros: { type: integer }
+        daily_cap_micros: { type: [integer, "null"], description: Account-wide daily spend cap. }
+        oauth_daily_cap_micros: { type: [integer, "null"], description: "Daily cap per OAuth client; null = the $1 default, 0 = OAuth off." }
+        paused: { type: boolean }
         created_at: { type: integer }
 
     Token:
