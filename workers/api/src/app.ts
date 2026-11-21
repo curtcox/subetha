@@ -67,7 +67,7 @@ app.use("*", async (c, next) => {
 // Provider hooks are exempt (they're signature-checked and must not be dropped).
 app.use("*", async (c, next) => {
   const path = new URL(c.req.url).pathname;
-  if (path.startsWith("/v1/hooks/") || path === "/v1/health") return next();
+  if (path.startsWith("/v1/hooks/") || path === "/v1/health" || path === "/v1/status") return next();
   const cred = c.req.header("authorization") ?? c.req.header("x-device-id") ?? new URL(c.req.url).searchParams.get("auth");
   const limiter = cred ? c.env.RL_AUTH : c.env.RL_ANON;
   if (limiter) {
@@ -89,6 +89,30 @@ const principal = async (c: C) => {
 
 app.get("/v1/health", (c) => c.json({ ok: true, environment: c.env.ENVIRONMENT, time: Math.floor(Date.now() / 1000) }));
 app.get("/v1/prices", (c) => c.json(PRICES));
+
+// Status page data (PLAN §14 Phase 3): component health and which transports are configured.
+app.get("/v1/status", async (c) => {
+  const timed = async (fn: () => Promise<unknown>) => {
+    const t = Date.now();
+    try { await fn(); return { ok: true, ms: Date.now() - t }; } catch (e) { return { ok: false, error: String((e as Error).message ?? e) }; }
+  };
+  const e = c.env;
+  const [d1, kv, circuit] = await Promise.all([timed(() => e.DB.prepare("SELECT 1").first()), timed(() => e.CACHE.get("status:probe")), e.CACHE.get("circuit:telephony")]);
+  const transports = {
+    ws: true, sse: true, poll: true, mcp: true,
+    webhook: !!e.DELIVERY,
+    webpush: !!(e.DELIVERY && e.VAPID_PRIVATE_KEY),
+    fcm: !!(e.DELIVERY && e.FCM_SERVICE_ACCOUNT),
+    apns: !!(e.DELIVERY && e.APNS_KEY_P8),
+    email: !!(e.DELIVERY && (e.EMAIL || e.SES_ACCESS_KEY_ID)),
+    slack: !!(e.DELIVERY && e.SLACK_CLIENT_ID),
+    sms: !!(e.DELIVERY && e.TWILIO_ACCOUNT_SID) && !circuit,
+    voice: !!(e.DELIVERY && e.TWILIO_ACCOUNT_SID) && !circuit,
+    lxmf: !!(e.DELIVERY && e.LXMF_GATEWAY_URL),
+  };
+  const ok = d1.ok && kv.ok;
+  return c.json({ ok, environment: e.ENVIRONMENT, components: { d1, kv, queue: { ok: !!e.DELIVERY }, attachments: { ok: !!e.FILES } }, transports, telephony_circuit: circuit ?? null, time: Math.floor(Date.now() / 1000) }, ok ? 200 : 503);
+});
 app.get("/v1/config", (c) => c.json({ environment: c.env.ENVIRONMENT, clerk_publishable_key: c.env.CLERK_PUBLISHABLE_KEY ?? null, vapid_public_key: c.env.VAPID_PUBLIC_KEY ?? null }));
 
 // ---------------- accounts ----------------

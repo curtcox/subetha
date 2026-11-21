@@ -253,3 +253,15 @@ describe("acks and read-side caps", () => {
     expect(last).toBe(403);
   });
 });
+
+describe("status", () => {
+  it("reports component health and configured transports", async () => {
+    const r = await SELF.fetch(`${BASE}/v1/status`);
+    expect(r.status).toBe(200);
+    const s = (await r.json()) as { ok: boolean; transports: Record<string, boolean>; components: Record<string, { ok: boolean }> };
+    expect(s.ok).toBe(true);
+    expect(s.components.d1!.ok).toBe(true);
+    expect(s.transports.ws).toBe(true);
+    expect(s.transports.sms).toBe(true);
+  });
+});
