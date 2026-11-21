@@ -1,0 +1,118 @@
+package org.subetha.core
+
+import com.sun.net.httpserver.HttpServer
+import java.io.File
+import java.net.InetSocketAddress
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.jupiter.api.BeforeEach
+import org.subetha.Encoding
+import org.subetha.JdkDeviceSigner
+import org.subetha.PublishOptions
+import org.subetha.SubEtha
+import org.subetha.TopicKey
+import org.subetha.core.ffi.requestSigningInput
+import org.subetha.core.ffi.validateEnvelopeJson
+import org.subetha.signRequest
+
+/** Runs against the real libsubetha_core via JNA; skipped when the library isn't built. */
+class CoreTest {
+    private val seed = Encoding.hexDecode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
+
+    @BeforeEach
+    fun needsLibrary() = assumeTrue(Core.available, "libsubetha_core not found on jna.library.path; run cargo build -p subetha-core --features uniffi")
+
+    private fun vectors(name: String): JsonObject =
+        Json.parseToJsonElement(File(System.getProperty("subetha.vectors"), name).readText()).jsonObject
+
+    @Test
+    fun signaturesConformance() {
+        val v = vectors("signatures.json")
+        for (d in v["devices"]!!.jsonArray) {
+            val s = CoreDeviceSigner(Encoding.hexDecode(d.jsonObject["seed"]!!.jsonPrimitive.content))
+            assertEquals(d.jsonObject["device_id"]!!.jsonPrimitive.content, s.deviceId)
+        }
+        for (c in v["cases"]!!.jsonArray) {
+            val o = c.jsonObject
+            val s = CoreDeviceSigner(Encoding.hexDecode(o["seed"]!!.jsonPrimitive.content))
+            val signed = Json.parseToJsonElement(s.signEnvelope(o["unsigned"].toString())).jsonObject
+            assertEquals(o["signed"]!!.jsonObject["sig"], signed["sig"])
+            assertTrue(CoreEnvelopeCrypto.verify(o["signed"].toString()))
+        }
+        for (n in v["negative"]!!.jsonArray) assertFalse(CoreEnvelopeCrypto.verify(n.jsonObject["envelope"].toString()), n.toString())
+    }
+
+    @Test
+    fun e2eeConformance() {
+        val v = vectors("e2ee.json")
+        val key = Encoding.hexDecode(v["key"]!!.jsonPrimitive.content)
+        val dec = CoreEnvelopeCrypto.decrypt(v["encrypted"].toString(), key)!!
+        assertEquals(v["plaintext"], Json.parseToJsonElement(dec))
+        assertNull(CoreEnvelopeCrypto.decrypt(v["encrypted"].toString(), ByteArray(32)))
+    }
+
+    @Test
+    fun coreAndJdkSignersAgree() {
+        val core = CoreDeviceSigner(seed)
+        val jdk = JdkDeviceSigner(seed)
+        assertEquals(jdk.deviceId, core.deviceId)
+        val a = signRequest(core, "POST", "https://x.test/v1/ack?x=1", "{}".toByteArray(), 1763750000)
+        val b = signRequest(jdk, "POST", "https://x.test/v1/ack?x=1", "{}".toByteArray(), 1763750000)
+        assertEquals(b, a)
+        assertEquals(
+            org.subetha.requestSigningInput("POST", "https://x.test/v1/ack?x=1", 1763750000, "{}".toByteArray()),
+            requestSigningInput("POST", "/v1/ack?x=1", 1763750000uL, "{}".toByteArray()),
+        )
+        val g = CoreDeviceSigner.generate()
+        assertNotEquals(core.deviceId, g.deviceId)
+        assertEquals(g.deviceId, CoreDeviceSigner(g.seed()).deviceId)
+    }
+
+    @Test
+    fun clientSignsEncryptsAndDecrypts() = runBlocking {
+        var stored = ""
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { ex ->
+            val body = ex.requestBody.readBytes().toString(Charsets.UTF_8)
+            val out = if (ex.requestMethod == "POST") { stored = body; body } else stored + "\n"
+            val bytes = out.toByteArray()
+            ex.sendResponseHeaders(200, bytes.size.toLong())
+            ex.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val signer = CoreDeviceSigner(seed)
+            val key = ByteArray(32) { it.toByte() }
+            val c = SubEtha(
+                baseUrl = "http://127.0.0.1:${server.address.port}",
+                deviceSigner = signer,
+                crypto = CoreEnvelopeCrypto,
+                topicKeys = mapOf("@a/b" to TopicKey("k1", key)),
+            )
+            val sent = c.publish("@a/b", "secret", PublishOptions(title = "shh"))
+            assertNotEquals("secret", sent.message)
+            assertNull(sent.title)
+            assertEquals(signer.deviceId, sent.sender)
+            assertTrue(sent.isEncrypted)
+            assertTrue(CoreEnvelopeCrypto.verify(sent.toJson()))
+            assertTrue(validateEnvelopeJson(sent.toJson()).isEmpty())
+            val got = c.poll("@a/b").single()
+            assertEquals("secret", got.message)
+            assertEquals("shh", got.title)
+            assertFalse(got.isEncrypted)
+        } finally {
+            server.stop(0)
+        }
+    }
+}
