@@ -3,7 +3,7 @@
 import { accountStub } from "../durable/account.ts";
 import { topicStub } from "../durable/topic.ts";
 import type { DeliveryJob, Env } from "../types.ts";
-import { senders, PermanentError } from "./senders.ts";
+import { senders, PermanentError } from "./index.ts";
 
 const MAX_ATTEMPTS = 5;
 

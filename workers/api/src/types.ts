@@ -38,6 +38,17 @@ export interface Env {
   SES_REGION?: string;
   EMAIL?: SendEmail;
   WEBHOOK_SIGNING_SECRET?: string;
+  FCM_SERVICE_ACCOUNT?: string; // JSON
+  APNS_KEY_P8?: string;
+  APNS_KEY_ID?: string;
+  APNS_TEAM_ID?: string;
+  APNS_TOPIC?: string;
+  APNS_ENDPOINT?: string; // default https://api.push.apple.com (needs HTTP/2; see docs)
+  LXMF_GATEWAY_URL?: string;
+  LXMF_GATEWAY_SECRET?: string;
+  SLACK_CLIENT_ID?: string;
+  SLACK_CLIENT_SECRET?: string;
+  INBOUND_EMAIL_DOMAIN?: string; // in.subetha.org
 }
 
 export interface TopicPolicy {
@@ -59,6 +70,8 @@ export interface TopicPolicy {
   paused?: boolean;
   /** Minimum message priority for a transport, e.g. { sms: 4 }. */
   min_priority?: Partial<Record<Transport, number>>;
+  /** Inbound email senders allowed to publish via topic@in.subetha.org ("*" = anyone). */
+  email_senders?: string[];
   /** UTC "HH:MM"–"HH:MM": paid transports are suppressed (downgrade to free ones). */
   quiet_hours?: { start: string; end: string };
 }
@@ -95,6 +108,8 @@ export interface QueuedSubscription {
   transport: Transport;
   /** Endpoint id (email, phone, webhook, slack channel, push subscription…). */
   endpoint: string;
+  /** Endpoint address (email, E.164 number, URL, channel id, push subscription JSON, LXMF hash). */
+  address?: string;
   filter?: SubscriptionFilter;
   /** Escalation: deliver via this transport only if unacked after `after_s` seconds. */
   after_s?: number;

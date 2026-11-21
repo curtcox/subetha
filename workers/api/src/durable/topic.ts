@@ -7,6 +7,8 @@ import { actionPriceMicros, rentNanos, type PriceTable } from "@subetha/pricing"
 import prices from "@subetha/pricing/prices.json";
 import { asResult, rpcError, type RpcResult } from "../errors.ts";
 import { planDeliveries } from "../routing.ts";
+import { smsBody, smsSegments, voiceMinutes } from "../delivery/twilio.ts";
+import { renderText } from "../delivery/senders.ts";
 import type { Caller, DeliveryJob, Env, PublishInput, PublishResult, QueuedSubscription, SubscriptionFilter, TopicMeta } from "../types.ts";
 import { accountStub } from "./account.ts";
 
@@ -272,6 +274,7 @@ export class TopicDO extends DurableObject<Env> {
       prices: PRICES,
       tier: this.tier(),
       nowMs,
+      units: { sms: smsSegments(smsBody(env)), voice: voiceMinutes(renderText(env, 1500)) },
     });
     const publishPrice = actionPriceMicros(PRICES, "publish", this.tier());
     const liveCost = plan.deliveries.filter((d) => d.after_s === 0 && d.transport === "ws").reduce((n, d) => n + d.cost_micros, 0);
@@ -336,8 +339,12 @@ export class TopicDO extends DurableObject<Env> {
       const sub = subs.get(d.subscriber);
       if (!sub || !this.env.DELIVERY) continue;
       const ref = `dlv:${env.id}:${sub.id}`;
-      const r = await accountStub(this.env, meta.owner).reserve(d.cost_micros, ref, null, {});
-      if (!r.ok) continue;
+      const r = await accountStub(this.env, meta.owner).reserve(d.cost_micros, ref, null, {}, d.transport === "sms" || d.transport === "voice" ? "telephony" : null);
+      if (!r.ok) {
+        this.trace(env.id!, {}, env.expires!);
+        await this.recordDelivery(env.id!, { sub: sub.id, transport: d.transport, result: "not sent", error: r.code });
+        continue;
+      }
       jobs.push({ body: { topic: meta.name, owner: meta.owner, message: env, sub, reservation: { ref, micros: d.cost_micros }, attempt: 0 }, delaySeconds: d.after_s || undefined });
     }
     if (jobs.length && this.env.DELIVERY) await this.env.DELIVERY.sendBatch(jobs);

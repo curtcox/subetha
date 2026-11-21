@@ -50,6 +50,9 @@ class SqlLedgerStore implements LedgerStore {
   }
 }
 
+const HOLD_DAYS = 7;
+const TELEPHONY_HOLD_CAP_MICROS = 5_000_000;
+
 export interface Balance { available: number; reserved: number }
 
 export class AccountDO extends DurableObject<Env> {
@@ -77,15 +80,35 @@ export class AccountDO extends DurableObject<Env> {
   }
 
   async topup(amount: number, ref: string, meta?: string) {
-    return this.tx(() => this.ledger.topup(amount, ref, meta));
+    return this.tx(() => {
+      const r = this.ledger.topup(amount, ref, meta);
+      if (r.applied && this.store.getSpend("first_topup_at", "ms") === 0) this.store.addSpend("first_topup_at", "ms", Date.now());
+      return r;
+    });
   }
 
   async charge(amount: number, ref: string, tokenId: string | null, caps: Caps): Promise<ReserveResult> {
     return this.tx(() => this.ledger.charge(amount, ref, { tokenId, caps }));
   }
 
-  async reserve(amount: number, ref: string, tokenId: string | null, caps: Caps): Promise<ReserveResult> {
-    return this.tx(() => this.ledger.reserve(amount, ref, { tokenId, caps }));
+  /**
+   * Reserve before acting. Category "telephony" (SMS/voice) is subject to the new-funds hold:
+   * until the first top-up is HOLD_DAYS old, total telephony spend is capped (PLAN §8).
+   */
+  async reserve(amount: number, ref: string, tokenId: string | null, caps: Caps, category: "telephony" | null = null): Promise<ReserveResult> {
+    return this.tx(() => {
+      if (category === "telephony") {
+        const first = this.store.getSpend("first_topup_at", "ms");
+        const young = first === 0 || Date.now() - first < HOLD_DAYS * 86_400_000;
+        const spent = this.store.getSpend("telephony", "total");
+        if (young && spent + amount > TELEPHONY_HOLD_CAP_MICROS) {
+          return { ok: false, code: "spend_cap_exceeded", cap: "account_daily", remaining: Math.max(0, TELEPHONY_HOLD_CAP_MICROS - spent) } as ReserveResult;
+        }
+      }
+      const r = this.ledger.reserve(amount, ref, { tokenId, caps });
+      if (r.ok && category === "telephony") this.store.addSpend("telephony", "total", amount);
+      return r;
+    });
   }
 
   async settle(ref: string, actual: number) {

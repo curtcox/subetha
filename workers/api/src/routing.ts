@@ -16,6 +16,8 @@ export interface PlanInput {
   prices: PriceTable;
   tier: string;
   nowMs: number;
+  /** Billable units per transport (SMS segments, call minutes). Default 1. */
+  units?: Partial<Record<Transport, number>>;
 }
 
 export interface Plan {
@@ -47,7 +49,7 @@ export function planDeliveries(input: PlanInput): Plan {
   const dropped: Plan["dropped"] = [];
   const price = (t: Transport) => {
     const sku = skuForTransport(input.prices, t);
-    return { sku, cost: sku ? actionPriceMicros(input.prices, sku, input.tier) : 0 };
+    return { sku, cost: sku ? actionPriceMicros(input.prices, sku, input.tier, input.units?.[t] ?? 1) : 0 };
   };
   const allowLists = [...input.allowLists, input.policy.allow_transports];
   const denyLists = [...input.denyLists, input.policy.deny_transports];

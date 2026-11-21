@@ -12,6 +12,8 @@ export default defineConfig(async () => {
       cloudflareTest({
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
+          // Tests drive the delivery consumer directly; don't auto-consume the queue.
+          queueConsumers: {},
           bindings: {
             TEST_MIGRATIONS: migrations,
             STRIPE_WEBHOOK_SECRET: "whsec_test",
@@ -19,6 +21,13 @@ export default defineConfig(async () => {
             DEV_BOOTSTRAP_SECRET: "test-secret",
             CLERK_ISSUER: "https://clerk.test",
             CLERK_JWKS: JSON.stringify({ keys: [pub] }),
+            WEBHOOK_SIGNING_SECRET: "test",
+            SES_ACCESS_KEY_ID: "AKIDEXAMPLE",
+            SES_SECRET_ACCESS_KEY: "secret",
+            TWILIO_ACCOUNT_SID: "ACtest",
+            TWILIO_AUTH_TOKEN: "twilio-token",
+            TWILIO_FROM: "+15005550006",
+            SLACK_SIGNING_SECRET: "slack-secret",
             TEST_CLERK_PRIVATE_JWK: JSON.stringify(privateKey.export({ format: "jwk" })),
           },
         },

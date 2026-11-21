@@ -68,7 +68,7 @@ export function validatePolicy(p: unknown): TopicPolicy {
   const checks: [string, (v: unknown) => boolean][] = [
     ["public_publish", BOOL], ["public_read", BOOL], ["require_signature", BOOL], ["paused", BOOL],
     ["anon_rate_per_min", NUM], ["anon_daily_cap_micros", NUM], ["max_cost_per_message_micros", NUM], ["daily_cap_micros", NUM], ["retention_s", NUM],
-    ["allowed_publishers", STRS], ["allowed_readers", STRS], ["allow_transports", TRANSPORT_LIST], ["deny_transports", TRANSPORT_LIST],
+    ["allowed_publishers", STRS], ["email_senders", STRS], ["allowed_readers", STRS], ["allow_transports", TRANSPORT_LIST], ["deny_transports", TRANSPORT_LIST],
     ["min_priority", (v) => v === undefined || (typeof v === "object" && v !== null)],
     ["quiet_hours", (v) => v === undefined || (typeof v === "object" && v !== null && /^\d\d:\d\d$/.test((v as { start: string }).start) && /^\d\d:\d\d$/.test((v as { end: string }).end))],
   ];
