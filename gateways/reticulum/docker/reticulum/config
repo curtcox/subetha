@@ -1,0 +1,20 @@
+# Reticulum config for the gateway container.
+#
+# A container usually can't accept inbound connections, so the gateway reaches the mesh by
+# connecting OUT to a Reticulum transport node over TCP. Replace the target below with a node
+# you run or trust (see the community list in the Reticulum manual), or add more interfaces.
+
+[reticulum]
+  enable_transport = False
+  share_instance = No
+  panic_on_interface_error = No
+
+[logging]
+  loglevel = 3
+
+[interfaces]
+  [[Upstream transport node]]
+    type = TCPClientInterface
+    enabled = yes
+    target_host = amsterdam.connect.reticulum.network
+    target_port = 4965

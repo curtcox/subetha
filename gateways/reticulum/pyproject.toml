@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "subetha-reticulum-gateway"
+version = "0.1.0"
+description = "Bridges Reticulum/LXMF destinations to SubEtha topics"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  "subetha>=0.1",
+]
+
+[project.optional-dependencies]
+# The real Reticulum transport. Not needed for tests, which use fake ports.
+rns = ["rns>=0.9", "lxmf>=0.6"]
+test = ["pytest>=8"]
+
+[project.scripts]
+subetha-reticulum = "subetha_reticulum.cli:main"
+
+[project.urls]
+Homepage = "https://subetha.org"
+Source = "https://github.com/curtcox/subetha"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/subetha_reticulum"]

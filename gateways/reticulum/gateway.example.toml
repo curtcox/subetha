@@ -1,0 +1,42 @@
+# SubEtha <-> Reticulum/LXMF gateway configuration.
+# Run with:  subetha-reticulum --config gateway.toml
+
+# The relay to bridge to.
+relay_url = "https://subetha.org"
+
+# API token used to publish and subscribe. Prefer the environment variable named by
+# token_env (default SUBETHA_TOKEN) over writing the token here.
+# token = "tk_..."
+token_env = "SUBETHA_TOKEN"
+
+# Where LXMF identities (one per topic), LXMF router storage, and subscriber state live.
+# Keep it on a persistent volume: losing it changes every topic's LXMF address.
+# Relative paths are relative to this file.
+data_dir = "data"
+
+# Reticulum config directory (holds the `config` file with your interfaces).
+# Omit to use Reticulum's default (~/.reticulum).
+# reticulum_config_dir = "reticulum"
+
+# Seconds between announces of every topic destination (0 = only at startup).
+announce_interval = 1800
+
+# How replies and deliveries are sent: "direct" (link to the peer), "opportunistic"
+# (single packet), or "propagated" (via propagation_node, for peers that are often offline).
+delivery_method = "direct"
+# propagation_node = "<32 hex chars>"
+
+# Optional HTTP health endpoint (GET /health). Cloudflare Containers needs one.
+# health_port = 8080
+
+# One [[topics]] table per bridged topic. Each gets its own LXMF address.
+[[topics]]
+topic = "@alice/doorbell"
+name = "Alice's doorbell"   # display name announced on the mesh
+publish = true              # LXMF -> topic
+deliver = true              # topic -> LXMF subscribers (/subscribe)
+allow = []                  # LXMF addresses allowed to use it; empty = anyone
+
+# [[topics]]
+# topic = "t_mfrggzdfmztwq2lknnwg23tpoa"
+# publish = false           # receive-only on the mesh
