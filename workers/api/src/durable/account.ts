@@ -3,6 +3,7 @@ import { DurableObject } from "cloudflare:workers";
 import { Ledger, type Caps, type Entry, type LedgerStore, type Reservation, type ReserveResult } from "../ledger.ts";
 import type { Env } from "../types.ts";
 import { chargeSavedCard } from "../stripe.ts";
+import { aggregateUsage, type RefRow, type Usage } from "../usage.ts";
 
 class SqlLedgerStore implements LedgerStore {
   private readonly sql: SqlStorage;
@@ -12,7 +13,8 @@ class SqlLedgerStore implements LedgerStore {
       CREATE TABLE IF NOT EXISTS reservations (ref TEXT PRIMARY KEY, amount INTEGER NOT NULL, token_id TEXT, time INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS refs (ref TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS entries (seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, amount INTEGER, ref TEXT, available_after INTEGER, reserved_after INTEGER, time INTEGER, meta TEXT);
-      CREATE TABLE IF NOT EXISTS spend (key TEXT, period TEXT, amount INTEGER NOT NULL, PRIMARY KEY (key, period));`);
+      CREATE TABLE IF NOT EXISTS spend (key TEXT, period TEXT, amount INTEGER NOT NULL, PRIMARY KEY (key, period));
+      CREATE INDEX IF NOT EXISTS entries_time ON entries(time);`);
   }
   private get(k: string): number {
     const r = this.sql.exec<{ v: number }>("SELECT v FROM kv WHERE k = ?", k).toArray()[0];
@@ -206,6 +208,19 @@ export class AccountDO extends DurableObject<Env> {
       .map((e) => ({ ...(e as unknown as Entry), meta: (e.meta as string | null) ?? undefined }));
   }
 
+  /** Spend by category and day for the last `days` UTC days (usage.ts). */
+  async usage(days: number, nowMs = Date.now()): Promise<Usage> {
+    // A week of margin before the window, so refs that started inside it keep their opening entry
+    // even if they closed later; refs that started before it are dropped by aggregateUsage.
+    const from = nowMs - (days + 7) * 86_400_000;
+    const rows = this.ctx.storage.sql.exec<RefRow>(
+      `SELECT ref, MIN(time) AS start, SUM(amount) AS net,
+              SUM(CASE WHEN kind IN ('settle', 'lease_return') THEN 1 ELSE 0 END) AS closed
+         FROM entries WHERE time >= ? AND kind IN ('reserve', 'settle', 'lease', 'lease_return')
+        GROUP BY ref`, from).toArray();
+    return aggregateUsage(rows, nowMs, days);
+  }
+
   /** Journals new ledger entries to D1 (nightly reconciliation compares this to Stripe). */
   override async alarm() {
     await this.maybeRecharge(Date.now());
@@ -248,7 +263,7 @@ export class AccountDO extends DurableObject<Env> {
   }
 }
 
-export type AccountRpc = Pick<AccountDO, "balance" | "topup" | "charge" | "reserve" | "settle" | "release" | "lease" | "returnLease" | "adjust" | "entries" | "setAccountId" | "setAutoRecharge" | "autoRechargeFailed" | "trackTokenSpend" | "setControls" | "claimNonce">;
+export type AccountRpc = Pick<AccountDO, "usage" | "balance" | "topup" | "charge" | "reserve" | "settle" | "release" | "lease" | "returnLease" | "adjust" | "entries" | "setAccountId" | "setAutoRecharge" | "autoRechargeFailed" | "trackTokenSpend" | "setControls" | "claimNonce">;
 
 export function accountStub(env: Env, accountId: string): AccountRpc {
   return env.ACCOUNT.get(env.ACCOUNT.idFromName(accountId)) as unknown as AccountRpc;

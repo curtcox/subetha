@@ -43,7 +43,7 @@ curl -H "Authorization: Bearer $SUBETHA_TOKEN" https://subetha.org/@me/backups/j
   test (`spec/openapi.yaml`), `llms.txt`, GitHub Pages and deploy workflows, infrastructure notes
   (`infra/`), legal drafts (`docs/legal/`).
 - **Web console and tools** (`apps/site`): the console (send/receive, topics, endpoints and
-  escalation subscriptions, Slack, devices, tokens, billing and limits, traces, audit log, and an
+  escalation subscriptions, Slack, devices, tokens, billing, usage chart and limits, traces, audit log, and an
   OpenAPI-driven API explorer; "copy as" curl/JS/Python/Swift/Kotlin/Dart), plus a pricing
   calculator and an offline route simulator at `/tools/` that bundle the relay's own price table
   and planner.
@@ -115,7 +115,7 @@ in this repository; nothing is deployed to staging or production yet.
 | **D** Reticulum gateway | Mostly done | Gateway (both directions, `/deliver` for LXMF endpoints), Docker, Python SDK, BYO-gateway docs | Hosted deployment (Containers or VPS); Sideband round trip |
 | **E** Rust core + mobile SDKs | Mostly done | Rust core passing all vectors; UniFFI bindings; Swift, Kotlin, Dart, and React Native SDKs; doorbell sample apps on all four platforms; mobile CI | flutter_rust_bridge plugin for the core in Flutter; running the scripted flow on devices |
 | **F** Edge transports | In progress | Protocol logic in the core: audio modem, fountain-coded QR, BLE chunking, gossip | Platform shims (BLE, audio, camera), demos |
-| **G** Docs + dev tools | Mostly done | Docs with CI-run samples, OpenAPI + drift test, llms.txt, static docs build; pricing calculator, route simulator, token builder, API explorer, copy-as for six languages, trace viewer | Usage charts; nightly samples against staging |
+| **G** Docs + dev tools | Mostly done | Docs with CI-run samples, OpenAPI + drift test, llms.txt, static docs build; pricing calculator, route simulator, token builder, API explorer, copy-as for six languages, trace viewer, usage by category (`/v1/usage` + chart) | Nightly samples against staging |
 | **Phase 3** Launch hardening | Started | Rate limits, load-test script, legal drafts, `/v1/status` | Load tests, abuse tuning, legal review, status page, backups, security review |
 
 ## File size limits

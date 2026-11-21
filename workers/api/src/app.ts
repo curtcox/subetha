@@ -14,6 +14,7 @@ import { createCheckoutSession, verifyStripeSignature } from "./stripe.ts";
 import type { Env, Principal, TopicMeta } from "./types.ts";
 import { registerControlRoutes } from "./control.ts";
 import { mcpChallenge, registerMcp } from "./mcp.ts";
+import { USAGE_LABELS } from "./usage.ts";
 
 const PRICES = prices as unknown as PriceTable;
 type C = Context<{ Bindings: Env; Variables: { principal: Principal } }>;
@@ -194,6 +195,12 @@ app.get("/v1/ledger", async (c) => {
   const id = requireAdmin(await principal(c));
   const after = Number(c.req.query("after") ?? 0);
   return c.json({ entries: await accountStub(c.env, id).entries(after, Number(c.req.query("limit") ?? 100)) });
+});
+
+app.get("/v1/usage", async (c) => {
+  const id = requireAdmin(await principal(c));
+  const days = Math.min(Math.max(Math.floor(Number(c.req.query("days") ?? 30)) || 30, 1), 90);
+  return c.json({ categories: USAGE_LABELS, ...(await accountStub(c.env, id).usage(days)) });
 });
 
 app.get("/v1/audit", async (c) => {

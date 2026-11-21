@@ -61,6 +61,15 @@ The ledger is append-only: `topup`, `reserve`, `settle`, `release`, `refund`, an
 entries, journaled and reconciled nightly against Stripe. Refunds and chargebacks are deducted
 from the balance (a chargeback also recovers the dispute fee where possible).
 
+### Usage
+
+`GET /v1/usage?days=30` (admin) breaks spend down by category and day, computed from the
+ledger: publishing, paid deliveries, live delivery and storage (with the top topics), device and
+endpoint rent, and API requests and other charges. In-flight deliveries and credit that topics
+still hold are reported as `pending_micros`, so counted plus pending equals what left the
+balance. The console's Billing tab charts it. To estimate future spend, use the
+[pricing calculator](/tools/pricing.html).
+
 ## 402 Payment Required
 
 ```json

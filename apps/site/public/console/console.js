@@ -1,6 +1,7 @@
 // The console is an ordinary SDK client (PLAN §11).
 import { LANGUAGES, LANGUAGE_NAMES, snippet } from "./snippets.js";
 import { buildRequest, operations, toCurl } from "./explorer.js";
+import { renderUsageChart } from "./usage-chart.js";
 
 const $ = (id) => document.getElementById(id);
 const usd = (micros) => `$${(micros / 1e6).toFixed(micros < 10000 ? 6 : 2)}`;
@@ -220,6 +221,7 @@ $("capSave").onclick = async () => {
 };
 
 async function loadBilling() {
+  client.request("GET", "/v1/usage?days=30").then((u) => renderUsageChart($("usageChart"), u)).catch((e) => { $("usageChart").textContent = `${e.code ?? "error"}: ${e.message}`; });
   $("capDaily").value = toUsdInput(me.daily_cap_micros);
   $("capOauth").value = toUsdInput(me.oauth_daily_cap_micros);
   $("capPaused").checked = !!me.paused;

@@ -484,6 +484,48 @@ paths:
                   entries:
                     type: array
                     items: { type: object, additionalProperties: true }
+  /v1/usage:
+    get:
+      tags: [account]
+      operationId: getUsage
+      summary: Spend by category and day
+      description: |
+        Computed from the ledger: each charge's ref says what it was for, and a reservation and
+        its settlement (or a credit lease and its return) share the ref, so a ref's net is what it
+        cost. Each finished charge counts on the UTC day it started. In-flight deliveries and
+        credit leases that topics still hold are `pending_micros`. Categories: `publish`,
+        `deliveries` (paid transports), `live` (live delivery, retention, connections, charged
+        through topic leases), `rent` (devices and endpoints), and `other` (dry runs, duplicate
+        publishes, downloads, endpoint verification, inbound email/SMS).
+      parameters:
+        - name: days
+          in: query
+          schema: { type: integer, default: 30, minimum: 1, maximum: 90 }
+      responses:
+        "200":
+          description: Usage.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  categories: { type: object, additionalProperties: { type: string }, description: Display names. }
+                  since: { type: integer, description: Start of the first day (Unix ms). }
+                  days:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        day: { type: string, format: date }
+                        micros: { type: object, additionalProperties: { type: integer } }
+                        total: { type: integer }
+                  totals: { type: object, additionalProperties: { type: integer } }
+                  total_micros: { type: integer }
+                  pending_micros: { type: integer }
+                  live_by_topic:
+                    type: array
+                    items: { type: object, properties: { topic: { type: string }, micros: { type: integer } } }
+        "403": { $ref: "#/components/responses/Error" }
   /v1/audit:
     get:
       tags: [account]
