@@ -14,6 +14,7 @@ from subetha.protocol import (
     canonicalize,
     decrypt_envelope,
     device_key_from_seed,
+    e2ee_aad,
     encrypt_envelope,
     hex_decode,
     is_topic,
@@ -117,8 +118,7 @@ def test_e2ee_nonce_encoding():
 def test_e2ee_encrypts_deterministically():
     enc = encrypt_envelope(copy.deepcopy(E2EE["plaintext"]), hex_decode(E2EE["key"]), E2EE["kid"], hex_decode(E2EE["nonce"]))
     assert enc == E2EE["encrypted"]
-    without_message = {k: v for k, v in enc.items() if k != "message"}
-    assert canonical_envelope(without_message) == E2EE["aad"]
+    assert e2ee_aad(enc) == E2EE["aad"].encode("utf-8")
 
 
 def test_e2ee_decrypts():
@@ -140,13 +140,12 @@ def test_e2ee_signed_verifies():
     assert sign_envelope(E2EE["encrypted"], k) == E2EE["encrypted_signed"]
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Spec issue: §5 puts the whole envelope (minus message/sig/hops) in the AAD and §4 signs "
-        "after encrypting, so a `sender` added at signing time is not in the AAD used at "
-        "encryption time. The TS reference also returns null here."
-    ),
-    strict=False,
-)
 def test_e2ee_signed_decrypts():
-    assert decrypt_envelope(E2EE["encrypted_signed"], hex_decode(E2EE["key"])) is not None
+    assert decrypt_envelope(E2EE["encrypted_signed"], hex_decode(E2EE["key"])) == E2EE["decrypted_signed"]
+
+
+def test_e2ee_aad_excludes_sender_sig_hops():
+    expected = E2EE["aad"].encode("utf-8")
+    assert e2ee_aad(E2EE["encrypted"]) == expected
+    assert e2ee_aad(E2EE["encrypted_signed"]) == expected
+    assert e2ee_aad({**E2EE["encrypted_signed"], "hops": 3}) == expected

@@ -158,6 +158,11 @@ def parse_priority(v: str | int | None) -> int | None:
 PROTECTED_FIELDS = ("title", "message", "attachment", "click", "actions", "content_type")
 
 
+def e2ee_aad(env: Envelope) -> bytes:
+    """Associated data for E2EE (spec §5): canonical envelope without message, sender, sig, hops."""
+    return canonical_envelope({k: v for k, v in env.items() if k not in ("message", "sender")}).encode("utf-8")
+
+
 def encrypt_envelope(env: Envelope, key: bytes, kid: str, nonce: bytes | None = None) -> Envelope:
     """Encrypts the protected fields. Drops any existing ``sig``; sign after encrypting."""
     if env.get("enc"):
@@ -171,21 +176,25 @@ def encrypt_envelope(env: Envelope, key: bytes, kid: str, nonce: bytes | None = 
             del out[f]
     out.pop("sig", None)
     out["enc"] = {"alg": "xchacha20poly1305", "kid": kid, "nonce": base64url_encode(n)}
-    aad = canonical_envelope(out).encode("utf-8")
+    aad = e2ee_aad(out)
     ct = xchacha_seal(key, n, canonicalize(prot).encode("utf-8"), aad)
     out["message"] = base64url_encode(ct)
     return out
 
 
 def decrypt_envelope(env: Envelope, key: bytes) -> Envelope | None:
-    """Returns the decrypted envelope, or None if the key is wrong or the message was tampered with."""
+    """Returns the decrypted envelope, or None if the key is wrong or the message was tampered with.
+
+    The protected fields are restored and ``enc`` removed; every other field (including
+    ``sender`` and ``sig``) is kept as received.
+    """
     enc = env.get("enc")
     message = env.get("message")
     if not enc or not isinstance(message, str):
         return None
     rest = {k: v for k, v in env.items() if k != "message"}
     try:
-        aad = canonical_envelope(rest).encode("utf-8")
+        aad = e2ee_aad(env)
         pt = xchacha_open(key, base64url_decode(enc["nonce"]), base64url_decode(message), aad)
         if pt is None:
             return None

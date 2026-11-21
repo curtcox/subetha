@@ -93,12 +93,14 @@ Topic keys are 32 random bytes identified by a `kid` string. To encrypt:
 2. Serialize them as a canonical JSON object `P`.
 3. Remove them from the envelope, then set
    `enc = { "alg": "xchacha20poly1305", "kid": <kid>, "nonce": base64url(24 random bytes) }`.
-4. Compute `ct = XChaCha20-Poly1305(key, nonce, plaintext = P, aad = canonical(envelope_without_message))`
-   where the AAD envelope has `enc` set and no `message`.
+4. Compute `ct = XChaCha20-Poly1305(key, nonce, plaintext = P, aad = A)` where `A` is the canonical
+   form (§3) of the envelope with `enc` set and the fields `message`, `sender`, `sig`, and `hops`
+   removed. (`sender` is excluded because signing, which adds it, happens after encryption.)
 5. Set `message = base64url_nopad(ct)`.
 
 Relays route ciphertext and never see keys. Signing happens **after** encryption, so signatures
-cover the ciphertext.
+cover the ciphertext. Decryption restores the protected fields, removes `enc`, and leaves every
+other field (including `sender` and `sig`) as received.
 
 ## 6. Dedupe
 

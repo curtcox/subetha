@@ -4,7 +4,7 @@ import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  base64urlEncode, canonicalEnvelope, canonicalize, deviceKeyFromSeed, encryptEnvelope, hexDecode, hexEncode, signEnvelope, type Json,
+  base64urlEncode, canonicalEnvelope, canonicalize, decryptEnvelope, deviceKeyFromSeed, encryptEnvelope, hexDecode, hexEncode, signEnvelope, type Json,
 } from "@subetha/sdk/protocol";
 
 const out = join(dirname(fileURLToPath(import.meta.url)), "..", "vectors");
@@ -83,7 +83,7 @@ const encrypted = await encryptEnvelope(plain, key, "topic-key-3", nonce);
 const signer = await deviceKeyFromSeed(hexDecode(seeds[0]!));
 const encSigned = await signEnvelope(encrypted, signer);
 write("e2ee.json", {
-  description: "E2EE (spec §5). Encrypting `plaintext` with `key`, `kid`, and `nonce` must yield `encrypted` exactly; decrypting must restore `plaintext`. `encrypted_signed` is `encrypted` signed with signatures.devices[0].",
+  description: "E2EE (spec §5). Encrypting `plaintext` with `key`, `kid`, and `nonce` must yield `encrypted` exactly; decrypting must restore `plaintext`. `encrypted_signed` is `encrypted` signed with signatures.devices[0]; decrypting it must yield `decrypted_signed` (sender and sig kept, enc removed). The AAD excludes message, sender, sig, and hops.",
   key: hexEncode(key),
   kid: "topic-key-3",
   nonce: hexEncode(nonce),
@@ -92,5 +92,6 @@ write("e2ee.json", {
   aad: canonicalEnvelope({ ...encrypted, message: undefined }),
   encrypted,
   encrypted_signed: encSigned,
+  decrypted_signed: await decryptEnvelope(encSigned, key),
 });
 console.log("vectors written to", out);
