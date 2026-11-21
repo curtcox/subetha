@@ -1,0 +1,17 @@
+name: subetha
+description: SubEtha client for Dart and Flutter. Publish and subscribe over any transport.
+version: 0.1.0
+homepage: https://subetha.org
+repository: https://github.com/curtcox/subetha/tree/main/sdk/flutter
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  # Pure Dart: the same package works in Flutter apps, on the server and in CLIs.
+  http: ^1.2.0
+  cryptography: ^2.7.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^4.0.0
