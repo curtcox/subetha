@@ -5,3 +5,4 @@ packages:
   - workers/*
   - apps/*
   - samples/*
+  - docs/samples

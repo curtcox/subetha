@@ -22,3 +22,8 @@ uniffi = { version = "0.28", optional = true }
 default = []
 # Export the `ffi` module through UniFFI proc-macros (see BINDINGS.md).
 uniffi = ["dep:uniffi"]
+
+# Docs sample (docs/samples/rust); `cargo test` builds it, so a broken sample fails CI.
+[[example]]
+name = "sign_and_encrypt"
+path = "../../docs/samples/rust/sign_and_encrypt.rs"

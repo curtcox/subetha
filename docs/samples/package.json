@@ -1,0 +1,19 @@
+{
+  "name": "@subetha/samples",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Runnable docs samples. TS samples run against the Worker in workers/api/test/samples.test.ts; this package checks the rest.",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@subetha/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}
