@@ -1,0 +1,1785 @@
+openapi: 3.1.0
+info:
+  title: SubEtha API
+  version: 0.0.1
+  summary: Transport-agnostic, ntfy-compatible pub/sub relay.
+  description: |
+    SubEtha relays messages published to a **topic** to every subscriber over whatever transport
+    works (WebSocket, SSE, push, email, Slack, SMS, voice, MCP, Reticulum/LXMF, …).
+
+    * The ntfy-compatible paths (`/{topic}`, `/{topics}/json|sse|raw|ws`, `POST /`) work with stock
+      ntfy clients and `curl`.
+    * The control plane lives under `/v1/*`.
+    * Every metered action is prepaid. An insufficient balance returns HTTP 402 with
+      `shortfall_usd_micros`. `X-Dry-Run: 1` returns the route plan and cost without delivering.
+    * Money is integer micro-dollars (µ$, `*_usd_micros`). Request bodies that take dollars use
+      `*_usd` (decimal).
+    * Errors are JSON with a stable `error` code (see the `Error` schema and `spec/errors.json`).
+    * Requests are rate limited per credential (600/min) or, without one, per IP (60/min).
+      Over the limit: HTTP 429 `rate_limited` with `Retry-After`. Provider hooks, `/v1/health`, and
+      `/v1/status` are exempt.
+
+    **Topic path parameters.** A topic is `@handle/name` or `t_<26 base32 chars>`. In paths it is
+    written literally (`/@alice/doorbell/json`); the slash in a namespaced topic is part of the
+    topic. Tools that percent-encode path parameters (`%40alice%2Fdoorbell`) also work, because
+    the relay decodes the path before parsing it. Several topics can be subscribed at once,
+    separated by commas (`/t_a…,t_b…/json`).
+
+    The message envelope is defined normatively by
+    [`spec/schema/message.schema.json`](https://github.com/curtcox/subetha/blob/main/spec/schema/message.schema.json);
+    `components.schemas.Envelope` mirrors it (a test keeps the two in sync).
+  license:
+    name: MIT
+  contact:
+    url: https://github.com/curtcox/subetha
+externalDocs:
+  description: Developer docs
+  url: https://subetha.org/docs/
+servers:
+  - url: https://subetha.org
+    description: Production
+  - url: https://staging.subetha.org
+    description: Staging (providers in test mode)
+  - url: http://localhost:8787
+    description: Local (wrangler dev)
+security:
+  - bearerAuth: []
+  - basicAuth: []
+  - authQuery: []
+  - deviceSignature: []
+  - {}
+tags:
+  - name: publish
+    description: ntfy-compatible publishing.
+  - name: subscribe
+    description: ntfy-compatible subscriptions (JSON stream, SSE, raw, WebSocket, poll).
+  - name: meta
+  - name: account
+  - name: billing
+  - name: tokens
+  - name: topics
+  - name: traces
+  - name: endpoints
+    description: Verified non-SDK destinations (email, SMS, voice, webhook, push, LXMF).
+  - name: subscriptions
+    description: Topic → endpoint bindings (the topic owner pays for delivery).
+  - name: slack
+  - name: devices
+    description: Device enrollment (RFC 8628-style device flow). In progress.
+  - name: hooks
+    description: Inbound provider webhooks. Called by Stripe, Twilio, and Slack, not by clients.
+  - name: mcp
+    description: Remote MCP server for agents. In progress.
+  - name: dev
+    description: Local development only.
+
+paths:
+  # ------------------------------------------------------------------ ntfy-compatible
+  /:
+    post:
+      tags: [publish]
+      operationId: publishJson
+      summary: Publish a JSON envelope
+      description: |
+        ntfy JSON publishing, extended to full SubEtha envelopes. Signed messages (spec §4) and
+        E2EE messages (spec §5) must use this form. ntfy aliases are accepted: `priority` as a
+        name (`high`), `attach` + `filename`, and `markdown: true`. `delay` is rejected
+        (`unsupported`). Route headers (`X-Route-Mode`, …) override `route` in the body.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XDryRun"
+        - $ref: "#/components/parameters/XRouteMode"
+        - $ref: "#/components/parameters/XMaxCost"
+        - $ref: "#/components/parameters/XDeny"
+        - $ref: "#/components/parameters/XAllow"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - type: object
+                  properties:
+                    priority:
+                      oneOf:
+                        - type: integer
+                          minimum: 1
+                          maximum: 5
+                        - enum: [min, low, default, high, max, urgent]
+                    attach: { type: string, description: ntfy alias for `attachment.url`. }
+                    filename: { type: string, description: ntfy alias for `attachment.name`. }
+                    markdown: { type: boolean, description: "`true` sets `content_type: text/markdown`." }
+            example: { topic: "@alice/doorbell", title: Front door, message: Opened, priority: 4, tags: [door] }
+      responses:
+        "200": { $ref: "#/components/responses/Published" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /{topic}:
+    parameters:
+      - $ref: "#/components/parameters/Topic"
+    put:
+      tags: [publish]
+      operationId: publishPut
+      summary: Publish (ntfy, PUT)
+      description: Same as `POST /{topic}`.
+      parameters: &publishParams
+        - $ref: "#/components/parameters/XTitle"
+        - $ref: "#/components/parameters/XPriority"
+        - $ref: "#/components/parameters/XTags"
+        - $ref: "#/components/parameters/XClick"
+        - $ref: "#/components/parameters/XIcon"
+        - $ref: "#/components/parameters/XActions"
+        - $ref: "#/components/parameters/XAttach"
+        - $ref: "#/components/parameters/XMarkdown"
+        - $ref: "#/components/parameters/XExpires"
+        - $ref: "#/components/parameters/XFilename"
+        - $ref: "#/components/parameters/XMessage"
+        - $ref: "#/components/parameters/XDelay"
+        - $ref: "#/components/parameters/XRouteMode"
+        - $ref: "#/components/parameters/XMaxCost"
+        - $ref: "#/components/parameters/XDeny"
+        - $ref: "#/components/parameters/XAllow"
+        - $ref: "#/components/parameters/XDeadline"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XDryRun"
+        - $ref: "#/components/parameters/XSender"
+        - $ref: "#/components/parameters/XSignature"
+        - $ref: "#/components/parameters/XMessageId"
+        - $ref: "#/components/parameters/XTime"
+        - $ref: "#/components/parameters/MessageQuery"
+        - $ref: "#/components/parameters/TitleQuery"
+        - $ref: "#/components/parameters/PriorityQuery"
+        - $ref: "#/components/parameters/TagsQuery"
+      requestBody: &publishBody
+        description: |
+          The message text (UTF-8, at most 4096 bytes); empty bodies use `X-Message`/`?message=` or
+          "triggered". With `X-Filename`, the body is the attachment (up to 15 MB).
+        content:
+          text/plain:
+            schema: { type: string, maxLength: 4096 }
+            example: Backup done
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses: &publishResponses
+        "200": { $ref: "#/components/responses/Published" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    post:
+      tags: [publish]
+      operationId: publish
+      summary: Publish (ntfy)
+      description: |
+        `curl -d "Backup done" https://subetha.org/@me/backups`. ntfy headers, their short aliases,
+        and query-string equivalents (`?title=…`) are accepted. The publisher pays for the publish;
+        the topic owner pays for fan-out and delivery. Anonymous publishes need the topic policy
+        `public_publish` and a funded owner (else `no_funded_owner`, HTTP 402).
+      parameters: *publishParams
+      requestBody: *publishBody
+      responses: *publishResponses
+    get:
+      tags: [publish]
+      operationId: topicPage
+      summary: Open the topic in the web console
+      description: Browsers visiting a topic URL are redirected to the console. ntfy's "publish via GET" is not supported.
+      security: []
+      responses:
+        "302":
+          description: Redirect to `/console/#topic=…`.
+
+  /{topics}/json:
+    parameters:
+      - $ref: "#/components/parameters/Topics"
+    get:
+      tags: [subscribe]
+      operationId: subscribeJson
+      summary: Subscribe (newline-delimited JSON)
+      description: |
+        A long-lived NDJSON stream. The first line is an `open` event, then each message as it
+        arrives, with periodic `keepalive` events. With `poll=1` the cached messages are returned
+        and the connection closes (`since` defaults to `all` for polls). The topic owner pays for
+        the connection and live deliveries.
+      parameters: &subscribeParams
+        - $ref: "#/components/parameters/Since"
+        - $ref: "#/components/parameters/Poll"
+        - $ref: "#/components/parameters/PriorityFilter"
+        - $ref: "#/components/parameters/TagsFilter"
+        - $ref: "#/components/parameters/Scheduled"
+      responses:
+        "200":
+          description: One JSON envelope per line.
+          content:
+            application/x-ndjson:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /{topics}/sse:
+    parameters:
+      - $ref: "#/components/parameters/Topics"
+    get:
+      tags: [subscribe]
+      operationId: subscribeSse
+      summary: Subscribe (server-sent events)
+      description: 'Each event is `id: <message id>` and `data: <JSON envelope>`. Resume with `since=<last id>`.'
+      parameters: *subscribeParams
+      responses:
+        "200":
+          description: An `text/event-stream` of envelopes.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /{topics}/raw:
+    parameters:
+      - $ref: "#/components/parameters/Topics"
+    get:
+      tags: [subscribe]
+      operationId: subscribeRaw
+      summary: Subscribe (message bodies only)
+      description: One message body per line (newlines in bodies become spaces). Keepalives are empty lines.
+      parameters: *subscribeParams
+      responses:
+        "200":
+          description: Plain text.
+          content:
+            text/plain:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /{topics}/ws:
+    parameters:
+      - $ref: "#/components/parameters/Topics"
+    get:
+      tags: [subscribe]
+      operationId: subscribeWs
+      summary: Subscribe (WebSocket)
+      description: |
+        Upgrade to a WebSocket. Each server frame is one JSON envelope. Clients may send
+        `{"event":"ack","id":"<message id>"}` to acknowledge a message (stops escalation).
+        One topic per WebSocket. Browsers pass the token as `?auth=<base64("Bearer <token>")>`.
+      parameters: *subscribeParams
+      responses:
+        "101":
+          description: Switching protocols.
+        "400": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /{topics}/auth:
+    parameters:
+      - $ref: "#/components/parameters/Topics"
+    get:
+      tags: [subscribe]
+      operationId: checkTopicAccess
+      summary: Check access (ntfy)
+      description: 'ntfy clients call this to check credentials. Returns `{"success": true}` when every topic exists and the caller may read it.'
+      responses:
+        "200":
+          description: Access OK.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { success: { const: true } }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  # ------------------------------------------------------------------ meta
+  /v1/health:
+    get:
+      tags: [meta]
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { const: true }
+                  environment: { enum: [local, staging, production] }
+                  time: { type: integer, description: Unix seconds. }
+  /v1/prices:
+    get:
+      tags: [meta]
+      operationId: prices
+      summary: The generated price table
+      description: Generated from `pricing/costs.yaml`. Every SKU at every tier has a margin above the floor.
+      security: []
+      responses:
+        "200":
+          description: Price table.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /v1/status:
+    get:
+      tags: [meta]
+      operationId: status
+      summary: Component health and configured transports (for the status page)
+      security: []
+      responses:
+        "200":
+          description: Healthy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "503":
+          description: A core component (D1 or KV) is failing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+  /v1/config:
+    get:
+      tags: [meta]
+      operationId: config
+      summary: Public client configuration
+      security: []
+      responses:
+        "200":
+          description: Config for web clients.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  environment: { enum: [local, staging, production] }
+                  clerk_publishable_key: { type: [string, "null"] }
+                  vapid_public_key:
+                    type: [string, "null"]
+                    description: Web Push application server key (base64url). Present once Web Push is configured.
+
+  # ------------------------------------------------------------------ account
+  /v1/account:
+    get:
+      tags: [account]
+      operationId: getAccount
+      responses:
+        "200":
+          description: The caller's account.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [account]
+      operationId: createAccount
+      summary: Create an account (Clerk session required)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                handle: { type: string, pattern: "^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$" }
+                email: { type: string, format: email }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  handle: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [account]
+      operationId: updateAccount
+      summary: Set the handle (once), the account daily cap, or the kill switch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                handle: { type: string }
+                daily_cap_micros: { type: [integer, "null"], minimum: 0 }
+                paused: { type: boolean, description: Account-wide kill switch. }
+                auto_recharge:
+                  description: |
+                    Off-session top-up with the saved card when the balance drops below
+                    `threshold_usd` (`null` turns it off). Needs a card saved by a checkout with
+                    `save_card: true` (else `conflict`). Not a subscription; it stops after a decline.
+                  oneOf:
+                    - type: "null"
+                    - type: object
+                      required: [threshold_usd, amount_usd]
+                      properties:
+                        threshold_usd: { type: number, minimum: 0 }
+                        amount_usd: { type: number }
+      responses:
+        "200":
+          description: The updated account record.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/balance:
+    get:
+      tags: [account]
+      operationId: getBalance
+      responses:
+        "200":
+          description: Balance.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  available_usd_micros: { type: integer }
+                  reserved_usd_micros: { type: integer }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/ledger:
+    get:
+      tags: [account]
+      operationId: getLedger
+      summary: Append-only ledger entries
+      parameters:
+        - name: after
+          in: query
+          schema: { type: integer, default: 0 }
+          description: Return entries with a sequence number greater than this.
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100 }
+      responses:
+        "200":
+          description: Ledger entries (`topup`, `reserve`, `settle`, `release`, `refund`, `adjust`).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+
+  # ------------------------------------------------------------------ billing
+  /v1/billing/checkout:
+    post:
+      tags: [billing]
+      operationId: createCheckout
+      summary: Start a Stripe Checkout top-up
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount_usd]
+              properties:
+                amount_usd: { type: number, description: "Top-up amount in USD (minimum $5)." }
+                success_url: { type: string, format: uri }
+                cancel_url: { type: string, format: uri }
+                save_card: { type: boolean, description: Save the card for auto-recharge. }
+      responses:
+        "200":
+          description: Checkout session; redirect the user to `url`.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  url: { type: string, format: uri }
+                  creditMicros: { type: integer }
+                  feeMicros: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  # ------------------------------------------------------------------ tokens
+  /v1/tokens:
+    get:
+      tags: [tokens]
+      operationId: listTokens
+      responses:
+        "200":
+          description: Tokens (secrets are never returned).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tokens:
+                    type: array
+                    items: { $ref: "#/components/schemas/Token" }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [tokens]
+      operationId: createToken
+      summary: Create a scoped, capped API token
+      description: |
+        Scopes: `admin`, `*`, `publish`, `subscribe`, or `publish:<pattern>` / `subscribe:<pattern>`
+        where the pattern is `*`, an exact topic, or `@handle/*`. **Publishable tokens** (for web
+        pages) set `origins`, exactly one non-wildcard topic scope, and a `daily_cap_usd`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scopes]
+              properties:
+                name: { type: string }
+                scopes:
+                  type: array
+                  minItems: 1
+                  items: { type: string, examples: ["publish:@alice/*", "subscribe:@alice/doorbell", admin] }
+                transports:
+                  type: array
+                  items: { $ref: "#/components/schemas/Transport" }
+                  description: Allow-list of transports this token's publishes may use.
+                daily_cap_usd: { type: number }
+                total_cap_usd: { type: number }
+                origins:
+                  type: array
+                  items: { type: string, pattern: "^https?://[^/]+$" }
+                expires_in_s: { type: integer }
+      responses:
+        "201":
+          description: The token secret, shown once.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  token: { type: string, pattern: "^se_[a-z2-7]{16}_[a-z2-7]{32}$" }
+                  scopes: { type: array, items: { type: string } }
+                  note: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/tokens/{id}:
+    delete:
+      tags: [tokens]
+      operationId: revokeToken
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Revoked.
+          content:
+            application/json:
+              schema: { type: object, properties: { revoked: { const: true } } }
+        "404": { $ref: "#/components/responses/Error" }
+
+  # ------------------------------------------------------------------ topics
+  /v1/topics:
+    get:
+      tags: [topics]
+      operationId: listTopics
+      responses:
+        "200":
+          description: Topics owned by the caller's account.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  topics:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        policy: { $ref: "#/components/schemas/TopicPolicy" }
+                        created_at: { type: integer }
+  /v1/topics/{topic}:
+    parameters:
+      - $ref: "#/components/parameters/Topic"
+    get:
+      tags: [topics]
+      operationId: getTopic
+      responses:
+        "200":
+          description: Topic metadata (owner only).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TopicMeta" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      tags: [topics]
+      operationId: putTopic
+      summary: Create or configure a topic
+      description: You can create topics in your own `@handle/…` namespace and secret `t_…` topics.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                policy: { $ref: "#/components/schemas/TopicPolicy" }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TopicMeta" }
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TopicMeta" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  # ------------------------------------------------------------------ traces & acks
+  /v1/traces/{id}:
+    get:
+      tags: [traces]
+      operationId: getTrace
+      summary: Per-message route and cost trace (topic owner only)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: Message id (ULID). }
+        - { name: topic, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Trace.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/ack:
+    post:
+      tags: [traces]
+      operationId: ack
+      summary: Acknowledge a message (stops escalation)
+      description: The caller needs read access to the topic (tokens need its subscribe scope; secret `t_` topics are readable by name).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [topic, id]
+              properties:
+                topic: { type: string }
+                id: { type: string }
+                via: { type: string, default: http, maxLength: 16, description: Transport the message arrived by. }
+      responses:
+        "200":
+          description: Acknowledged (idempotent).
+          content:
+            application/json:
+              schema: { type: object, properties: { acked: { const: true } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  # ------------------------------------------------------------------ endpoints
+  /v1/endpoints:
+    get:
+      tags: [endpoints]
+      operationId: listEndpoints
+      responses:
+        "200":
+          description: Endpoints (addresses masked).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  endpoints:
+                    type: array
+                    items: { $ref: "#/components/schemas/Endpoint" }
+    post:
+      tags: [endpoints]
+      operationId: createEndpoint
+      summary: Add an endpoint
+      description: |
+        `email`, `sms`, and `voice` endpoints get a 6-digit code (charged like one delivery) and
+        must be verified within 30 minutes (5 attempts). `sms`/`voice` accept US numbers only
+        (`+1NXXNXXXXXX`). `webhook` endpoints return a signing secret once. Slack endpoints are
+        created by `POST /v1/slack/bindings`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, address]
+              properties:
+                kind: { enum: [email, sms, voice, webhook, webpush, apns, fcm, lxmf] }
+                address:
+                  type: string
+                  description: |
+                    email address; E.164 US number; `https://` URL; Web Push subscription JSON
+                    (`{"endpoint":…,"keys":{"p256dh":…,"auth":…}}`); APNs device token (hex);
+                    FCM registration token; LXMF destination hash (32 hex).
+                name: { type: string }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Endpoint"
+                  - type: object
+                    properties:
+                      secret: { type: string, description: Webhook signing secret (`whsec_…`), shown once. }
+                      note: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/endpoints/{id}:
+    delete:
+      tags: [endpoints]
+      operationId: deleteEndpoint
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Deleted (with its subscriptions).
+          content:
+            application/json:
+              schema: { type: object, properties: { deleted: { const: true } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/endpoints/{id}/verify:
+    post:
+      tags: [endpoints]
+      operationId: verifyEndpoint
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, pattern: "^[0-9]{6}$" }
+      responses:
+        "200":
+          description: Verified.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Endpoint" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  # ------------------------------------------------------------------ subscriptions
+  /v1/subscriptions:
+    get:
+      tags: [subscriptions]
+      operationId: listSubscriptions
+      responses:
+        "200":
+          description: Endpoint subscriptions.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscriptions:
+                    type: array
+                    items: { $ref: "#/components/schemas/Subscription" }
+    post:
+      tags: [subscriptions]
+      operationId: createSubscription
+      summary: Deliver a topic to an endpoint
+      description: |
+        Only the topic owner can add endpoint subscriptions (the owner pays for delivery).
+        `after_s` makes this an escalation step: it is used only if the message is still unacked
+        after that many seconds. `min_priority` skips lower-priority messages.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [topic, endpoint_id]
+              properties:
+                topic: { type: string }
+                endpoint_id: { type: string }
+                filter: { $ref: "#/components/schemas/SubscriptionFilter" }
+                after_s: { type: integer, minimum: 0, maximum: 3600 }
+                min_priority: { type: integer, minimum: 1, maximum: 5 }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Subscription" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/subscriptions/{id}:
+    delete:
+      tags: [subscriptions]
+      operationId: deleteSubscription
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema: { type: object, properties: { deleted: { const: true } } }
+        "404": { $ref: "#/components/responses/Error" }
+
+  # ------------------------------------------------------------------ Slack
+  /v1/slack/install:
+    get:
+      tags: [slack]
+      operationId: slackInstall
+      summary: Get the Slack OAuth install URL
+      responses:
+        "200":
+          description: Redirect the user to `url`.
+          content:
+            application/json:
+              schema: { type: object, properties: { url: { type: string, format: uri } } }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/slack/oauth:
+    get:
+      tags: [slack]
+      operationId: slackOAuthCallback
+      summary: Slack OAuth redirect target
+      security: []
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses:
+        "302":
+          description: Back to the console.
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/slack/bindings:
+    post:
+      tags: [slack]
+      operationId: slackBind
+      summary: Bind a Slack channel to a topic (both directions by default)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [team_id, channel, topic]
+              properties:
+                team_id: { type: string }
+                channel: { type: string, pattern: "^[CG][A-Z0-9]{6,}$" }
+                topic: { type: string }
+                inbound: { type: boolean, default: true, description: Channel messages publish to the topic. }
+                outbound: { type: boolean, default: true, description: Topic messages post to the channel. }
+      responses:
+        "201":
+          description: Bound.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bound: { const: true }
+                  endpoint_id: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  # ------------------------------------------------------------------ devices
+  /v1/devices:
+    get:
+      tags: [devices]
+      operationId: listDevices
+      summary: Enrolled devices
+      responses:
+        "200":
+          description: Devices (including revoked ones, with `revoked_at`).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  devices:
+                    type: array
+                    items: { $ref: "#/components/schemas/Device" }
+    post:
+      tags: [devices]
+      operationId: enrollDevice
+      summary: Enroll a device directly by its id (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id]
+              properties:
+                device_id: { type: string, pattern: "^dev_[a-z2-7]{52}$" }
+                name: { type: string }
+                capabilities: { type: array, items: { $ref: "#/components/schemas/Transport" } }
+      responses:
+        "201":
+          description: Enrolled.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  enrolled: { const: true }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/devices/{id}:
+    delete:
+      tags: [devices]
+      operationId: revokeDevice
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, pattern: "^dev_[a-z2-7]{52}$" } }
+      responses:
+        "200":
+          description: Revoked.
+          content:
+            application/json:
+              schema: { type: object, properties: { revoked: { const: true } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/device/code:
+    post:
+      tags: [devices]
+      operationId: deviceCode
+      summary: "Device flow, step 1: get a user code"
+      description: |
+        The device proves it holds its key by signing
+        `"subetha-enroll-v1\n" + device_id + "\n" + time` (Ed25519, base64url) and gets a
+        `user_code` to show the owner. Codes last 10 minutes. The SDK's `enrollmentProof(key)`
+        builds `device_id`, `time`, and `proof`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id, time, proof]
+              properties:
+                device_id: { type: string, pattern: "^dev_[a-z2-7]{52}$", description: The device's Ed25519 identity. }
+                time: { type: integer, description: Unix seconds (±300 s). }
+                proof: { type: string, description: base64url Ed25519 signature. }
+                name: { type: string, maxLength: 64 }
+                capabilities: { type: array, items: { $ref: "#/components/schemas/Transport" } }
+      responses:
+        "200":
+          description: Device authorization.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device_code: { type: string, description: Secret; the device polls with it. }
+                  user_code: { type: string, examples: [BCDF-GHJK] }
+                  verification_uri: { type: string, format: uri }
+                  verification_uri_complete: { type: string, format: uri }
+                  expires_in: { type: integer }
+                  interval: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/device/approve:
+    post:
+      tags: [devices]
+      operationId: deviceApprove
+      summary: "Device flow, step 2: the owner approves the code (admin)"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_code]
+              properties:
+                user_code: { type: string }
+      responses:
+        "200":
+          description: Enrolled.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device_id: { type: string }
+                  name: { type: string }
+                  enrolled: { const: true }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/device/token:
+    post:
+      tags: [devices]
+      operationId: deviceToken
+      summary: "Device flow, step 3: poll until approved"
+      description: After approval the device authenticates every request with `X-Device-Id`, `X-Device-Time`, and `X-Device-Signature` (see the `deviceSignature` security scheme). No bearer token is issued.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_code]
+              properties:
+                device_code: { type: string }
+      responses:
+        "200":
+          description: Approved.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device_id: { type: string }
+                  account_id: { type: string }
+                  auth: { type: string }
+        "400":
+          description: 'RFC 8628-style poll errors: `{"error": "authorization_pending"}` or `{"error": "expired_token"}`.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { enum: [authorization_pending, expired_token] }
+
+  # ------------------------------------------------------------------ MCP
+  /mcp:
+    get:
+      tags: [mcp]
+      operationId: mcpGet
+      summary: Not supported (no server-initiated streams)
+      responses:
+        "405":
+          description: Use POST.
+    post:
+      tags: [mcp]
+      operationId: mcp
+      summary: Remote MCP server (Streamable HTTP, JSON-RPC 2.0, JSON responses)
+      description: |
+        Methods: `initialize`, `ping`, `tools/list`, `tools/call`, and notifications (202, no body).
+        Batches are accepted. Tools: `publish`, `poll`, `wait_for_message` (long-poll, up to 50 s),
+        `list_topics`, `create_topic`, `estimate_cost`. Tools call the public API in-process with
+        the caller's credentials, so scopes, policies, and prepaid charges apply unchanged.
+        Without `Authorization` the response is 401 with a `WWW-Authenticate` header pointing at
+        `/.well-known/oauth-protected-resource`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/JsonRpcRequest"
+                - type: array
+                  items: { $ref: "#/components/schemas/JsonRpcRequest" }
+      responses:
+        "200":
+          description: JSON-RPC response(s).
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "202":
+          description: Notification accepted.
+        "400":
+          description: JSON-RPC parse error.
+        "401":
+          description: Authentication required.
+  /.well-known/oauth-protected-resource:
+    get:
+      tags: [mcp]
+      operationId: oauthProtectedResource
+      summary: OAuth 2.0 protected resource metadata (RFC 9728) for the MCP server
+      security: []
+      responses:
+        "200":
+          description: Metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resource: { type: string, format: uri }
+                  authorization_servers: { type: array, items: { type: string, format: uri } }
+                  bearer_methods_supported: { type: array, items: { type: string } }
+                  resource_documentation: { type: string, format: uri }
+
+  # ------------------------------------------------------------------ attachments
+  /file/{id}/{name}:
+    get:
+      tags: [publish]
+      operationId: downloadAttachment
+      summary: Download an attachment
+      description: |
+        Attachment URLs are returned in `attachment.url` when a file is published with
+        `X-Filename`. Anyone with the URL can download until the message expires; each download is
+        charged to the topic owner as one API request. Images, audio, video, plain text, and PDF are
+        served inline; everything else as a download. `/file/{id}` (without the name) also works.
+      security: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The file.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "402": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  # ------------------------------------------------------------------ hooks
+  /v1/hooks/stripe:
+    post:
+      tags: [hooks]
+      operationId: stripeWebhook
+      summary: Stripe events (checkout completion, auto-recharge payment intents, refunds, disputes)
+      security: []
+      parameters:
+        - { name: Stripe-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Received (idempotent by event id).
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/hooks/twilio/sms:
+    post:
+      tags: [hooks]
+      operationId: twilioInboundSms
+      summary: Inbound SMS (STOP, ACK <id>, or publish to the bound topic)
+      security: []
+      parameters:
+        - { name: X-Twilio-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { type: object, additionalProperties: { type: string } }
+      responses:
+        "200":
+          description: TwiML.
+          content:
+            text/xml:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/hooks/twilio/voice-ack:
+    post:
+      tags: [hooks]
+      operationId: twilioVoiceAck
+      summary: DTMF acknowledgement from a voice call (press 1)
+      security: []
+      parameters:
+        - { name: topic, in: query, required: true, schema: { type: string } }
+        - { name: id, in: query, required: true, schema: { type: string } }
+        - { name: t, in: query, required: true, schema: { type: string }, description: Ack token bound to topic and id. }
+        - { name: X-Twilio-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { type: object, additionalProperties: { type: string } }
+      responses:
+        "200":
+          description: TwiML.
+          content:
+            text/xml:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/hooks/twilio/voice-status:
+    post:
+      tags: [hooks]
+      operationId: twilioVoiceStatus
+      summary: Call status callback (settles a voice delivery to its actual duration)
+      security: []
+      parameters:
+        - { name: acct, in: query, required: true, schema: { type: string } }
+        - { name: ref, in: query, required: true, schema: { type: string } }
+        - { name: max, in: query, required: true, schema: { type: integer } }
+        - { name: t, in: query, required: true, schema: { type: string }, description: Token bound to acct, ref, and max. }
+        - { name: X-Twilio-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { type: object, additionalProperties: { type: string } }
+      responses:
+        "200":
+          description: TwiML.
+          content:
+            text/xml:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/hooks/slack/events:
+    post:
+      tags: [hooks]
+      operationId: slackEvents
+      summary: Slack Events API (url_verification and channel messages)
+      security: []
+      parameters:
+        - { name: X-Slack-Signature, in: header, required: true, schema: { type: string } }
+        - { name: X-Slack-Request-Timestamp, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: OK (or the url_verification challenge).
+        "401": { $ref: "#/components/responses/Error" }
+
+  # ------------------------------------------------------------------ dev
+  /v1/dev/bootstrap:
+    post:
+      tags: [dev]
+      operationId: devBootstrap
+      summary: Create a funded account and admin token (local only)
+      description: Only when `ENVIRONMENT=local` and `DEV_BOOTSTRAP_SECRET` is set; 404 elsewhere.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [secret]
+              properties:
+                secret: { type: string, examples: [local-dev-only] }
+                handle: { type: string }
+                credit_usd: { type: number }
+      responses:
+        "201":
+          description: Account and token.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  account_id: { type: string }
+                  handle: { type: [string, "null"] }
+                  token: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: An API token (`se_…`), a device token, or a Clerk session JWT.
+    basicAuth:
+      type: http
+      scheme: basic
+      description: For ntfy clients. Empty username, the token as the password.
+    deviceSignature:
+      type: apiKey
+      in: header
+      name: X-Device-Id
+      description: |
+        Enrolled devices sign each request instead of sending a token. Headers:
+        `X-Device-Id: dev_…`, `X-Device-Time: <unix seconds, ±300 s>`,
+        `X-Device-Nonce: <16–64 random base64url chars, single use>`, and
+        `X-Device-Signature: base64url(Ed25519(key, "subetha-req-v1\n" + METHOD + "\n" + host + "\n" + path?query + "\n" + time + "\n" + nonce + "\n" + hex(sha256(body))))`.
+        A replayed signature is rejected, and the host binds it to one deployment.
+        Devices can publish and subscribe but not manage the account. The SDK does this with
+        `new SubEtha({ deviceKey, signRequests: true })`.
+    authQuery:
+      type: apiKey
+      in: query
+      name: auth
+      description: ntfy-style `?auth=<base64url("Bearer <token>")>`, used by browsers for WebSockets.
+
+  parameters:
+    Topic:
+      name: topic
+      in: path
+      required: true
+      description: "`@handle/name` or `t_<26 base32>` (the slash is literal; `%2F` also works)."
+      schema:
+        type: string
+        pattern: "^(@[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?/[A-Za-z0-9_-]{1,64}|t_[a-z2-7]{26})$"
+      examples:
+        namespaced: { value: "@alice/doorbell" }
+        secret: { value: t_mfrggzdfmztwq2lknnwg23tpoa }
+    Topics:
+      name: topics
+      in: path
+      required: true
+      description: One topic, or several separated by commas (not for `ws`).
+      schema: { type: string }
+      examples:
+        one: { value: "@alice/doorbell" }
+        several: { value: "@alice/doorbell,@alice/backups" }
+    Since:
+      name: since
+      in: query
+      description: Replay cached messages first. A message id (exclusive), Unix seconds, a duration (`10m`, `2h`, `1d`), or `all`.
+      schema: { type: string, examples: [all, 10m, "1763750000", 01JD0000000000000000000000] }
+    Poll:
+      name: poll
+      in: query
+      description: "`1` returns cached messages and closes."
+      schema: { enum: ["1", "true", "yes"] }
+    PriorityFilter:
+      name: priority
+      in: query
+      description: Only these priorities (numbers or names, comma-separated). Aliases `prio`, `p`.
+      schema: { type: string, examples: ["4,5", "high,urgent"] }
+    TagsFilter:
+      name: tags
+      in: query
+      description: Only messages carrying all these tags. Aliases `tag`, `ta`.
+      schema: { type: string, examples: ["door,warning"] }
+    Scheduled:
+      name: scheduled
+      in: query
+      description: Accepted for ntfy compatibility; scheduled messages are not supported in v0.
+      schema: { type: string }
+    XTitle:
+      name: X-Title
+      in: header
+      description: Message title. Aliases `Title`, `t`; query `?title=`. RFC 2047 encoded words are decoded.
+      schema: { type: string, maxLength: 256 }
+    XPriority:
+      name: X-Priority
+      in: header
+      description: 1–5 or `min|low|default|high|max|urgent`. Aliases `Priority`, `prio`, `p`; query `?priority=`.
+      schema: { type: string, examples: ["4", high] }
+    XTags:
+      name: X-Tags
+      in: header
+      description: Comma-separated tags. Aliases `Tags`, `Tag`, `ta`; query `?tags=`.
+      schema: { type: string }
+    XClick:
+      name: X-Click
+      in: header
+      description: URL opened when the notification is clicked. Alias `Click`.
+      schema: { type: string }
+    XIcon:
+      name: X-Icon
+      in: header
+      description: Notification icon URL. Alias `Icon`.
+      schema: { type: string }
+    XActions:
+      name: X-Actions
+      in: header
+      description: "ntfy action buttons: `view, Open, https://…; http, Close, https://…, clear=true` or a JSON array. Alias `Actions`."
+      schema: { type: string }
+    XAttach:
+      name: X-Attach
+      in: header
+      description: URL of an attachment. Aliases `Attach`, `a`.
+      schema: { type: string }
+    XMarkdown:
+      name: X-Markdown
+      in: header
+      description: "`yes|true|1` sets `content_type: text/markdown`. Aliases `Markdown`, `md`."
+      schema: { type: string }
+    XExpires:
+      name: X-Expires
+      in: header
+      description: Unix seconds; capped by the topic's retention.
+      schema: { type: integer }
+    XFilename:
+      name: X-Filename
+      in: header
+      description: |
+        Upload the request body as an attachment with this file name (up to 15 MB; aliases
+        `Filename`, `f`). The file is stored in R2 until the message expires and `attachment.url`
+        points at `/file/{id}/{name}`. The publisher pays `attachment_upload` plus storage.
+        Put the message text in `X-Message`.
+      schema: { type: string, maxLength: 200 }
+    XMessage:
+      name: X-Message
+      in: header
+      description: Message text when the body is an attachment or empty. Aliases `Message`, `m`; query `?message=`.
+      schema: { type: string }
+    XDelay:
+      name: X-Delay
+      in: header
+      description: Scheduled delivery is not supported in v0 and is rejected (`unsupported`). Also `Delay`, `X-At`, `X-In`.
+      schema: { type: string }
+    XRouteMode:
+      name: X-Route-Mode
+      in: header
+      description: "`any` (cheapest viable path, escalate if unacked), `fast`, `all` (every allowed transport), `cheap` (free transports only)."
+      schema: { enum: [any, fast, all, cheap], default: any }
+    XMaxCost:
+      name: X-Max-Cost
+      in: header
+      description: Maximum delivery cost for this message, in USD (decimal). Deliveries that would exceed it are dropped from the plan.
+      schema: { type: string, examples: ["0.02"] }
+    XDeny:
+      name: X-Deny
+      in: header
+      description: Comma-separated transports never to use for this message.
+      schema: { type: string, examples: ["sms,voice"] }
+    XAllow:
+      name: X-Allow
+      in: header
+      description: Comma-separated transports that may be used (all others are denied).
+      schema: { type: string, examples: ["ws,webpush"] }
+    XDeadline:
+      name: X-Deadline
+      in: header
+      description: Reserved (seconds). Not yet enforced by the relay.
+      schema: { type: integer }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: |
+        Retrying with the same key returns the original message (`X-Duplicate: 1`) without
+        delivering or charging again. Reusing a key with a different body is `conflict` (409).
+      schema: { type: string, maxLength: 256 }
+    XDryRun:
+      name: X-Dry-Run
+      in: header
+      description: "`1` returns the route plan and cost estimate; nothing is delivered (charged as one API request)."
+      schema: { enum: ["1", "true", "yes"] }
+    XSender:
+      name: X-Sender
+      in: header
+      description: Signer's device id (`dev_…`), for header-signed messages.
+      schema: { type: string }
+    XSignature:
+      name: X-Signature
+      in: header
+      description: "`ed25519:<base64url>` over the canonical envelope (spec §4). Requires `X-Message-Id` and `X-Time`."
+      schema: { type: string }
+    XMessageId:
+      name: X-Message-Id
+      in: header
+      description: Sender-chosen ULID.
+      schema: { type: string }
+    XTime:
+      name: X-Time
+      in: header
+      description: Sender-chosen Unix seconds.
+      schema: { type: integer }
+    MessageQuery:
+      name: message
+      in: query
+      description: Message text when the body is empty. Alias `m`.
+      schema: { type: string }
+    TitleQuery:
+      name: title
+      in: query
+      schema: { type: string }
+    PriorityQuery:
+      name: priority
+      in: query
+      schema: { type: string }
+    TagsQuery:
+      name: tags
+      in: query
+      schema: { type: string }
+
+  headers:
+    XCostMicros:
+      description: µ$ charged to the caller for this request (or estimated, for dry runs).
+      schema: { type: integer }
+    XMessageId:
+      description: The message id.
+      schema: { type: string }
+    XDuplicate:
+      description: "`1` when an idempotency key matched an earlier publish."
+      schema: { type: string }
+
+  responses:
+    Published:
+      description: The stored envelope, or a dry-run estimate when `X-Dry-Run` was set.
+      headers:
+        X-Cost-Micros: { $ref: "#/components/headers/XCostMicros" }
+        X-Message-Id: { $ref: "#/components/headers/XMessageId" }
+        X-Duplicate: { $ref: "#/components/headers/XDuplicate" }
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/Envelope"
+              - $ref: "#/components/schemas/DryRun"
+    Error:
+      description: Error (see `Error.error` for the stable code).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Rate limited.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Transport:
+      enum: [ws, sse, poll, webpush, apns, fcm, webhook, email, slack, sms, voice, mcp, lxmf, ble, audio, qr, lan]
+      description: Transport ids (spec §10). `ble`, `audio`, `qr`, and `lan` are edge transports and never touch the relay.
+
+    Envelope:
+      type: object
+      description: |
+        The message envelope (spec §2), a superset of ntfy's message JSON. Mirrors
+        `spec/schema/message.schema.json`. Unknown fields are preserved by relays.
+      required: [topic]
+      additionalProperties: true
+      properties:
+        id: { type: string, pattern: "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$", description: ULID; the dedupe key across transports. }
+        time: { type: integer, minimum: 0, description: Unix seconds. }
+        expires: { type: integer, minimum: 0, description: Unix seconds. }
+        event: { enum: [message, open, keepalive, poll_request] }
+        topic:
+          type: string
+          pattern: "^(@[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?/[A-Za-z0-9_-]{1,64}|t_[a-z2-7]{26})$"
+        title: { type: string, maxLength: 256 }
+        message: { type: string, maxLength: 4096 }
+        priority: { type: integer, minimum: 1, maximum: 5, description: 3 is the default and is omitted. }
+        tags: { type: array, items: { type: string, maxLength: 64 }, maxItems: 16 }
+        click: { type: string, maxLength: 2048 }
+        icon: { type: string, maxLength: 2048 }
+        actions:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            required: [action, label]
+            properties:
+              action: { enum: [view, http, broadcast] }
+              label: { type: string }
+              url: { type: string }
+              clear: { type: boolean }
+        attachment:
+          type: object
+          required: [name, url]
+          properties:
+            name: { type: string }
+            url: { type: string }
+            size: { type: integer, minimum: 0 }
+            type: { type: string }
+            expires: { type: integer }
+        content_type: { enum: [text/plain, text/markdown, application/json, application/octet-stream] }
+        sender: { type: string, pattern: "^dev_[a-z2-7]{52}$", description: Signer's device id. }
+        sig: { type: string, pattern: "^ed25519:[A-Za-z0-9_-]{86}$" }
+        enc:
+          type: object
+          required: [alg, kid, nonce]
+          description: Present when protected fields are end-to-end encrypted (spec §5).
+          properties:
+            alg: { const: xchacha20poly1305 }
+            kid: { type: string, maxLength: 64 }
+            nonce: { type: string, pattern: "^[A-Za-z0-9_-]{32}$" }
+        route:
+          type: object
+          properties:
+            mode: { enum: [any, fast, all, cheap] }
+            max_cost_usd_micros: { type: integer, minimum: 0 }
+            deny: { type: array, items: { $ref: "#/components/schemas/Transport" } }
+            allow: { type: array, items: { $ref: "#/components/schemas/Transport" } }
+            deadline_s: { type: integer, minimum: 1 }
+        hops: { type: integer, minimum: 0, maximum: 16, description: Remaining edge-relay hops. }
+
+    DryRun:
+      type: object
+      properties:
+        dry_run: { const: true }
+        estimate_usd_micros: { type: integer, description: Worst-case cost if published now. }
+        plan:
+          type: array
+          items: { $ref: "#/components/schemas/PlannedDelivery" }
+        message: { $ref: "#/components/schemas/Envelope" }
+
+    PlannedDelivery:
+      type: object
+      properties:
+        subscriber: { type: string, description: Opaque subscriber id. }
+        transport: { $ref: "#/components/schemas/Transport" }
+        sku: { type: [string, "null"] }
+        cost_micros: { type: integer }
+        after_s: { type: integer, description: Escalation delay; 0 = immediately. }
+
+    Error:
+      type: object
+      required: [error, http, message]
+      properties:
+        error:
+          description: Stable machine-readable code (spec/errors.json).
+          enum:
+            - bad_request
+            - invalid_topic
+            - invalid_message
+            - message_too_large
+            - unsupported
+            - unauthorized
+            - signature_required
+            - bad_signature
+            - insufficient_balance
+            - no_funded_owner
+            - forbidden
+            - spend_cap_exceeded
+            - transport_denied
+            - topic_paused
+            - not_found
+            - conflict
+            - rate_limited
+            - internal
+            - provider_unavailable
+        http: { type: integer }
+        message: { type: string }
+        shortfall_usd_micros: { type: integer, description: "On `insufficient_balance`: how much more is needed." }
+        payer: { type: string, description: "`topic_owner` when the owner's balance, not the caller's, was short." }
+      additionalProperties: true
+      example: { error: insufficient_balance, http: 402, message: "balance cannot cover the worst-case cost", shortfall_usd_micros: 1234 }
+
+    Account:
+      type: object
+      properties:
+        id: { type: string }
+        handle: { type: [string, "null"] }
+        email: { type: [string, "null"] }
+        tier: { type: string, description: Markup tier from trailing-12-month top-ups. }
+        balance_usd_micros: { type: integer }
+        reserved_usd_micros: { type: integer }
+        created_at: { type: integer }
+
+    Token:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        scopes: { type: array, items: { type: string } }
+        transports: { type: [array, "null"], items: { $ref: "#/components/schemas/Transport" } }
+        daily_cap_micros: { type: [integer, "null"] }
+        total_cap_micros: { type: [integer, "null"] }
+        origins: { type: [array, "null"], items: { type: string } }
+        expires_at: { type: [integer, "null"] }
+        created_at: { type: integer }
+        revoked_at: { type: [integer, "null"] }
+
+    TopicPolicy:
+      type: object
+      properties:
+        public_publish: { type: boolean, description: Anyone may publish (charged to the owner, rate-limited and capped). }
+        public_read: { type: boolean, description: Anyone may subscribe to a namespaced topic. Secret topics are readable by name. }
+        anon_rate_per_min: { type: integer, default: 60 }
+        anon_daily_cap_micros: { type: integer, default: 1000000 }
+        require_signature: { type: boolean }
+        allowed_publishers: { type: array, items: { type: string } }
+        allowed_readers: { type: array, items: { type: string } }
+        allow_transports: { type: array, items: { $ref: "#/components/schemas/Transport" } }
+        deny_transports: { type: array, items: { $ref: "#/components/schemas/Transport" } }
+        max_cost_per_message_micros: { type: integer }
+        daily_cap_micros: { type: integer }
+        retention_s: { type: integer }
+        paused: { type: boolean }
+        min_priority:
+          type: object
+          additionalProperties: { type: integer, minimum: 1, maximum: 5 }
+          description: "Minimum priority per transport, e.g. `{\"sms\": 4}`."
+        email_senders: { type: array, items: { type: string }, description: Inbound email senders allowed to publish (`*` = anyone). }
+        quiet_hours:
+          type: object
+          properties:
+            start: { type: string, pattern: "^\\d{2}:\\d{2}$" }
+            end: { type: string, pattern: "^\\d{2}:\\d{2}$" }
+
+    TopicMeta:
+      type: object
+      properties:
+        name: { type: string }
+        owner: { type: string }
+        policy: { $ref: "#/components/schemas/TopicPolicy" }
+        created_at: { type: integer }
+        tier: { type: string }
+
+    Endpoint:
+      type: object
+      properties:
+        id: { type: string, examples: [ep_01JD0000000000000000000000] }
+        kind: { $ref: "#/components/schemas/Transport" }
+        address: { type: string, description: Masked. }
+        verified: { type: boolean }
+        created_at: { type: integer }
+
+    SubscriptionFilter:
+      type: object
+      properties:
+        priority: { type: array, items: { type: integer, minimum: 1, maximum: 5 } }
+        tags: { type: array, items: { type: string } }
+
+    Subscription:
+      type: object
+      properties:
+        id: { type: string }
+        topic: { type: string }
+        endpoint_id: { type: string }
+        kind: { $ref: "#/components/schemas/Transport" }
+        filter: { $ref: "#/components/schemas/SubscriptionFilter" }
+        after_s: { type: integer }
+        min_priority: { type: [integer, "null"] }
+        created_at: { type: integer }
+
+    Device:
+      type: object
+      properties:
+        id: { type: string, pattern: "^dev_[a-z2-7]{52}$" }
+        name: { type: string }
+        capabilities: { type: array, items: { type: string } }
+        created_at: { type: integer }
+        last_seen_at: { type: [integer, "null"] }
+        revoked_at: { type: [integer, "null"] }
+
+    JsonRpcRequest:
+      type: object
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc: { const: "2.0" }
+        id: { type: [string, integer, "null"] }
+        method: { type: string, examples: [initialize, tools/list, tools/call] }
+        params: { type: object, additionalProperties: true }
+
+    Status:
+      type: object
+      properties:
+        ok: { type: boolean }
+        environment: { enum: [local, staging, production] }
+        components:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              ok: { type: boolean }
+              ms: { type: integer }
+              error: { type: string }
+        transports:
+          type: object
+          description: Which relay transports are configured (true) on this deployment.
+          additionalProperties: { type: boolean }
+        telephony_circuit: { type: [string, "null"], description: Set when the SMS/voice circuit breaker has tripped. }
+        time: { type: integer }

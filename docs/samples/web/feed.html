@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Doorbell</title>
+  <!-- Drop-in web components. Use a publishable token: origin-bound, one topic, small daily cap. -->
+  <script src="https://subetha.org/sdk.js"></script>
+  <style>
+    subetha-feed::part(item) { padding: 4px 0; border-bottom: 1px solid #ddd; }
+  </style>
+</head>
+<body>
+  <h1>Doorbell</h1>
+  <subetha-send topic="@me/doorbell" token="se_publishable_send_token" placeholder="Say something" label="Send"></subetha-send>
+  <subetha-feed topic="@me/doorbell" token="se_publishable_read_token" since="1h" max="20"></subetha-feed>
+
+  <script>
+    // Each element dispatches a "message" event with the envelope.
+    document.querySelector("subetha-feed").addEventListener("message", (e) => {
+      if ((e.detail.priority ?? 3) >= 4) document.title = `🔔 ${e.detail.message}`;
+    });
+
+    // The SDK client class is window.SubEtha (protocol helpers on SubEtha.protocol):
+    //   const se = new SubEtha({ token: "se_…" });
+    //   se.subscribe("@me/doorbell", (m) => console.log(m.message));
+  </script>
+</body>
+</html>

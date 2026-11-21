@@ -37,3 +37,8 @@ uniffi = ["dep:uniffi"]
 # `uniffi` plus the bindgen CLI (the `uniffi-bindgen` binary). Kept apart from `uniffi` so
 # library builds for phones don't compile the generator (clap, askama, goblin, ...).
 bindgen = ["uniffi", "uniffi/cli"]
+
+# Docs sample (docs/samples/rust); `cargo test` builds it, so a broken sample fails CI.
+[[example]]
+name = "sign_and_encrypt"
+path = "../../docs/samples/rust/sign_and_encrypt.rs"
