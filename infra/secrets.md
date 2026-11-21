@@ -80,7 +80,8 @@ applications in the Clerk dashboard, so clients can register themselves.
 | `APNS_KEY_ID` | The key's 10-character Key ID. |
 | `APNS_TEAM_ID` | Apple Developer → Membership → Team ID. |
 | `APNS_TOPIC` | The iOS app's bundle id. |
-| `APNS_ENDPOINT` | Optional. Default `https://api.push.apple.com`. APNs requires HTTP/2, which a Worker's `fetch()` may not negotiate; point this at an HTTP/1.1 → HTTP/2 forwarder if direct delivery fails, or use FCM for iOS (see `docs/transports.md`). |
+| `APNS_ENDPOINT` | Optional. Default `https://api.push.apple.com`. APNs requires HTTP/2, which a Worker's `fetch()` may not negotiate: run [`gateways/apns-relay`](../gateways/apns-relay/README.md) and set this to its URL (e.g. `https://apns-relay.subetha.org`), or use FCM for iOS. |
+| `APNS_RELAY_SECRET` | With the relay: the same random value as its `RELAY_SECRET` (at least 16 characters), sent as `x-relay-secret`. |
 
 ### Slack
 

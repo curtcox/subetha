@@ -2,9 +2,9 @@
 // hex device token.
 //
 // HTTP/2 caveat: APNs only speaks HTTP/2, and a Worker's outbound fetch() is not guaranteed to
-// negotiate HTTP/2 with api.push.apple.com. Operators can set APNS_ENDPOINT to an HTTP/1.1 →
-// HTTP/2 relay that forwards /3/device/{token} verbatim (headers included), or deliver to iOS
-// through FCM instead (fcm.ts), which talks to APNs on our behalf.
+// negotiate HTTP/2 with api.push.apple.com. Operators run gateways/apns-relay (HTTP/1.1 in,
+// HTTP/2 out) and set APNS_ENDPOINT to it, with APNS_RELAY_SECRET sent as x-relay-secret; or
+// deliver to iOS through FCM instead (fcm.ts), which talks to APNs on our behalf.
 import type { Env } from "../types.ts";
 import { alertText, pemToDer, signJwt, trimEnvelope, unverifyEndpoint } from "./push.ts";
 import { httpFailure, loadEndpoint, PermanentError, registerSender } from "./senders.ts";
@@ -52,6 +52,7 @@ registerSender("apns", async (job, env) => {
     "content-type": "application/json",
   };
   if (m.expires) headers["apns-expiration"] = String(m.expires);
+  if (env.APNS_RELAY_SECRET) headers["x-relay-secret"] = env.APNS_RELAY_SECRET;
   // No apns-collapse-id (distinct messages must not replace each other) and no apns-id (must be a
   // UUID; APNs assigns one and returns it).
   const base = (env.APNS_ENDPOINT || APNS_DEFAULT_ENDPOINT).replace(/\/+$/, "");

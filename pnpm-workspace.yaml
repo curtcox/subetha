@@ -4,6 +4,7 @@ packages:
   - sdk/js
   - sdk/react-native
   - workers/*
+  - gateways/apns-relay
   - apps/*
   - samples/*
   - docs/samples

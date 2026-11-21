@@ -82,10 +82,12 @@ Firebase.
 **APNs setup:** set `APNS_KEY_P8` (the `.p8` key, PEM), `APNS_KEY_ID`, `APNS_TEAM_ID`, and
 `APNS_TOPIC` (the app's bundle id).
 
-> **HTTP/2 caveat.** APNs only accepts HTTP/2, and a Worker's outbound `fetch()` isn't guaranteed
-> to negotiate HTTP/2 with `api.push.apple.com`. If APNs deliveries fail, either set
-> `APNS_ENDPOINT` to an HTTP/1.1 → HTTP/2 relay that forwards `POST /3/device/{token}` with its
-> headers and body unchanged, or deliver to iOS through FCM instead.
+> **HTTP/2.** APNs only accepts HTTP/2, and a Worker's outbound `fetch()` isn't guaranteed to
+> negotiate it with `api.push.apple.com`. Run the APNs relay in
+> [`gateways/apns-relay`](https://github.com/curtcox/subetha/tree/main/gateways/apns-relay) (a
+> zero-dependency Node service that forwards `POST /3/device/{token}` over one long-lived HTTP/2
+> connection) and set `APNS_ENDPOINT` to its URL and `APNS_RELAY_SECRET` to its secret. Or
+> deliver to iOS through FCM instead.
 
 ## Webhooks
 

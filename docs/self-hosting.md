@@ -23,6 +23,12 @@ one-time Cloudflare setup (D1, KV, R2, Queues, rate limits, custom domains) and 
 deploy workflow (staging on every push to `main`, production on `v*` tags). Point SDKs and
 clients at your deployment with `baseUrl` / `SUBETHA_URL`.
 
+To deliver to iOS through APNs, also run the
+[APNs relay](https://github.com/curtcox/subetha/tree/main/gateways/apns-relay): APNs needs
+HTTP/2, which a Worker can't be relied on to speak. It's one dependency-free Node process (or
+Docker image) with no Apple credentials; set `APNS_ENDPOINT` and `APNS_RELAY_SECRET` to point the
+Worker at it.
+
 ## Reticulum gateway
 
 [`gateways/reticulum`](https://github.com/curtcox/subetha/tree/main/gateways/reticulum) bridges
