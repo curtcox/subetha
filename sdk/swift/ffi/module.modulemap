@@ -1,0 +1,4 @@
+module subetha_coreFFI {
+    header "subetha_coreFFI.h"
+    export *
+}

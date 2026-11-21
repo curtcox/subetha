@@ -116,9 +116,83 @@ pub fn decrypt_envelope_json(envelope_json: String, key: Vec<u8>) -> Result<Opti
     Ok(e2ee::decrypt_map(&m, &key32(&key)?).map(|d| to_json(&d)))
 }
 
+/// Raw Ed25519 signature (64 bytes) over `message` with the device seed.
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn sign_bytes(seed: Vec<u8>, message: Vec<u8>) -> Result<Vec<u8>, FfiError> {
+    Ok(sign::DeviceKey::from_seed_slice(&seed)?.sign_bytes(&message).to_vec())
+}
+
+/// Header values for a device-signed HTTP request (`X-Device-Id`, `X-Device-Time`,
+/// `X-Device-Signature`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct SignedRequestRecord {
+    pub device_id: String,
+    pub time: u64,
+    pub signature: String,
+}
+
+/// The string a device signs for an HTTP request:
+/// `subetha-req-v1\n METHOD \n path?query \n time \n hex(sha256(body))` (no spaces).
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn request_signing_input(method: String, path_and_query: String, time: u64, body: Vec<u8>) -> String {
+    use sha2::Digest;
+    let digest = crate::encoding::hex_encode(&sha2::Sha256::digest(&body));
+    format!("subetha-req-v1\n{}\n{path_and_query}\n{time}\n{digest}", method.to_uppercase())
+}
+
+/// Signs an HTTP request. `path_and_query` is the URL path plus `?query` if any (no host).
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn sign_request(seed: Vec<u8>, method: String, path_and_query: String, time: u64, body: Vec<u8>) -> Result<SignedRequestRecord, FfiError> {
+    let key = sign::DeviceKey::from_seed_slice(&seed)?;
+    let input = request_signing_input(method, path_and_query, time, body);
+    let signature = crate::encoding::base64url_encode(&key.sign_bytes(input.as_bytes()));
+    Ok(SignedRequestRecord { device_id: key.device_id().to_owned(), time, signature })
+}
+
+/// Proof of key possession for `POST /v1/device/code`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct EnrollmentProofRecord {
+    pub device_id: String,
+    pub time: u64,
+    pub proof: String,
+}
+
+/// Signs `subetha-enroll-v1\n<device_id>\n<time>`.
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn enrollment_proof(seed: Vec<u8>, time: u64) -> Result<EnrollmentProofRecord, FfiError> {
+    let key = sign::DeviceKey::from_seed_slice(&seed)?;
+    let input = format!("subetha-enroll-v1\n{}\n{time}", key.device_id());
+    let proof = crate::encoding::base64url_encode(&key.sign_bytes(input.as_bytes()));
+    Ok(EnrollmentProofRecord { device_id: key.device_id().to_owned(), time, proof })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // RFC 8032 test 1 seed (also spec/vectors/signatures.json devices[0]).
+    const SEED: &str = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
+
+    #[test]
+    fn request_signing() {
+        let seed = crate::encoding::hex_decode(SEED).unwrap();
+        let input = request_signing_input("post".into(), "/v1/ack?x=1".into(), 1763750000, b"{}".to_vec());
+        assert_eq!(input, "subetha-req-v1\nPOST\n/v1/ack?x=1\n1763750000\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a");
+        let r = sign_request(seed.clone(), "POST".into(), "/v1/ack?x=1".into(), 1763750000, b"{}".to_vec()).unwrap();
+        assert_eq!(r.device_id, "dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena");
+        let sig = crate::encoding::base64url_decode(&r.signature).unwrap();
+        assert_eq!(sig, sign_bytes(seed.clone(), input.into_bytes()).unwrap());
+        // Pinned so the Kotlin/Swift/Dart SDK tests can check their signers against the core.
+        assert_eq!(r.signature, REQ_SIG);
+        let p = enrollment_proof(seed, 1763750000).unwrap();
+        assert_eq!(p.proof, ENROLL_SIG);
+        assert!(sign_bytes(vec![0; 3], vec![]).is_err());
+    }
+
+    const REQ_SIG: &str = "aMS_4A8mZWICmhOQb6w5LxhZ8xXpltw-dtFLPWGWTaGQTZm9PIcwEAUs88n30exIwuAjedPlr2-C20WQadlqBQ";
+    const ENROLL_SIG: &str = "ZTDaaJXLPfCowo3I7bl8k3JvIl5nYldqr4735NNFrw4bGcu-Tl2p2W7jYXZH8NuORBcsaVO-5Em3aahKD1eqDQ";
 
     #[test]
     fn publish_flow() {

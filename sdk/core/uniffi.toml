@@ -1,0 +1,9 @@
+# UniFFI binding options (read by `uniffi-bindgen generate --library`; see BINDINGS.md).
+
+[bindings.kotlin]
+package_name = "org.subetha.core.ffi"
+cdylib_name = "subetha_core"
+
+[bindings.swift]
+# The generated Swift imports this C module; the XCFramework ships it (sdk/swift/ffi).
+ffi_module_name = "subetha_coreFFI"

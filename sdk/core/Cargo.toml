@@ -8,6 +8,17 @@ repository.workspace = true
 
 [lib]
 name = "subetha_core"
+# `lib` for Rust users and tests. `cdylib` (Android .so, JVM via JNA, desktop) and `staticlib`
+# (iOS XCFramework) are what the UniFFI bindings load. Without the `uniffi` feature they
+# export nothing and only cost an extra link step.
+crate-type = ["lib", "cdylib", "staticlib"]
+
+# UniFFI's bindgen CLI (`uniffi::uniffi_bindgen_main()`), used by scripts/gen-bindings.sh:
+#   cargo run -p subetha-core --features bindgen --bin uniffi-bindgen -- generate ...
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -15,6 +26,7 @@ serde_json = "1"
 ed25519-dalek = "2"
 chacha20poly1305 = "0.10"
 getrandom = "0.2"
+sha2 = "0.10"
 thiserror = "1"
 uniffi = { version = "0.28", optional = true }
 
@@ -22,3 +34,6 @@ uniffi = { version = "0.28", optional = true }
 default = []
 # Export the `ffi` module through UniFFI proc-macros (see BINDINGS.md).
 uniffi = ["dep:uniffi"]
+# `uniffi` plus the bindgen CLI (the `uniffi-bindgen` binary). Kept apart from `uniffi` so
+# library builds for phones don't compile the generator (clap, askama, goblin, ...).
+bindgen = ["uniffi", "uniffi/cli"]
