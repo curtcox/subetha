@@ -1,0 +1,24 @@
+# XcodeGen spec: `brew install xcodegen && xcodegen` writes Doorbell.xcodeproj.
+name: Doorbell
+options:
+  bundleIdPrefix: org.subetha.sample
+  deploymentTarget:
+    iOS: "16.0"
+packages:
+  SubEtha:
+    path: ../../sdk/swift
+targets:
+  Doorbell:
+    type: application
+    platform: iOS
+    sources: [Doorbell]
+    dependencies:
+      - package: SubEtha
+        product: SubEtha
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.subetha.sample.doorbell
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Doorbell
+        SWIFT_VERSION: "5.9"

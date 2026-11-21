@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "Doorbell",
+    "slug": "subetha-doorbell",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": { "bundleIdentifier": "org.subetha.sample.doorbell" },
+    "android": { "package": "org.subetha.sample.doorbell" }
+  }
+}
