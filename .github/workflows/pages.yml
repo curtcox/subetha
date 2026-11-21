@@ -47,7 +47,7 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p test-results
-          for pkg in spec pricing sdk/js workers/api docs/samples; do
+          for pkg in spec pricing sdk/js workers/api docs/samples apps/site; do
             name=$(echo "$pkg" | tr / -)
             pnpm --dir "$pkg" exec vitest run --reporter=default --reporter=json \
               --outputFile.json="$GITHUB_WORKSPACE/test-results/ts-$name.json" || true

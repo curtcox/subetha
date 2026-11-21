@@ -21,3 +21,4 @@ apps/site/public/llms.txt
 apps/site/public/llms-full.txt
 apps/site/public/openapi.yaml
 test-results/
+apps/site/public/tools/tools.js

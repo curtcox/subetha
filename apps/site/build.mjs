@@ -20,6 +20,7 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { build as esbuild } from "esbuild";
 import { Marked } from "marked";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -142,7 +143,7 @@ function fixLinks(html) {
 }
 
 function header(rel) {
-  return `<header><a class="brand" href="${rel}index.html">SubEtha</a><nav><a href="${rel}docs/">Docs</a><a href="${rel}docs/pricing.html">Pricing</a><a href="${rel}docs/api.html">API</a><a href="${rel}llms.txt">llms.txt</a><a href="${REPO_URL}">GitHub</a></nav><span class="spacer"></span><a href="${appUrl}/console/">Console →</a></header>`;
+  return `<header><a class="brand" href="${rel}index.html">SubEtha</a><nav><a href="${rel}docs/">Docs</a><a href="${rel}docs/pricing.html">Pricing</a><a href="${rel}docs/api.html">API</a><a href="${rel}tools/">Tools</a><a href="${rel}llms.txt">llms.txt</a><a href="${REPO_URL}">GitHub</a></nav><span class="spacer"></span><a href="${appUrl}/console/">Console →</a></header>`;
 }
 
 function page({ title, body, slug, rel, sidebar = true, description = "" }) {
@@ -226,14 +227,18 @@ ${legal.map((d) => link(d.slug, d.navTitle, "")).join("\n")}
 write("llms-full.txt", `# SubEtha documentation (all pages)\n\nSource: ${siteUrl}/docs/\n\n${docs.map((d) => `<!-- ${siteUrl}/docs/${d.slug}.md -->\n\n${d.md.trim()}\n`).join("\n---\n\n")}`);
 copyFileSync(join(repo, "spec/openapi.yaml"), join(out, "openapi.yaml"));
 
+// Built-in tools (PLAN §10): pricing calculator and route simulator. src/ → tools/tools.js, which
+// bundles the relay's own price table, planner, and telephony units.
+await esbuild({ entryPoints: [join(here, "src/web.ts")], outfile: join(out, "tools/tools.js"), bundle: true, format: "iife", globalName: "SubEthaTools", platform: "browser", target: "es2022", minify: true, legalComments: "none", logLevel: "warning" });
+
 // ---------------------------------------------------------------- GitHub Pages extras
 if (pages) {
   // Static files from the production site, with root-absolute links moved under the base path.
-  for (const f of ["index.html", "style.css", "sdk.js"]) {
+  for (const f of ["index.html", "style.css", "sdk.js", "tools/index.html", "tools/pricing.html", "tools/simulator.html"]) {
     const src = join(publicDir, f);
     if (!existsSync(src)) continue;
     let text = readFileSync(src, "utf8");
-    if (f.endsWith(".html")) text = text.replace(/href="\/console\/"/g, `href="${appUrl}/console/"`).replace(/(href|src)="\/(?!\/)/g, `$1="${base}`);
+    if (f.endsWith(".html")) text = text.replace(/href="\/console\/"/g, `href="${appUrl}/console/"`).replace(/"\/console\/(#[^"]*)?"/g, `"${appUrl}/console/$1"`).replace(/(href|src)="\/(?!\/)/g, `$1="${base}`);
     write(f, text);
   }
   write("pricing-report.html", page({ title: "Pricing invariant report", rel: "", sidebar: false, body: makeMarked().parse(readFileSync(join(repo, "pricing/generated/report.md"), "utf8")) }));
@@ -319,4 +324,4 @@ ${sdks.map(([what, name, v, registry, dir]) => `<tr><td>${what}</td><td><code>${
 </ul>`;
 }
 
-console.log(`built ${docs.length} docs pages, llms.txt, llms-full.txt, openapi.yaml${pages ? ", build-info.html, pricing-report.html" : ""} → ${relative(process.cwd(), out) || "."} (base ${base})`);
+console.log(`built ${docs.length} docs pages, llms.txt, llms-full.txt, openapi.yaml, tools/tools.js${pages ? ", build-info.html, pricing-report.html" : ""} → ${relative(process.cwd(), out) || "."} (base ${base})`);

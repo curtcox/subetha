@@ -1,7 +1,7 @@
 // Delivery planning (PLAN §5): which transports each subscriber gets, in what order, at what cost.
 import { EDGE_TRANSPORTS, type RouteMode, type Transport } from "@subetha/sdk/protocol";
 import { actionPriceMicros, skuForTransport, type PriceTable } from "@subetha/pricing";
-import type { PlannedDelivery, QueuedSubscription, TopicPolicy } from "./types.ts";
+import type { PlannedDelivery, QueuedSubscription, TopicPolicy } from "./model.ts";
 
 export interface PlanInput {
   liveSubscribers: string[]; // connection ids matching the message filters

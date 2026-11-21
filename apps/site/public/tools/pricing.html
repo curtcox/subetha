@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pricing calculator · SubEtha</title>
+<meta name="description" content="Estimate a month of SubEtha usage and the top-up that covers it.">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header><a class="brand" href="/">SubEtha</a><nav><a href="/docs/">Docs</a><a href="/docs/pricing.html">Pricing</a><a href="/docs/api.html">API</a><a href="/tools/">Tools</a><a href="/llms.txt">llms.txt</a><a href="https://github.com/curtcox/subetha">GitHub</a></nav><span class="spacer"></span><a href="/console/">Console →</a></header>
+<main>
+  <h1>Pricing calculator</h1>
+  <p class="muted">Prepaid, no subscription. Edit any number; the link in the address bar keeps your inputs.</p>
+  <div id="calc"><noscript>The calculator needs JavaScript. The full price table is in <a href="/docs/pricing.html">the pricing docs</a>.</noscript></div>
+</main>
+<footer class="site muted"><a href="/tools/">Tools</a> · <a href="/docs/pricing.html">Pricing docs</a> · <a href="/docs/legal/terms.html">Terms</a></footer>
+<script src="/tools/tools.js"></script>
+<script>SubEthaTools.mountPricing(document.getElementById("calc"));</script>
+</body>
+</html>

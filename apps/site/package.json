@@ -4,12 +4,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc -p ."
   },
   "dependencies": {
+    "@subetha/pricing": "workspace:*",
     "@subetha/sdk": "workspace:*"
   },
   "devDependencies": {
-    "marked": "^18.2.1"
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.25.0",
+    "marked": "^18.2.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
   }
 }

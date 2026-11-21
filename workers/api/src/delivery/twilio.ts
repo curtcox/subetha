@@ -3,35 +3,11 @@ import { base64urlEncode, utf8 } from "@subetha/sdk/protocol";
 import { timingSafeEqual } from "../crypto.ts";
 import type { Env } from "../types.ts";
 import { httpFailure, loadEndpoint, PermanentError, registerSender, renderText } from "./senders.ts";
+import { CALL_TIME_LIMIT_S, smsBody, smsSegments } from "./units.ts";
+
+export { CALL_TIME_LIMIT_S, SMS_MAX_CHARS, smsBody, smsSegments, voiceMinutes } from "./units.ts";
 
 export const US_E164 = /^\+1[2-9]\d{2}[2-9]\d{6}$/;
-
-const GSM7 = "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà";
-const GSM7_EXT = "^{}\\[~]|€\f";
-
-/** Number of SMS segments Twilio will bill for this text. */
-export function smsSegments(text: string): number {
-  let septets = 0;
-  let gsm = true;
-  for (const ch of text) {
-    if (GSM7.includes(ch)) septets += 1;
-    else if (GSM7_EXT.includes(ch)) septets += 2;
-    else { gsm = false; break; }
-  }
-  if (gsm) return septets <= 160 ? 1 : Math.ceil(septets / 153);
-  const units = [...text].reduce((n, ch) => n + (ch.codePointAt(0)! > 0xffff ? 2 : 1), 0);
-  return units <= 70 ? 1 : Math.ceil(units / 67);
-}
-
-/** Calls are capped at CALL_TIME_LIMIT_S and the text is spoken twice plus a gather, so the
- * reservation covers the whole limit; the status callback settles to the real duration. */
-export const CALL_TIME_LIMIT_S = 180;
-export function voiceMinutes(_text: string): number {
-  return CALL_TIME_LIMIT_S / 60;
-}
-
-export const SMS_MAX_CHARS = 459; // 3 GSM segments
-export const smsBody = (m: Parameters<typeof renderText>[0]) => renderText(m, SMS_MAX_CHARS);
 
 function twilioAuth(env: Env) {
   if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN || !env.TWILIO_FROM) throw new PermanentError("Twilio is not configured");

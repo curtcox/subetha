@@ -5,6 +5,8 @@
 import type { Transport } from "@subetha/sdk/protocol";
 import type { DeliveryJob, Env } from "../types.ts";
 
+export { renderText } from "./units.ts";
+
 export class PermanentError extends Error {}
 
 export interface SendResult { costMicros?: number; detail?: unknown; /** Leave the reservation open; a provider callback settles it. */ deferSettle?: boolean }
@@ -26,12 +28,6 @@ export async function loadEndpoint(env: Env, id: string): Promise<EndpointRow & 
   return { ...row, cfg: JSON.parse(row.config || "{}") };
 }
 
-/** Human-readable rendering used by text transports (email, SMS, voice, Slack). */
-export function renderText(m: DeliveryJob["message"], max = Infinity): string {
-  const body = m.enc ? "[encrypted message — open in a SubEtha app]" : (m.message ?? "");
-  const s = m.title ? `${m.title}: ${body}` : body;
-  return s.length > max ? s.slice(0, max - 1) + "…" : s;
-}
 
 export function httpFailure(status: number, text: string): Error {
   return status >= 400 && status < 500 && status !== 408 && status !== 429

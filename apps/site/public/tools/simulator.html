@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Route simulator · SubEtha</title>
+<meta name="description" content="Simulate how SubEtha would route a message: which transports, in what order, and at what cost.">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header><a class="brand" href="/">SubEtha</a><nav><a href="/docs/">Docs</a><a href="/docs/pricing.html">Pricing</a><a href="/docs/api.html">API</a><a href="/tools/">Tools</a><a href="/llms.txt">llms.txt</a><a href="https://github.com/curtcox/subetha">GitHub</a></nav><span class="spacer"></span><a href="/console/">Console →</a></header>
+<main>
+  <h1>Route simulator</h1>
+  <p class="muted">Runs the relay’s delivery planner in your browser on a made-up topic. Change the message, the subscriptions, or the policy and the plan updates.</p>
+  <div id="sim" data-console="/console/#tab=messages"><noscript>The simulator needs JavaScript.</noscript></div>
+</main>
+<footer class="site muted"><a href="/tools/">Tools</a> · <a href="/docs/pricing.html">Pricing docs</a> · <a href="/docs/legal/terms.html">Terms</a></footer>
+<script src="/tools/tools.js"></script>
+<script>const el = document.getElementById("sim"); SubEthaTools.mountSimulator(el, { consoleUrl: el.dataset.console });</script>
+</body>
+</html>
