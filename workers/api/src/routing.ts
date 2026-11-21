@@ -16,6 +16,8 @@ export interface PlanInput {
   prices: PriceTable;
   tier: string;
   nowMs: number;
+  /** Message tags, for subscription tag filters. */
+  tags?: string[];
   /** Billable units per transport (SMS segments, call minutes). Default 1. */
   units?: Partial<Record<Transport, number>>;
 }
@@ -68,7 +70,8 @@ export function planDeliveries(input: PlanInput): Plan {
       input.mode === "cheap" && !EDGE_TRANSPORTS.includes(t) ? "route mode cheap" :
       quiet ? "quiet hours" :
       (sub.min_priority ?? input.policy.min_priority?.[t] ?? 1) > input.priority ? "below minimum priority" :
-      sub.filter?.priority && !sub.filter.priority.includes(input.priority) ? "filtered" :
+      sub.filter?.priority?.length && !sub.filter.priority.includes(input.priority) ? "filtered" :
+      sub.filter?.tags?.length && !sub.filter.tags.every((t) => input.tags?.includes(t)) ? "filtered" :
       null;
     if (why) {
       dropped.push({ subscriber: sub.id, transport: t, reason: why });
@@ -84,7 +87,9 @@ export function planDeliveries(input: PlanInput): Plan {
   const cap = caps.length ? Math.min(...caps) : null;
   let total = deliveries.reduce((n, d) => n + d.cost_micros, 0);
   if (cap !== null && total > cap) {
-    const order = deliveries.map((d, i) => ({ d, i })).sort((a, b) => b.d.after_s - a.d.after_s || b.d.cost_micros - a.d.cost_micros);
+    // Live deliveries are always made (they're broadcast to every matching connection), so only
+    // paid queued steps can be dropped to fit the cap.
+    const order = deliveries.map((d, i) => ({ d, i })).filter(({ d }) => !(d.transport === "ws" && d.after_s === 0)).sort((a, b) => b.d.after_s - a.d.after_s || b.d.cost_micros - a.d.cost_micros);
     const remove = new Set<number>();
     for (const { d, i } of order) {
       if (total <= cap) break;

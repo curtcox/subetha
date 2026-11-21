@@ -4,7 +4,7 @@ import { canonicalize, isTopic, validateEnvelope, ulid, type Envelope, type Json
 import { actionPriceMicros, topupSplit, tierFor, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { audit, autoCreateOwnerFor, createAccount, getAccount, invalidateAccount, recordTopic, validateHandle, validatePolicy } from "./accounts.ts";
-import { authenticate, callerOf, invalidateToken, newTokenSecret, requireAccount, requireAdmin, scopeAllows, validateScopes, validateTransports } from "./auth.ts";
+import { authenticate, callerOf, invalidateToken, newTokenSecret, requireAdmin, scopeAllows, validateScopes, validateTransports } from "./auth.ts";
 import { sha256Hex } from "./crypto.ts";
 import { accountStub } from "./durable/account.ts";
 import { topicStub, type SubscribeParams } from "./durable/topic.ts";
@@ -63,15 +63,15 @@ app.use("*", async (c, next) => {
   await next();
 });
 
-// Rate limits (PLAN §9): per credential for authenticated callers, per IP otherwise.
+// Rate limits (PLAN §9): per identity for authenticated callers, per IP for anonymous ones.
 // Provider hooks are exempt (they're signature-checked and must not be dropped).
 app.use("*", async (c, next) => {
   const path = new URL(c.req.url).pathname;
   if (path.startsWith("/v1/hooks/") || path === "/v1/health" || path === "/v1/status") return next();
-  const cred = c.req.header("authorization") ?? c.req.header("x-device-id") ?? new URL(c.req.url).searchParams.get("auth");
-  const limiter = cred ? c.env.RL_AUTH : c.env.RL_ANON;
+  const p = await principal(c);
+  const limiter = p.kind === "anonymous" ? c.env.RL_ANON : c.env.RL_AUTH;
   if (limiter) {
-    const key = cred ? (await sha256Hex(cred)).slice(0, 32) : c.req.header("cf-connecting-ip") ?? "unknown";
+    const key = p.kind === "anonymous" ? `ip:${c.req.header("cf-connecting-ip") ?? "unknown"}` : p.kind === "token" ? `tok:${p.tokenId}` : p.kind === "device" ? `dev:${p.deviceId}` : `user:${p.clerkId}`;
     const { success } = await limiter.limit({ key });
     if (!success) throw new ApiError("rate_limited", "too many requests");
   }
@@ -117,7 +117,7 @@ app.get("/v1/config", (c) => c.json({ environment: c.env.ENVIRONMENT, clerk_publ
 
 // ---------------- accounts ----------------
 app.get("/v1/account", async (c) => {
-  const id = requireAccount(await principal(c));
+  const id = requireAdmin(await principal(c));
   const acct = await getAccount(c.env, id);
   if (!acct) throw new ApiError("not_found");
   const bal = await accountStub(c.env, id).balance();
@@ -138,8 +138,23 @@ app.post("/v1/account", async (c) => {
 
 app.patch("/v1/account", async (c) => {
   const id = requireAdmin(await principal(c));
-  const body = (await c.req.json()) as { handle?: string; daily_cap_micros?: number | null; paused?: boolean };
+  const body = (await c.req.json()) as { handle?: string; daily_cap_micros?: number | null; paused?: boolean; auto_recharge?: { threshold_usd: number; amount_usd: number } | null };
   const acct = await getAccount(c.env, id);
+  if (body.auto_recharge !== undefined) {
+    if (body.auto_recharge === null) {
+      await accountStub(c.env, id).setAutoRecharge(null);
+      await c.env.DB.prepare("UPDATE accounts SET auto_recharge = NULL WHERE id = ?").bind(id).run();
+    } else {
+      const customer = (acct as { stripe_customer_id?: string | null } | null)?.stripe_customer_id;
+      if (!customer) throw new ApiError("conflict", "top up once with save_card: true to store a card first");
+      const threshold = Math.round(Number(body.auto_recharge.threshold_usd) * 1e6), amount = Math.round(Number(body.auto_recharge.amount_usd) * 1e6);
+      try { topupSplit(PRICES, amount); } catch { throw new ApiError("bad_request", "amount_usd is outside the allowed top-up range"); }
+      if (!(threshold >= 0 && threshold < amount)) throw new ApiError("bad_request", "threshold_usd must be ≥ 0 and below amount_usd");
+      const cfg = { threshold_micros: threshold, amount_micros: amount };
+      await accountStub(c.env, id).setAutoRecharge({ ...cfg, customer });
+      await c.env.DB.prepare("UPDATE accounts SET auto_recharge = ? WHERE id = ?").bind(JSON.stringify(cfg), id).run();
+    }
+  }
   if (body.handle !== undefined) {
     if (acct?.handle) throw new ApiError("conflict", "handle can't be changed once set");
     await c.env.DB.prepare("UPDATE accounts SET handle = ? WHERE id = ?").bind(validateHandle(body.handle), id).run().catch((e) => {
@@ -148,19 +163,23 @@ app.patch("/v1/account", async (c) => {
   }
   if (body.daily_cap_micros !== undefined) await c.env.DB.prepare("UPDATE accounts SET daily_cap_micros = ? WHERE id = ?").bind(body.daily_cap_micros, id).run();
   if (body.paused !== undefined) await c.env.DB.prepare("UPDATE accounts SET paused = ? WHERE id = ?").bind(body.paused ? 1 : 0, id).run();
+  if (body.daily_cap_micros !== undefined || body.paused !== undefined) {
+    const row = await c.env.DB.prepare("SELECT paused, daily_cap_micros FROM accounts WHERE id = ?").bind(id).first<{ paused: number; daily_cap_micros: number | null }>();
+    await accountStub(c.env, id).setControls({ paused: !!row?.paused, dailyCapMicros: row?.daily_cap_micros ?? null });
+  }
   await invalidateAccount(c.env, id);
   await audit(c.env, id, actorOf(await principal(c)), "account.update", body);
   return c.json(await getAccount(c.env, id));
 });
 
 app.get("/v1/balance", async (c) => {
-  const id = requireAccount(await principal(c));
+  const id = requireAdmin(await principal(c));
   const b = await accountStub(c.env, id).balance();
   return c.json({ available_usd_micros: b.available, reserved_usd_micros: b.reserved });
 });
 
 app.get("/v1/ledger", async (c) => {
-  const id = requireAccount(await principal(c));
+  const id = requireAdmin(await principal(c));
   const after = Number(c.req.query("after") ?? 0);
   return c.json({ entries: await accountStub(c.env, id).entries(after, Number(c.req.query("limit") ?? 100)) });
 });
@@ -168,7 +187,7 @@ app.get("/v1/ledger", async (c) => {
 // ---------------- billing ----------------
 app.post("/v1/billing/checkout", async (c) => {
   const id = requireAdmin(await principal(c));
-  const body = (await c.req.json()) as { amount_usd?: number; success_url?: string; cancel_url?: string };
+  const body = (await c.req.json()) as { amount_usd?: number; success_url?: string; cancel_url?: string; save_card?: boolean };
   const amountMicros = Math.round(Number(body.amount_usd) * 1e6);
   try {
     topupSplit(PRICES, amountMicros);
@@ -177,7 +196,7 @@ app.post("/v1/billing/checkout", async (c) => {
   }
   const acct = await getAccount(c.env, id);
   const base = c.env.BASE_URL;
-  const s = await createCheckoutSession(c.env, { accountId: id, amountMicros, successUrl: body.success_url ?? `${base}/console/#billing?ok=1`, cancelUrl: body.cancel_url ?? `${base}/console/#billing`, email: acct?.email });
+  const s = await createCheckoutSession(c.env, { accountId: id, amountMicros, successUrl: body.success_url ?? `${base}/console/#billing?ok=1`, cancelUrl: body.cancel_url ?? `${base}/console/#billing`, email: acct?.email, saveCard: !!body.save_card, customer: (acct as { stripe_customer_id?: string | null } | null)?.stripe_customer_id ?? null });
   return c.json({ id: s.id, url: s.url, ...topupSplit(PRICES, amountMicros) });
 });
 
@@ -196,20 +215,48 @@ app.post("/v1/hooks/stripe", async (c) => {
     if (!accountId) throw new ApiError("bad_request", "missing account_id metadata");
     const { creditMicros, feeMicros } = topupSplit(PRICES, amountMicros);
     await accountStub(c.env, accountId).topup(creditMicros, String(obj.id), `stripe amount=${amountMicros} fee=${feeMicros}`);
+    if (typeof obj.payment_intent === "string") await c.env.DB.prepare("INSERT OR IGNORE INTO stripe_payments (payment_intent, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?)").bind(obj.payment_intent, accountId, amountMicros, Date.now()).run();
     await c.env.DB.batch([
       c.env.DB.prepare("INSERT INTO stripe_events (id, type, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?, ?)").bind(evt.id, evt.type, accountId, amountMicros, Date.now()),
-      c.env.DB.prepare("UPDATE accounts SET topups_12mo_micros = topups_12mo_micros + ? WHERE id = ?").bind(amountMicros, accountId),
+      c.env.DB.prepare("UPDATE accounts SET topups_12mo_micros = topups_12mo_micros + ?, stripe_customer_id = COALESCE(?, stripe_customer_id) WHERE id = ?").bind(amountMicros, typeof obj.customer === "string" ? obj.customer : null, accountId),
     ]);
     await invalidateAccount(c.env, accountId);
-  } else if (evt.type === "charge.dispute.created" || evt.type === "charge.refunded") {
-    const accountId = ((obj.metadata as Record<string, string> | undefined)?.account_id) ?? null;
-    const amount = Number(obj.amount ?? obj.amount_refunded ?? 0) * 10_000;
-    if (accountId && amount > 0) {
-      const fee = evt.type === "charge.dispute.created" ? 15_000_000 : 0; // dispute fee recovered where possible
-      const r = await accountStub(c.env, accountId).adjust(-(amount + fee), evt.id, evt.type === "charge.refunded" ? "refund: stripe" : "chargeback");
-      if (r.unrecovered) await audit(c.env, accountId, "stripe", "chargeback.unrecovered", { micros: r.unrecovered });
+  } else if ((evt.type === "payment_intent.succeeded" || evt.type === "payment_intent.payment_failed") && (obj.metadata as Record<string, string> | undefined)?.auto_recharge === "1") {
+    const accountId = (obj.metadata as Record<string, string>).account_id!;
+    const amountMicros = Number(obj.amount) * 10_000;
+    if (evt.type === "payment_intent.succeeded") {
+      const { creditMicros, feeMicros } = topupSplit(PRICES, amountMicros);
+      await accountStub(c.env, accountId).topup(creditMicros, String(obj.id), `auto-recharge amount=${amountMicros} fee=${feeMicros}`);
+      await c.env.DB.prepare("INSERT OR IGNORE INTO stripe_payments (payment_intent, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?)").bind(String(obj.id), accountId, amountMicros, Date.now()).run();
+      await c.env.DB.prepare("UPDATE accounts SET topups_12mo_micros = topups_12mo_micros + ? WHERE id = ?").bind(amountMicros, accountId).run();
+    } else {
+      await accountStub(c.env, accountId).autoRechargeFailed("card declined");
+      await c.env.DB.prepare("UPDATE accounts SET auto_recharge = NULL WHERE id = ?").bind(accountId).run();
+      await audit(c.env, accountId, "stripe", "auto_recharge.failed", { pi: obj.id });
     }
-    await c.env.DB.prepare("INSERT INTO stripe_events (id, type, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?, ?)").bind(evt.id, evt.type, accountId, amount, Date.now()).run();
+    await c.env.DB.prepare("INSERT INTO stripe_events (id, type, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?, ?)").bind(evt.id, evt.type, accountId, amountMicros, Date.now()).run();
+    await invalidateAccount(c.env, accountId);
+  } else if (evt.type === "charge.dispute.created" || evt.type === "charge.refunded") {
+    // Both objects carry payment_intent; map it back to the account we credited.
+    const pi = String(obj.payment_intent ?? "");
+    const pay = await c.env.DB.prepare("SELECT * FROM stripe_payments WHERE payment_intent = ?").bind(pi).first<{ account_id: string; amount_micros: number; refunded_micros: number; disputed: number }>();
+    let deducted = 0;
+    if (pay) {
+      if (evt.type === "charge.dispute.created" && !pay.disputed) {
+        deducted = Number(obj.amount ?? 0) * 10_000 + 15_000_000; // disputed amount + Stripe's dispute fee, recovered where possible
+        await c.env.DB.prepare("UPDATE stripe_payments SET disputed = 1 WHERE payment_intent = ?").bind(pi).run();
+        const r = await accountStub(c.env, pay.account_id).adjust(-deducted, `dispute:${pi}`, "chargeback");
+        if (r.unrecovered) await audit(c.env, pay.account_id, "stripe", "chargeback.unrecovered", { micros: r.unrecovered });
+      } else if (evt.type === "charge.refunded") {
+        const total = Number(obj.amount_refunded ?? 0) * 10_000;
+        deducted = Math.max(0, total - pay.refunded_micros); // only the newly refunded part
+        if (deducted) {
+          await c.env.DB.prepare("UPDATE stripe_payments SET refunded_micros = ? WHERE payment_intent = ?").bind(total, pi).run();
+          await accountStub(c.env, pay.account_id).adjust(-deducted, `refund:${pi}:${total}`, "refund: stripe");
+        }
+      }
+    }
+    await c.env.DB.prepare("INSERT INTO stripe_events (id, type, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?, ?)").bind(evt.id, evt.type, pay?.account_id ?? null, deducted, Date.now()).run();
   } else {
     await c.env.DB.prepare("INSERT INTO stripe_events (id, type, created_at) VALUES (?, ?, ?)").bind(evt.id, evt.type, Date.now()).run();
   }
@@ -230,7 +277,7 @@ app.post("/v1/tokens", async (c) => {
   const scopes = validateScopes(body.scopes);
   const transports = validateTransports(body.transports);
   if (body.origins && (!Array.isArray(body.origins) || !body.origins.every((o) => /^https?:\/\/[^/]+$/.test(o)))) throw new ApiError("bad_request", "origins must be like https://example.com");
-  if (body.origins?.length && (scopes.length !== 1 || scopes[0] === "admin" || scopes[0]!.endsWith("*"))) throw new ApiError("bad_request", "publishable (origin-bound) tokens must have exactly one non-wildcard topic scope");
+  if (body.origins?.length && (scopes.length !== 1 || !/^(publish|subscribe):(@[a-z0-9-]+\/[A-Za-z0-9_-]+|t_[a-z2-7]{26})$/.test(scopes[0]!))) throw new ApiError("bad_request", "publishable (origin-bound) tokens must have exactly one non-wildcard topic scope");
   if (body.origins?.length && body.daily_cap_usd === undefined) throw new ApiError("bad_request", "publishable tokens need a daily_cap_usd");
   // A token can't grant more than its creator has.
   if (p.kind === "token" && !scopeAllows(p.scopes, "admin")) throw new ApiError("forbidden");
@@ -254,13 +301,13 @@ app.delete("/v1/tokens/:id", async (c) => {
 
 // ---------------- topics ----------------
 app.get("/v1/topics", async (c) => {
-  const id = requireAccount(await principal(c));
+  const id = requireAdmin(await principal(c));
   const { results } = await c.env.DB.prepare("SELECT name, policy, created_at FROM topics WHERE owner_account_id = ? ORDER BY name").bind(id).all();
   return c.json({ topics: results.map((r) => ({ name: r.name, policy: JSON.parse(r.policy as string), created_at: r.created_at })) });
 });
 
 app.get("/v1/topics/:topic{.+}", async (c) => {
-  const id = requireAccount(await principal(c));
+  const id = requireAdmin(await principal(c));
   const name = c.req.param("topic");
   const meta = await topicStub(c.env, name).getMeta();
   if (!meta || meta.owner !== id) throw new ApiError("not_found");
@@ -288,7 +335,7 @@ app.put("/v1/topics/:topic{.+}", async (c) => {
 
 app.get("/v1/traces/:id", async (c) => {
   const p = await principal(c);
-  requireAccount(p);
+  requireAdmin(p);
   const topic = c.req.query("topic");
   if (!topic || !isTopic(topic)) throw new ApiError("bad_request", "?topic= is required");
   const t = unwrap(await topicStub(c.env, topic).getTrace(c.req.param("id"), callerOf(p)));

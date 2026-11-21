@@ -23,9 +23,11 @@ export function smsSegments(text: string): number {
   return units <= 70 ? 1 : Math.ceil(units / 67);
 }
 
-/** Estimated call minutes for a spoken message (~150 words/minute), at least 1. */
-export function voiceMinutes(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 750));
+/** Calls are capped at CALL_TIME_LIMIT_S and the text is spoken twice plus a gather, so the
+ * reservation covers the whole limit; the status callback settles to the real duration. */
+export const CALL_TIME_LIMIT_S = 180;
+export function voiceMinutes(_text: string): number {
+  return CALL_TIME_LIMIT_S / 60;
 }
 
 export const SMS_MAX_CHARS = 459; // 3 GSM segments
@@ -58,13 +60,13 @@ export function voiceTwiml(text: string, ackUrl: string | null): string {
   return `<Response><Gather numDigits="1" timeout="8" action="${xml(ackUrl)}" method="POST">${say}<Say>Press 1 to acknowledge.</Say></Gather>${say}</Response>`;
 }
 
-export async function makeCall(env: Env, to: string, twiml: string): Promise<{ sid: string }> {
+export async function makeCall(env: Env, to: string, twiml: string, statusCallback?: string): Promise<{ sid: string }> {
   if (!US_E164.test(to)) throw new PermanentError("only US numbers are supported");
   const t = twilioAuth(env);
   const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${t.sid}/Calls.json`, {
     method: "POST",
     headers: { authorization: t.auth, "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ To: to, From: t.from, Twiml: twiml, TimeLimit: "180" }).toString(),
+    body: new URLSearchParams({ To: to, From: t.from, Twiml: twiml, TimeLimit: String(CALL_TIME_LIMIT_S), ...(statusCallback ? { StatusCallback: statusCallback, StatusCallbackEvent: "completed" } : {}) }).toString(),
   });
   const text = await r.text();
   if (!r.ok) throw httpFailure(r.status, text);
@@ -103,6 +105,8 @@ registerSender("voice", async (job, env) => {
   const ep = await loadEndpoint(env, job.sub.endpoint);
   const secret = env.TWILIO_AUTH_TOKEN ?? "";
   const ack = `${env.BASE_URL}/v1/hooks/twilio/voice-ack?topic=${encodeURIComponent(job.topic)}&id=${job.message.id}&t=${await ackToken(secret, job.topic, job.message.id!)}`;
-  const r = await makeCall(env, ep.address, voiceTwiml(renderText(job.message, 1500), ack));
-  return { detail: { sid: r.sid } };
+  const res = job.reservation;
+  const status = `${env.BASE_URL}/v1/hooks/twilio/voice-status?acct=${encodeURIComponent(job.owner)}&ref=${encodeURIComponent(res.ref)}&max=${res.micros}&t=${await ackToken(secret, job.owner, `${res.ref}:${res.micros}`)}`;
+  const r = await makeCall(env, ep.address, voiceTwiml(renderText(job.message, 1500), ack), status);
+  return { detail: { sid: r.sid }, deferSettle: true };
 });

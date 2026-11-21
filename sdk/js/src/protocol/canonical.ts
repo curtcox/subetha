@@ -54,8 +54,8 @@ export function canonicalize(value: Json | undefined): string {
   );
 }
 
-/** Canonical form of an envelope for signing: drops `sig` and `hops`. */
+/** Canonical form of an envelope for signing: drops `sig`, `hops`, and the relay-set `event`. */
 export function canonicalEnvelope(env: Record<string, unknown>): string {
-  const { sig: _sig, hops: _hops, ...rest } = env;
+  const { sig: _sig, hops: _hops, event: _event, ...rest } = env;
   return canonicalize(rest as Json);
 }

@@ -84,4 +84,4 @@ def canonicalize(value: Any) -> str:
 
 def canonical_envelope(env: dict[str, Any]) -> str:
     """Canonical form of an envelope for signing and AAD: drops ``sig`` and ``hops``."""
-    return canonicalize({k: v for k, v in env.items() if k not in ("sig", "hops")})
+    return canonicalize({k: v for k, v in env.items() if k not in ("sig", "hops", "event")})

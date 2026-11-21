@@ -19,7 +19,7 @@ use crate::Error;
 pub const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 
 /// Fields excluded from the canonical form of an envelope (spec §3).
-pub const NON_CANONICAL_FIELDS: [&str; 2] = ["sig", "hops"];
+pub const NON_CANONICAL_FIELDS: [&str; 3] = ["sig", "hops", "event"];
 
 fn escape_into(out: &mut String, s: &str) {
     out.push('"');

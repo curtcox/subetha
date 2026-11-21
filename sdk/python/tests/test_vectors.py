@@ -97,6 +97,7 @@ def test_signature_cases(case):
 
 def test_hops_change_keeps_validity():
     assert verify_envelope(SIGS["hops_change"]["envelope"]) is SIGS["hops_change"]["valid"]
+    assert verify_envelope(SIGS["event_added"]["envelope"]) is SIGS["event_added"]["valid"]
 
 
 @pytest.mark.parametrize("case", SIGS["negative"], ids=[n["name"] for n in SIGS["negative"]])

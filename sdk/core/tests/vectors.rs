@@ -102,6 +102,8 @@ fn hops_change_still_verifies() {
     let v = load("signatures.json");
     let h = &v["hops_change"];
     assert_eq!(verify_map(obj(&h["envelope"])), h["valid"].as_bool().unwrap());
+    let e = &v["event_added"];
+    assert_eq!(verify_map(obj(&e["envelope"])), e["valid"].as_bool().unwrap());
 }
 
 #[test]

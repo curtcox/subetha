@@ -73,7 +73,11 @@ export async function authenticate(req: Request, env: Env): Promise<Principal> {
   const device = await authenticateDevice(req, env);
   if (device) return device;
   const cred = extractCredential(req);
-  if (!cred) return { kind: "anonymous" };
+  if (!cred) {
+    // An Authorization header we can't parse is an error, not an anonymous request.
+    if (req.headers.get("authorization")) throw new ApiError("unauthorized", "unsupported Authorization scheme (use Bearer or Basic)");
+    return { kind: "anonymous" };
+  }
   const m = TOKEN_RE.exec(cred);
   if (m) {
     const row = await loadToken(env, m[1]!);

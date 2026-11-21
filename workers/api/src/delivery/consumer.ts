@@ -16,7 +16,14 @@ export async function processJob(job: DeliveryJob, env: Env): Promise<"delivered
     await topic.recordDelivery(job.message.id!, { sub: job.sub.id, transport: job.sub.transport, result: "skipped: acked" });
     return "skipped";
   }
+  // A retry after a successful send (bookkeeping failed, or the worker died before acking) must
+  // not send again: the send is marked before any bookkeeping.
+  if (await topic.wasSent(job.reservation.ref)) {
+    await account.settle(job.reservation.ref, job.reservation.micros).catch(() => {});
+    return "delivered";
+  }
   const send = senders[job.sub.transport];
+  let sent = false;
   try {
     if (!send) throw new PermanentError(`no sender for transport ${job.sub.transport}`);
     if (job.sub.transport === "sms" || job.sub.transport === "voice") {
@@ -24,14 +31,18 @@ export async function processJob(job: DeliveryJob, env: Env): Promise<"delivered
       if (circuit) throw new PermanentError(`telephony paused: ${circuit}`);
     }
     const r = await send(job, env);
-    await account.settle(job.reservation.ref, Math.min(r.costMicros ?? job.reservation.micros, job.reservation.micros));
+    sent = true;
+    await topic.markSent(job.reservation.ref);
+    // Deferred settlement (voice): the provider's status callback settles to the real duration.
+    if (!r.deferSettle) await account.settle(job.reservation.ref, Math.min(r.costMicros ?? job.reservation.micros, job.reservation.micros));
     await topic.recordDelivery(job.message.id!, { sub: job.sub.id, transport: job.sub.transport, result: "delivered", detail: r.detail });
     return "delivered";
   } catch (e) {
+    if (sent) return "retry"; // bookkeeping failed after sending; the retry only settles
     const permanent = e instanceof PermanentError || job.attempt + 1 >= MAX_ATTEMPTS;
-    await topic.recordDelivery(job.message.id!, { sub: job.sub.id, transport: job.sub.transport, result: permanent ? "failed" : "retrying", error: String((e as Error).message ?? e), attempt: job.attempt });
+    await topic.recordDelivery(job.message.id!, { sub: job.sub.id, transport: job.sub.transport, result: permanent ? "failed" : "retrying", error: String((e as Error).message ?? e), attempt: job.attempt }).catch(() => {});
     if (permanent) {
-      await account.release(job.reservation.ref);
+      await account.release(job.reservation.ref).catch(() => {});
       return "failed";
     }
     return "retry";

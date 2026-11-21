@@ -93,34 +93,37 @@ async function runTool(name: string, a: Args, call: Call): Promise<unknown> {
       const timeout = Math.min(Math.max(Number(a.timeout_s ?? 25), 1), 50) * 1000;
       const q = new URLSearchParams();
       if (a.since) q.set("since", String(a.since));
-      const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), timeout);
+      const r = await call(`/${topicPath(topic)}/json${q.size ? `?${q}` : ""}`);
+      if (!r.ok) throw Object.assign(new Error(await r.text()), { status: r.status });
+      // Read bytes directly: cancelling a pipeThrough(TextDecoderStream) chain leaves a rejected
+      // internal pipe promise in workerd.
+      const reader = r.body!.getReader();
+      const decoder = new TextDecoder();
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const timedOut = new Promise<null>((res) => { timer = setTimeout(() => res(null), timeout); });
+      let buf = "";
+      let readPending = false;
       try {
-        const r = await call(`/${topicPath(topic)}/json${q.size ? `?${q}` : ""}`, { signal: ctl.signal });
-        if (!r.ok) throw Object.assign(new Error(await r.text()), { status: r.status });
-        const reader = r.body!.pipeThrough(new TextDecoderStream()).getReader();
-        let buf = "";
-        const timeoutP = new Promise<null>((res) => ctl.signal.addEventListener("abort", () => res(null)));
         for (;;) {
-          const chunk = await Promise.race([reader.read(), timeoutP]);
+          readPending = true;
+          const chunk = await Promise.race([reader.read().then((r) => { readPending = false; return r; }, () => ({ done: true as const, value: undefined })), timedOut]);
           if (!chunk || chunk.done) break;
-          buf += chunk.value;
+          buf += decoder.decode(chunk.value, { stream: true });
           let i;
           while ((i = buf.indexOf("\n")) >= 0) {
             const line = buf.slice(0, i).trim();
             buf = buf.slice(i + 1);
             if (!line) continue;
             const m = JSON.parse(line) as { event?: string };
-            if (m.event === "message") {
-              reader.cancel().catch(() => {});
-              return { message: m };
-            }
+            if (m.event === "message") return { message: m };
           }
         }
-        reader.cancel().catch(() => {});
         return { timeout: true };
       } finally {
-        clearTimeout(timer);
+        if (timer !== null) clearTimeout(timer);
+        // Close the subscription. Cancelling with a read still pending (the timeout case) leaves
+        // a rejected promise inside workerd; the subrequest is closed anyway when this request ends.
+        if (!readPending) reader.cancel("done").catch(() => {});
       }
     }
     case "list_topics":
