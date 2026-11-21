@@ -3,7 +3,7 @@
 > **subetha.org**: send and receive ntfy-style messages between any devices, over any transport,
 > without either side knowing how (or to whom) the message is being delivered.
 
-Status: **DRAFT v0.1** — Open questions are listed in [§15](#15-open-questions). Assumptions are marked **(A)**.
+Status: **DRAFT v0.2**. Decisions made so far are in [§15](#15-decisions-and-open-questions), along with the remaining open questions. Assumptions are marked **(A)**.
 
 ---
 
@@ -42,7 +42,7 @@ Guiding principles:
 | Hosting | Cloudflare | Cloudflare (Workers, Durable Objects, D1, R2, Queues, KV, Email Routing, Containers) |
 | Payments | Stripe, prepaid account balance, no subscription | Same |
 | Human auth | Clerk | Clerk (web console, OAuth for MCP/Slack installs) |
-| Device auth | devicebasedauth.org | devicebasedauth.org for device enrollment and identity **(A — see Q1)** |
+| Device auth | devicebasedauth.org | devicebasedauth.org for device enrollment and identity **(A — see open question 1)** |
 | Pricing | Thin margin, never negative | Same, enforced by automated pricing invariants (§8) |
 | Dev focus | API docs, working samples, built-in tools | Same, plus SDKs for 6+ platforms and sample apps |
 | Core difference | — | **Device-to-device, transport-agnostic, location-agnostic delivery** |
@@ -54,7 +54,7 @@ Guiding principles:
 | Concept | Description |
 |---|---|
 | **Account** | A Clerk user or org. Holds the balance, owns topics, devices, tokens, and policies. |
-| **Device** | Any endpoint running the SDK or registered to receive messages: browser tab, phone, server, ESP32, CLI, agent. It has an Ed25519 identity key (enrolled through devicebasedauth.org) and declares the **capabilities** (transports) it can reach. |
+| **Device** | Any endpoint running the SDK or registered to receive messages: browser tab, phone, server, ESP32, CLI, agent. It has an Ed25519 identity key (enrolled through devicebasedauth.org; see open question 1) and declares the **capabilities** (transports) it can reach. |
 | **Endpoint** | A non-SDK destination bound to a topic: an email address, phone number, Slack channel, webhook URL, LXMF address, or MCP agent inbox. Paid outbound endpoints must be **verified** (confirmation code) to prevent abuse. |
 | **Topic** | The rendezvous point. Namespaced `@handle/name`, or an unguessable `t_<128-bit>` name for ntfy-style "secret URL" topics. Topics carry policies and an optional E2EE key. |
 | **Subscription** | (Device or Endpoint) × Topic, plus a filter (priority, tags) and delivery preferences. |
@@ -68,7 +68,7 @@ Guiding principles:
 - **Publish** is charged to the **publisher's** token or account.
 - **Fan-out and delivery** is charged to the **topic owner** by default. That keeps
   `curl -d hi subetha.org/@alice/doorbell` simple: Alice can allow anonymous or public publishing
-  with a rate limit and a daily spend cap. **(A — see Q3)**
+  with a rate limit and a daily spend cap. *(Decided.)*
 - Anonymous publishes to topics with no funded owner are rejected (HTTP 402).
 
 ---
@@ -148,7 +148,7 @@ owner sees this only in the trace.
 | Webhook | relay | in/out | Worker + Queue, HMAC-signed | |
 | Email | relay | in/out | In: Cloudflare Email Routing → Email Worker (`topic@in.subetha.org`). Out: Cloudflare Email Service (fallback Amazon SES) | outbound only to verified addresses |
 | Slack | relay | in/out | Slack app (OAuth install), Events API in, `chat.postMessage` out | bind channel ↔ topic |
-| Twilio SMS / MMS / WhatsApp | relay | in/out | Twilio REST + inbound webhook | US A2P 10DLC registration needed (Q6); verified numbers only |
+| Twilio SMS / MMS / WhatsApp | relay | in/out | Twilio REST + inbound webhook | US A2P 10DLC registration needed (started in Phase 0); verified numbers only |
 | Twilio Voice | relay | out (+DTMF ack) | TwiML `<Say>` | escalation target for alarms |
 | MCP | relay | in/out | Remote MCP server at `mcp.subetha.org` (Streamable HTTP, OAuth via Clerk). Tools: `publish`, `poll`, `wait_for_message`, `list_topics`, `create_topic`, `estimate_cost` | agents are devices too |
 | Reticulum / LXMF | gateway | in/out | Python RNS + LXMF daemon in Cloudflare Containers (or a small VPS), linked to the relay by WebSocket. Each topic can be given an LXMF destination | BYO gateway supported |
@@ -196,6 +196,10 @@ Each transport is a module that implements one interface (`capabilities()`, `sen
 ## 8. Pricing model
 
 ### Rules
+0. **No free relay usage.** Every action that touches the relay or a hosted gateway is prepaid. The
+   only free things are edge transports (BLE, audio, QR, LAN), which run entirely on users' devices,
+   and reading the public docs. Live API explorers on the site use the signed-in user's own balance.
+   *(Decided.)*
 1. **Prepaid only.** Top up with Stripe Checkout (min **$5** **(A)**). Optional auto-recharge
    (saved card, top up when below a threshold) is *not* a subscription.
 2. **Price = cost × (1 + markup) + floor**, rounded up to a whole µ$. `pricing/costs.yaml` holds
@@ -256,7 +260,7 @@ the route plan and cost estimate without charging.
 - **Humans:** Clerk (email, passkeys, OAuth). Orgs map to shared accounts and balances.
 - **Devices:** devicebasedauth.org enrolls a device keypair and links it to an account (QR or code
   from the console, or the device flow from a CLI or TV-style device). Requests are signed by the
-  device key. **(A — Q1)**
+  device key. **(A — see open question 1)**
 - **API tokens:** scoped and revocable: `publish:@alice/*`, `subscribe:@alice/doorbell`, transport
   allow-lists, spend caps (per day / total), expiry, IP or origin restrictions. Browser-safe
   **publishable tokens** for web pages are tied to an origin and a single topic with a tight cap.
@@ -295,7 +299,7 @@ the route plan and cost estimate without charging.
 - **Working code samples:** every docs snippet lives as a file under `docs/samples/` and runs in CI
   against `wrangler dev` (and nightly against staging). A broken sample fails the build.
 
-### SDK architecture (recommended — Q4)
+### SDK architecture (decided)
 - **Rust core** (`sdk/core`): envelope, canonicalization, signatures, E2EE, dedupe, store-and-forward
   queue, routing/escalation, policy evaluation, edge gossip protocol.
   - Swift and Kotlin bindings via **UniFFI**. Flutter via **flutter_rust_bridge**. React Native via
@@ -355,7 +359,7 @@ runners (iOS) and Linux (Android / Flutter / RN).
 
 ## 13. Publishing: GitHub Pages and production
 
-**GitHub Pages** (`curtcox.github.io/subetha`, optionally CNAME `dev.subetha.org` **(Q5)**) holds:
+**GitHub Pages** (`curtcox.github.io/subetha`, optionally CNAME `dev.subetha.org`, see open question 2) holds:
 - **Build info:** commit, version, CI status per package, test and coverage summaries, the
   **pricing invariant report** (every SKU's cost vs. price vs. margin), SDK versions, and a changelog.
 - **Docs:** a versioned static docs build, mirroring what's on subetha.org.
@@ -371,40 +375,67 @@ migrations run in the deploy job. Secrets live in GitHub Environments and are pu
 
 ## 14. Roadmap
 
-| Phase | Scope | Exit criteria |
+All four transport groups (email/Slack/MCP, Twilio SMS/voice, Reticulum, BLE/audio/QR) are wanted
+early, so the work after the core relay runs as **parallel tracks** instead of strict phases.
+Anything with external lead time starts in Phase 0.
+
+### Phase 0: Foundations (also starts long-lead items)
+- Monorepo, CI, spec v0 + test vectors, GH Pages skeleton with build info, Cloudflare zone + staging.
+- Pricing generator, `costs.yaml`, invariant tests.
+- **Long-lead, start now:** business entity / Twilio account, **A2P 10DLC brand + campaign
+  registration** (takes weeks), Apple Developer + Google Play accounts, Slack app registration,
+  Stripe account + Radar rules, Clerk prod instance, Cloudflare Containers access.
+- Exit: Pages site live, `pnpm test` + `cargo test` green, price table generated.
+
+### Phase 1: Core relay MVP (critical path)
+- ntfy-compatible publish/subscribe (HTTP, JSON, SSE, WS), TopicDO, D1 schema.
+- Clerk login, API tokens, AccountDO ledger + credit leases, Stripe top-ups, 402 handling.
+- Minimal console (send / receive / billing), TS SDK + CLI.
+- Exit: `curl` publish → the browser console receives it; balance debits; property tests prove the
+  balance never goes negative.
+
+### Phase 2: Parallel tracks (start once Phase 1's API and ledger are stable)
+
+| Track | Scope | Depends on | Exit criteria |
+|---|---|---|---|
+| **A. Control plane** | devicebasedauth enrollment, device signatures, policies, traces, dry-run, escalation engine, Web Push / APNs / FCM, webhooks | Phase 1 | Policy matrix tests; escalation chain E2E in staging |
+| **B. Email + Slack + MCP** | Email in/out, Slack app (channel ↔ topic), remote MCP server (OAuth via Clerk) | Phase 1, A (policies) | Email → topic → Slack round trip; MCP `wait_for_message` works from an agent |
+| **C. Twilio SMS/voice (US)** | SMS in/out, voice TTS + DTMF ack, verified numbers, new-funds holds, Twilio repricing Cron, SMS-pumping defenses | Phase 1, A, 10DLC approval | Alarm escalates WS → push → SMS → voice in staging; per-SKU margin positive in reconciliation |
+| **D. Reticulum gateway** | Python RNS/LXMF bridge in Containers, topic ↔ LXMF destination mapping, BYO-gateway docs, Python SDK | Phase 1 | Sideband/NomadNet user ↔ web console round trip |
+| **E. Rust core + mobile SDKs** | `sdk/core` (envelope, crypto, dedupe, store-and-forward, routing), UniFFI → Swift/Kotlin, flutter_rust_bridge, uniffi-bindgen-react-native, sample apps on all four platforms | spec v0 (can start in Phase 0) | Same sample app passes the scripted flow on iOS, Android, Flutter, RN |
+| **F. Edge transports** | BLE store-and-forward, audio modem, animated QR, LAN discovery, E2EE, edge gossip | E | Offline phone gets a message via a BLE hop; audio and QR transfer demos in sample apps |
+| **G. Docs + dev tools** | Starlight docs, live API explorer, route simulator, token builder, pricing calculator, tested samples, `llms.txt`, OpenAPI | Phase 1, then follows every track | Every docs sample runs in CI |
+
+Track E has no server dependency, so it can start in Phase 0. That keeps Track F (edge transports)
+from becoming the long pole.
+
+### Phase 3: Launch hardening
+Load tests, abuse/rate tuning, ToS / privacy / AUP (including SMS consent language), status page,
+backups, security review, pricing review against real bills, then the production launch on
+subetha.org.
+
+## 15. Decisions and open questions
+
+### Decided
+| # | Topic | Decision |
 |---|---|---|
-| **0. Foundations** | Monorepo, CI, spec v0, GH Pages skeleton with build info, Cloudflare zone + staging, pricing generator + invariant tests | Pages site live; `pnpm test` green; price table generated |
-| **1. Core relay MVP** | ntfy-compatible publish/subscribe (HTTP, JSON, SSE, WS), TopicDO, D1 schema, Clerk login, API tokens, AccountDO ledger, Stripe top-ups, 402 handling, minimal console (send/receive/billing), TS SDK + CLI | `curl` publish → browser console receives; balance debits; cannot go negative (property tests) |
-| **2. Devices and control** | devicebasedauth enrollment, device signatures, policies, traces, dry-run, Web Push/APNs/FCM, webhooks, docs site with live explorer + tested samples, `llms.txt`, OpenAPI | Policy matrix tests; every docs sample executed in CI |
-| **3. External transports** | Email in/out, Slack app, Twilio SMS/voice (US first), MCP server, escalation chains, new-funds holds, Twilio repricing Cron, reconciliation jobs | Escalation E2E in staging; reconciliation shows positive margin per SKU |
-| **4. Mobile SDKs and samples** | Rust core + UniFFI, Swift/Kotlin/Flutter/RN SDKs, sample apps on all four, push integration, published to Pages | Same sample app passes the scripted flow on all platforms |
-| **5. Edge and mesh** | BLE store-and-forward, audio modem, animated QR, LAN discovery, E2EE, Reticulum gateway (Containers), BYO gateway docs | Offline phone receives a message through a BLE hop; LXMF ↔ web round trip |
-| **6. Launch hardening** | Load tests, abuse/rate tuning, ToS/privacy/AUP, status page, backups, security review, pricing review | Production launch on subetha.org |
+| D1 | Free usage | **None** for relay or gateway actions. Only edge/local transports are free. |
+| D2 | Who pays for delivery | **Topic owner** pays for fan-out and delivery; the publisher pays for the publish. |
+| D3 | SDK architecture | **Rust core + bindings** (UniFFI, flutter_rust_bridge, uniffi-bindgen-react-native), plus a hand-written TS SDK for the web. |
+| D4 | Early transports | **All of:** email + Slack + MCP, Twilio SMS/voice (US), Reticulum gateway, BLE/audio/QR edge, run as parallel tracks (§14). |
 
-Phases 1 to 3 give a useful hosted product (an ntfy-compatible relay with paid escalation
-transports). Phases 4 and 5 deliver the "devices don't know about each other" mesh story in full.
-
----
-
-## 15. Open questions
-
+### Still open
 1. **devicebasedauth.org:** what is its exact flow and API? (I couldn't reach it from the build
    sandbox.) Is it a device-keypair registry, an RFC 8628-style device-code flow, or both? Does it
    replace Clerk for devices, or link devices to Clerk users?
-2. **Free usage:** strictly none (every server action is prepaid), or a small new-account trial
-   credit? A trial credit technically lets a user cost money, unless it covers only edge/local
-   features or is gated, e.g. by a $0 card verification.
-3. **Who pays for delivery:** topic owner (proposed), publisher, or configurable per topic?
-4. **SDK architecture:** Rust core + bindings (proposed), or fully native SDKs per platform?
-5. **GitHub Pages domain:** `curtcox.github.io/subetha`, or a subdomain such as `dev.subetha.org`?
-6. **SMS/voice scope at launch:** US-only (needs A2P 10DLC brand/campaign registration and a
-   business entity), or skip SMS until later and launch with email/Slack/push first?
-7. **Refunds:** can unused balance be refunded (minus processing fees), or is it non-refundable
+2. **GitHub Pages domain:** `curtcox.github.io/subetha`, or a subdomain such as `dev.subetha.org`?
+3. **Refunds:** can unused balance be refunded (minus processing fees), or is it non-refundable
    credit? This affects how Stripe fees are passed through.
-8. **Code sharing with hashbin:** should SubEtha reuse hashbin.org's stack/modules (billing ledger,
-   Clerk integration, docs tooling)? If so, please grant this session read access to
-   `curtcox/hashbin.org` so the plan can match it.
-9. **Domain/accounts:** is `subetha.org` already on Cloudflare? Are Stripe, Clerk, Twilio, Apple,
-   and Google developer accounts available, or should setup be part of Phase 0?
-10. **Topic namespace:** global ntfy-style names (`subetha.org/anything`) in addition to
-    `@handle/…` and `t_<random>`? Global names are friendlier but invite squatting and collisions.
+4. **Code sharing with hashbin:** should SubEtha reuse hashbin.org's stack/modules (billing ledger,
+   Clerk integration, docs tooling)? If so, please grant read access to `curtcox/hashbin.org` so
+   the plan can match it.
+5. **Entity and accounts:** is `subetha.org` already on Cloudflare? Is there a business entity for
+   Twilio A2P 10DLC registration? Do Stripe, Clerk, Twilio, Apple, and Google developer accounts
+   exist?
+6. **Topic namespace:** global ntfy-style names (`subetha.org/anything`) in addition to
+   `@handle/…` and `t_<random>`? Global names are friendlier but invite squatting and collisions.
