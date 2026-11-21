@@ -1,7 +1,7 @@
 // HTTP API: ntfy-compatible publish/subscribe plus the /v1 control plane (spec §8, PLAN §7).
 import { Hono, type Context } from "hono";
 import { canonicalize, isTopic, validateEnvelope, ulid, type Envelope, type Json } from "@subetha/sdk/protocol";
-import { topupSplit, tierFor, type PriceTable } from "@subetha/pricing";
+import { actionPriceMicros, topupSplit, tierFor, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { audit, autoCreateOwnerFor, createAccount, getAccount, invalidateAccount, recordTopic, validateHandle, validatePolicy } from "./accounts.ts";
 import { authenticate, callerOf, invalidateToken, newTokenSecret, requireAccount, requireAdmin, scopeAllows, validateScopes, validateTransports } from "./auth.ts";
@@ -13,6 +13,7 @@ import { parseFilter, parseHeaderPublish, parseJsonPublish, parseTopicPath, type
 import { createCheckoutSession, verifyStripeSignature } from "./stripe.ts";
 import type { Env, Principal, TopicMeta } from "./types.ts";
 import { registerControlRoutes } from "./control.ts";
+import { registerMcp } from "./mcp.ts";
 
 const PRICES = prices as unknown as PriceTable;
 type C = Context<{ Bindings: Env; Variables: { principal: Principal } }>;
@@ -56,6 +57,27 @@ app.use("*", async (c, next) => {
   c.res.headers.set("access-control-expose-headers", "x-cost-micros, x-message-id, retry-after");
 });
 
+// Device-signed requests must be verified before anything consumes the body.
+app.use("*", async (c, next) => {
+  if (c.req.header("x-device-id")) c.set("principal", await authenticate(c.req.raw, c.env));
+  await next();
+});
+
+// Rate limits (PLAN §9): per credential for authenticated callers, per IP otherwise.
+// Provider hooks are exempt (they're signature-checked and must not be dropped).
+app.use("*", async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (path.startsWith("/v1/hooks/") || path === "/v1/health" || path === "/v1/status") return next();
+  const cred = c.req.header("authorization") ?? c.req.header("x-device-id") ?? new URL(c.req.url).searchParams.get("auth");
+  const limiter = cred ? c.env.RL_AUTH : c.env.RL_ANON;
+  if (limiter) {
+    const key = cred ? (await sha256Hex(cred)).slice(0, 32) : c.req.header("cf-connecting-ip") ?? "unknown";
+    const { success } = await limiter.limit({ key });
+    if (!success) throw new ApiError("rate_limited", "too many requests");
+  }
+  await next();
+});
+
 const principal = async (c: C) => {
   let p = c.get("principal");
   if (!p) {
@@ -67,7 +89,31 @@ const principal = async (c: C) => {
 
 app.get("/v1/health", (c) => c.json({ ok: true, environment: c.env.ENVIRONMENT, time: Math.floor(Date.now() / 1000) }));
 app.get("/v1/prices", (c) => c.json(PRICES));
-app.get("/v1/config", (c) => c.json({ environment: c.env.ENVIRONMENT, clerk_publishable_key: c.env.CLERK_PUBLISHABLE_KEY ?? null }));
+
+// Status page data (PLAN §14 Phase 3): component health and which transports are configured.
+app.get("/v1/status", async (c) => {
+  const timed = async (fn: () => Promise<unknown>) => {
+    const t = Date.now();
+    try { await fn(); return { ok: true, ms: Date.now() - t }; } catch (e) { return { ok: false, error: String((e as Error).message ?? e) }; }
+  };
+  const e = c.env;
+  const [d1, kv, circuit] = await Promise.all([timed(() => e.DB.prepare("SELECT 1").first()), timed(() => e.CACHE.get("status:probe")), e.CACHE.get("circuit:telephony")]);
+  const transports = {
+    ws: true, sse: true, poll: true, mcp: true,
+    webhook: !!e.DELIVERY,
+    webpush: !!(e.DELIVERY && e.VAPID_PRIVATE_KEY),
+    fcm: !!(e.DELIVERY && e.FCM_SERVICE_ACCOUNT),
+    apns: !!(e.DELIVERY && e.APNS_KEY_P8),
+    email: !!(e.DELIVERY && (e.EMAIL || e.SES_ACCESS_KEY_ID)),
+    slack: !!(e.DELIVERY && e.SLACK_CLIENT_ID),
+    sms: !!(e.DELIVERY && e.TWILIO_ACCOUNT_SID) && !circuit,
+    voice: !!(e.DELIVERY && e.TWILIO_ACCOUNT_SID) && !circuit,
+    lxmf: !!(e.DELIVERY && e.LXMF_GATEWAY_URL),
+  };
+  const ok = d1.ok && kv.ok;
+  return c.json({ ok, environment: e.ENVIRONMENT, components: { d1, kv, queue: { ok: !!e.DELIVERY }, attachments: { ok: !!e.FILES } }, transports, telephony_circuit: circuit ?? null, time: Math.floor(Date.now() / 1000) }, ok ? 200 : 503);
+});
+app.get("/v1/config", (c) => c.json({ environment: c.env.ENVIRONMENT, clerk_publishable_key: c.env.CLERK_PUBLISHABLE_KEY ?? null, vapid_public_key: c.env.VAPID_PUBLIC_KEY ?? null }));
 
 // ---------------- accounts ----------------
 app.get("/v1/account", async (c) => {
@@ -251,13 +297,16 @@ app.get("/v1/traces/:id", async (c) => {
 });
 
 app.post("/v1/ack", async (c) => {
+  const p = await principal(c);
   const body = (await c.req.json()) as { topic?: string; id?: string; via?: string };
   if (!body.topic || !isTopic(body.topic) || !body.id) throw new ApiError("bad_request", "topic and id are required");
-  await topicStub(c.env, body.topic).ack(body.id, body.via ?? "http");
+  if (p.kind === "token" && !scopeAllows(p.scopes, "subscribe", body.topic)) throw new ApiError("forbidden", "token lacks subscribe scope for this topic");
+  unwrap(await topicStub(c.env, body.topic).ackAs(body.id, String(body.via ?? "http").slice(0, 16), callerOf(p)));
   return c.json({ acked: true });
 });
 
 registerControlRoutes(app, principal);
+registerMcp(app);
 
 // ---------------- local development ----------------
 app.post("/v1/dev/bootstrap", async (c) => {
@@ -281,21 +330,62 @@ async function doPublish(c: C, parsed: ParsedPublish): Promise<Response> {
   const problems = validateEnvelope(env);
   if (problems.length) throw new ApiError("invalid_message", problems.join("; "));
   const caller = callerOf(p);
-  const bodyHash = await sha256Hex(canonicalize({ ...env, route: parsed.route } as unknown as Json));
-  const result = unwrap(await topicStub(c.env, env.topic).publish({
-    envelope: env,
-    caller,
-    autoCreateOwner: await autoCreateOwnerFor(c.env, caller.accountId, env.topic),
-    idempotencyKey: parsed.idempotencyKey,
-    bodyHash,
-    dryRun: parsed.dryRun,
-    route: parsed.route,
-  }));
+  // Attachments go to R2 first; the publish (which charges for them) references the file.
+  let fileId: string | null = null;
+  if (parsed.file) {
+    if (!c.env.FILES) throw new ApiError("unsupported", "attachments are not enabled");
+    fileId = ulid().toLowerCase();
+    env.attachment = { name: parsed.file.name, url: `${c.env.BASE_URL}/file/${fileId}/${encodeURIComponent(parsed.file.name)}`, size: parsed.file.bytes.length, type: parsed.file.type };
+    if (!parsed.dryRun) await c.env.FILES.put(`att/${fileId}`, parsed.file.bytes, { httpMetadata: { contentType: parsed.file.type } });
+  }
+  const bodyHash = await sha256Hex(canonicalize({ ...env, route: parsed.route, file: parsed.file ? await sha256Hex(parsed.file.bytes) : undefined } as unknown as Json));
+  let result;
+  try {
+    result = unwrap(await topicStub(c.env, env.topic).publish({
+      envelope: env,
+      caller,
+      autoCreateOwner: await autoCreateOwnerFor(c.env, caller.accountId, env.topic),
+      idempotencyKey: parsed.idempotencyKey,
+      bodyHash,
+      dryRun: parsed.dryRun,
+      attachmentBytes: parsed.file?.bytes.length,
+      route: parsed.route,
+    }));
+  } catch (e) {
+    if (fileId && !parsed.dryRun) await c.env.FILES!.delete(`att/${fileId}`);
+    throw e;
+  }
+  if (fileId && !parsed.dryRun) {
+    if (result.duplicate) await c.env.FILES!.delete(`att/${fileId}`);
+    else {
+      const meta = await topicStub(c.env, env.topic).getMeta();
+      await c.env.DB.prepare("INSERT INTO files (id, topic, owner_account_id, name, type, size, message_id, expires, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(fileId, env.topic, meta!.owner, parsed.file!.name, parsed.file!.type, parsed.file!.bytes.length, result.message.id, result.message.expires, Date.now()).run();
+    }
+  }
   if (result.created_topic) c.executionCtx.waitUntil(recordTopic(c.env, { name: env.topic, owner: caller.accountId!, policy: {}, created_at: Date.now() }));
   const headers = { "x-cost-micros": String(result.cost_micros), "x-message-id": result.message.id ?? "" };
   if (result.dry_run) return c.json({ dry_run: true, estimate_usd_micros: result.cost_micros, plan: result.plan, message: result.message }, 200, headers);
   return c.json(result.message, 200, result.duplicate ? { ...headers, "x-duplicate": "1" } : headers);
 }
+
+app.get("/file/:id/:name?", async (c) => {
+  const row = await c.env.DB.prepare("SELECT * FROM files WHERE id = ?").bind(c.req.param("id")).first<{ id: string; owner_account_id: string; name: string; type: string; expires: number }>();
+  if (!row || !c.env.FILES || row.expires < Math.floor(Date.now() / 1000)) throw new ApiError("not_found", "attachment expired or not found");
+  // Downloads are metered like any other request, paid by the topic owner.
+  const charge = await accountStub(c.env, row.owner_account_id).charge(actionPriceMicros(PRICES, "api_request"), `dl:${row.id}:${ulid()}`, null, {});
+  if (!charge.ok) throw new ApiError("insufficient_balance", "the topic owner's balance can't cover this download");
+  const obj = await c.env.FILES.get(`att/${row.id}`);
+  if (!obj) throw new ApiError("not_found");
+  const inline = /^(image|video|audio)\/|^text\/plain|^application\/pdf/.test(row.type);
+  return new Response(obj.body, { headers: {
+    "content-type": inline ? row.type : "application/octet-stream",
+    "content-disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(row.name)}`,
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; sandbox",
+    "cache-control": "private, max-age=3600",
+  } });
+});
 
 app.post("/", async (c) => {
   if (!(c.req.header("content-type") ?? "").includes("json") && !(await c.req.raw.clone().text()).trim().startsWith("{")) throw new ApiError("bad_request", "POST / expects a JSON message");

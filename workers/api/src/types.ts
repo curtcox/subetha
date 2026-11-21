@@ -12,6 +12,8 @@ export interface Env {
   ACCOUNT: DurableObjectNamespace<AccountDO>;
   DELIVERY?: Queue<DeliveryJob>;
   ASSETS?: Fetcher;
+  RL_AUTH?: RateLimit;
+  RL_ANON?: RateLimit;
   // Clerk
   CLERK_ISSUER?: string;
   CLERK_PUBLISHABLE_KEY?: string;
@@ -124,6 +126,8 @@ export interface PublishInput {
   idempotencyKey: string | null;
   bodyHash: string;
   dryRun: boolean;
+  /** Size of an attachment uploaded with this publish (charged upload + retention to the publisher). */
+  attachmentBytes?: number;
   route: { mode: RouteMode; maxCost: number | null; deny: Transport[]; allow: Transport[] | null };
 }
 

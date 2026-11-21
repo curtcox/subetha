@@ -56,7 +56,10 @@ function decodeHeader(v: string | null): string | null {
   });
 }
 
+export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+
 export interface ParsedPublish {
+  file?: { name: string; bytes: Uint8Array; type: string };
   envelope: Envelope;
   route: { mode: RouteMode; maxCost: number | null; deny: Transport[]; allow: Transport[] | null };
   dryRun: boolean;
@@ -86,11 +89,18 @@ export async function parseHeaderPublish(req: Request, topic: string): Promise<P
   const buf = new Uint8Array(await req.arrayBuffer());
   const env: Envelope = { topic };
   const filename = header(req, url, "X-Filename", "Filename", "f");
-  const bodyText = utf8.decode(buf);
-  if (filename) throw new ApiError("unsupported", "attachments: upload via PUT /v1/files then set X-Attach");
-  if (buf.length > MAX_MESSAGE_BYTES) throw new ApiError("message_too_large");
-  const msgParam = url.searchParams.get("message") ?? url.searchParams.get("m");
-  env.message = bodyText !== "" ? bodyText : msgParam ?? "triggered";
+  const msgParam = header(req, url, "X-Message", "Message", "m");
+  let file: ParsedPublish["file"];
+  if (filename) {
+    if (buf.length > MAX_ATTACHMENT_BYTES) throw new ApiError("message_too_large", `attachments are limited to ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`);
+    if (!/^[^/\\\x00-\x1f]{1,200}$/.test(filename)) throw new ApiError("bad_request", "invalid X-Filename");
+    file = { name: filename, bytes: buf, type: req.headers.get("content-type") ?? "application/octet-stream" };
+    env.message = msgParam ?? `You received a file: ${filename}`;
+  } else {
+    const bodyText = utf8.decode(buf);
+    if (buf.length > MAX_MESSAGE_BYTES) throw new ApiError("message_too_large");
+    env.message = bodyText !== "" ? bodyText : msgParam ?? "triggered";
+  }
   const title = decodeHeader(header(req, url, "X-Title", "Title", "t"));
   if (title) env.title = title;
   let prio: number | undefined;
@@ -120,7 +130,7 @@ export async function parseHeaderPublish(req: Request, topic: string): Promise<P
   const expires = header(req, url, "X-Expires");
   if (expires) env.expires = Number(expires);
   const route = parseRoute(req, url, env);
-  return { envelope: env, route, dryRun: ["1", "true", "yes"].includes((header(req, url, "X-Dry-Run") ?? "").toLowerCase()), idempotencyKey: req.headers.get("idempotency-key") };
+  return { envelope: env, route, dryRun: ["1", "true", "yes"].includes((header(req, url, "X-Dry-Run") ?? "").toLowerCase()), idempotencyKey: req.headers.get("idempotency-key"), file };
 }
 
 /** ntfy action header: "view, Open, https://…; http, Close, https://…, clear=true" or JSON. */

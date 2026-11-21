@@ -14,6 +14,7 @@ import { EMAIL_RE, sendEmail } from "./delivery/email.ts";
 import { verifySlackSignature } from "./delivery/slack.ts";
 import { ackToken, makeCall, sendSms, US_E164, verifyTwilioSignature, voiceTwiml } from "./delivery/twilio.ts";
 import type { Env, Principal, QueuedSubscription, SubscriptionFilter } from "./types.ts";
+import { registerDeviceRoutes } from "./devices.ts";
 
 const PRICES = prices as unknown as PriceTable;
 type Vars = { Bindings: Env; Variables: { principal: Principal } };
@@ -79,6 +80,7 @@ async function topicsForEndpoint(env: Env, endpointId: string): Promise<string[]
 }
 
 export function registerControlRoutes(app: App, principal: PrincipalFn) {
+  registerDeviceRoutes(app, principal);
   // ---------------- endpoints ----------------
   app.get("/v1/endpoints", async (c) => {
     const id = requireAccount(await principal(c));
@@ -93,6 +95,13 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     const kind = body.kind!;
     if (!CREATABLE.includes(kind)) throw new ApiError("bad_request", kind === "slack" ? "Slack endpoints are created by installing the Slack app (GET /v1/slack/install)" : `kind must be one of ${CREATABLE.join(", ")}`);
     const address = validateAddress(kind, body.address);
+    if (kind === "webhook") {
+      const host = new URL(address).hostname.toLowerCase();
+      const own = new URL(c.env.BASE_URL).hostname.toLowerCase();
+      if (host === own || host.endsWith(".subetha.org") || host === "subetha.org" || /^(localhost|127\.|10\.|192\.168\.|169\.254\.|\[?::1)/.test(host)) {
+        throw new ApiError("bad_request", "webhooks can't target the relay itself or private addresses (use a topic subscription instead)");
+      }
+    }
     const now = Date.now();
     const id = `ep_${ulid()}`;
     const config: Record<string, unknown> = { name: body.name ?? "" };
@@ -206,6 +215,9 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
   app.post("/v1/hooks/twilio/sms", async (c) => {
     const params = await twilioParams(c);
     const from = params.From ?? "", body = (params.Body ?? "").trim();
+    if (/^(help|info)$/i.test(body)) {
+      return twiml(c, "<Response><Message>SubEtha notifications. Manage at subetha.org/console. Reply STOP to opt out. Msg &amp; data rates may apply.</Message></Response>");
+    }
     const ep = await c.env.DB.prepare("SELECT * FROM endpoints WHERE kind = 'sms' AND address = ? AND verified_at IS NOT NULL ORDER BY created_at LIMIT 1").bind(from).first<EndpointRecord>();
     if (!ep) return twiml(c);
     if (/^(stop|stopall|unsubscribe|cancel|end|quit)$/i.test(body)) {

@@ -139,10 +139,19 @@ export class Ledger {
     return this.settle(ref, 0).released;
   }
 
-  /** Reserve and settle in one step (for fixed-price actions). */
-  charge(amount: number, ref: string, opts: { tokenId?: string | null; caps?: Caps } = {}): ReserveResult {
+  /**
+   * Reserve and settle in one step (for fixed-price actions). With `once`, a second charge with
+   * the same ref is a no-op (used by metering jobs that may re-run).
+   */
+  charge(amount: number, ref: string, opts: { tokenId?: string | null; caps?: Caps; once?: boolean } = {}): ReserveResult {
+    if (opts.once) {
+      if (this.s.hasRef(`charge:${ref}`)) return { ok: true, available: this.available };
+    }
     const r = this.reserve(amount, ref, opts);
-    if (r.ok) this.settle(ref, amount);
+    if (r.ok) {
+      this.settle(ref, amount);
+      if (opts.once) this.s.addRef(`charge:${ref}`);
+    }
     return r.ok ? { ok: true, available: this.available } : r;
   }
 

@@ -1,6 +1,7 @@
 // Request authentication: API tokens, Clerk session JWTs, anonymous (PLAN §9).
 import { TRANSPORTS, type Transport } from "@subetha/sdk/protocol";
 import { verifyClerkJwt } from "./clerk.ts";
+import { authenticateDevice } from "./devices.ts";
 import { randomBase32, sha256Hex, timingSafeEqual } from "./crypto.ts";
 import { ApiError } from "./errors.ts";
 import type { Caller, Env, Principal } from "./types.ts";
@@ -69,6 +70,8 @@ export async function invalidateToken(env: Env, id: string) {
 }
 
 export async function authenticate(req: Request, env: Env): Promise<Principal> {
+  const device = await authenticateDevice(req, env);
+  if (device) return device;
   const cred = extractCredential(req);
   if (!cred) return { kind: "anonymous" };
   const m = TOKEN_RE.exec(cred);
@@ -149,6 +152,7 @@ export function requireAccount(p: Principal): string {
 
 export function requireAdmin(p: Principal): string {
   const id = requireAccount(p);
+  if (p.kind === "device") throw new ApiError("forbidden", "devices can publish and subscribe but not manage the account");
   if (p.kind === "token" && !scopeAllows(p.scopes, "admin")) throw new ApiError("forbidden", "token lacks admin scope");
   return id;
 }

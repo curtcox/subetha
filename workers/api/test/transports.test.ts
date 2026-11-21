@@ -177,3 +177,17 @@ describe("inbound hooks", () => {
     expect(r.status).toBe(401);
   });
 });
+
+describe("Twilio SMS keywords", () => {
+  it("answers HELP and handles STOP with valid signatures", async () => {
+    const send = async (body: string) => {
+      const params = { From: "+14155550199", Body: body, MessageSid: `SM${Math.random()}` };
+      const sig = await twilioSignature("twilio-token", "http://localhost:8787/v1/hooks/twilio/sms", params);
+      return SELF.fetch(`${BASE}/v1/hooks/twilio/sms`, { method: "POST", body: new URLSearchParams(params), headers: { "x-twilio-signature": sig } });
+    };
+    const help = await send("HELP");
+    expect(help.status).toBe(200);
+    expect(await help.text()).toContain("Reply STOP to opt out");
+    expect((await send("STOP")).status).toBe(200);
+  });
+});

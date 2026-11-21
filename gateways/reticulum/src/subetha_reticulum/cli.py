@@ -53,7 +53,12 @@ def main(argv: list[str] | None = None) -> int:
         signal.signal(sig, lambda *_: stop.set())
 
     if cfg.health_port:  # up first, so the platform sees the container as started
-        serve_health(cfg.health_port, lambda: {"ok": True, "version": __version__, "topics": bridge.destinations()})
+        serve_health(
+            cfg.health_port,
+            lambda: {"ok": True, "version": __version__, "topics": bridge.destinations()},
+            deliver=bridge.deliver_direct,
+            deliver_secret=cfg.deliver_secret,
+        )
 
     bridge.start()
     for topic, dest in bridge.destinations().items():

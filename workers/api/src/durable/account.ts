@@ -87,8 +87,8 @@ export class AccountDO extends DurableObject<Env> {
     });
   }
 
-  async charge(amount: number, ref: string, tokenId: string | null, caps: Caps): Promise<ReserveResult> {
-    return this.tx(() => this.ledger.charge(amount, ref, { tokenId, caps }));
+  async charge(amount: number, ref: string, tokenId: string | null, caps: Caps, once = false): Promise<ReserveResult> {
+    return this.tx(() => this.ledger.charge(amount, ref, { tokenId, caps, once }));
   }
 
   /**

@@ -124,6 +124,23 @@ function subscribe() {
 }
 $("subBtn").onclick = subscribe;
 
+$("pushBtn").onclick = async () => {
+  const say = (t) => { $("pushMsg").textContent = t; };
+  try {
+    const cfg = await fetch("/v1/config").then((r) => r.json());
+    if (!cfg.vapid_public_key) return say("Web Push isn't configured on this server.");
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return say("This browser doesn't support Web Push.");
+    if ((await Notification.requestPermission()) !== "granted") return say("Notification permission was not granted.");
+    const reg = await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+    const address = await SubEtha.subscribeWebPush(reg, cfg.vapid_public_key);
+    const ep = await client.request("POST", "/v1/endpoints", { kind: "webpush", address, name: navigator.userAgent.slice(0, 60) });
+    const topics = $("subTopic").value.split(",").map((s) => s.trim()).filter(Boolean);
+    for (const topic of topics) await client.request("POST", "/v1/subscriptions", { topic, endpoint_id: ep.id });
+    say(`This browser will get push notifications for ${topics.join(", ")}.`);
+  } catch (e) { say(`${e.code ?? "error"}: ${e.message}`); }
+};
+
 async function loadTopics() {
   const { topics } = await client.topics();
   $("topicRows").innerHTML = topics.map((t) => `<tr><td><code>${esc(t.name)}</code></td><td><code>${esc(JSON.stringify(t.policy))}</code></td><td><button class="secondary" data-edit="${esc(t.name)}">Edit</button></td></tr>`).join("") || `<tr><td colspan=3 class="muted">No topics yet. Publishing to @${esc(me.handle)}/anything creates one.</td></tr>`;
