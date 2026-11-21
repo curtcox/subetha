@@ -85,8 +85,11 @@ export async function checkTwilioPrices(env: Env) {
 
 export async function deleteExpiredFiles(env: Env, now: number) {
   if (!env.FILES) return;
-  const { results } = await env.DB.prepare("SELECT id FROM files WHERE expires < ? LIMIT 1000").bind(Math.floor(now / 1000)).all<{ id: string }>();
-  if (!results.length) return;
-  await env.FILES.delete(results.map((r) => `att/${r.id}`));
-  await env.DB.batch(results.map((r) => env.DB.prepare("DELETE FROM files WHERE id = ?").bind(r.id)));
+  for (let round = 0; round < 50; round++) {
+    const { results } = await env.DB.prepare("SELECT id FROM files WHERE expires < ? LIMIT 1000").bind(Math.floor(now / 1000)).all<{ id: string }>();
+    if (!results.length) return;
+    await env.FILES.delete(results.map((r) => `att/${r.id}`));
+    await env.DB.batch(results.map((r) => env.DB.prepare("DELETE FROM files WHERE id = ?").bind(r.id)));
+    if (results.length < 1000) return;
+  }
 }

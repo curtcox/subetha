@@ -10,7 +10,7 @@ function form(obj: Record<string, string | number | undefined>): string {
     .join("&");
 }
 
-export async function createCheckoutSession(env: Env, opts: { accountId: string; amountMicros: number; successUrl: string; cancelUrl: string; email?: string | null }): Promise<{ id: string; url: string }> {
+export async function createCheckoutSession(env: Env, opts: { accountId: string; amountMicros: number; successUrl: string; cancelUrl: string; email?: string | null; saveCard?: boolean; customer?: string | null }): Promise<{ id: string; url: string }> {
   if (!env.STRIPE_SECRET_KEY) throw new ApiError("provider_unavailable", "Stripe is not configured");
   const cents = Math.round(opts.amountMicros / 10_000);
   const r = await fetch("https://api.stripe.com/v1/checkout/sessions", {
@@ -28,7 +28,10 @@ export async function createCheckoutSession(env: Env, opts: { accountId: string;
       "metadata[account_id]": opts.accountId,
       "metadata[amount_micros]": opts.amountMicros,
       client_reference_id: opts.accountId,
-      customer_email: opts.email ?? undefined,
+      customer: opts.customer ?? undefined,
+      customer_email: opts.customer ? undefined : opts.email ?? undefined,
+      customer_creation: opts.saveCard && !opts.customer ? "always" : undefined,
+      "payment_intent_data[setup_future_usage]": opts.saveCard ? "off_session" : undefined,
       "payment_method_options[card][request_three_d_secure]": "automatic",
     }),
   });
@@ -50,4 +53,34 @@ export async function verifyStripeSignature(payload: string, header: string | nu
 
 export async function signStripePayload(payload: string, secret: string, t = Math.floor(Date.now() / 1000)): Promise<string> {
   return `t=${t},v1=${await hmacSha256Hex(secret, `${t}.${payload}`)}`;
+}
+
+/**
+ * Off-session top-up with the customer's saved card (auto-recharge). The balance is credited
+ * by the payment_intent.succeeded webhook, never here, so a charge is never credited twice.
+ */
+export async function chargeSavedCard(env: Env, opts: { customer: string; amountMicros: number; accountId: string; idempotencyKey: string }): Promise<{ id: string; status: string }> {
+  if (!env.STRIPE_SECRET_KEY) throw new Error("Stripe is not configured");
+  const auth = { authorization: `Bearer ${env.STRIPE_SECRET_KEY}` };
+  const pm = await fetch(`https://api.stripe.com/v1/payment_methods?customer=${encodeURIComponent(opts.customer)}&type=card&limit=1`, { headers: auth });
+  const pms = (await pm.json()) as { data?: { id: string }[]; error?: { message: string } };
+  const method = pms.data?.[0]?.id;
+  if (!pm.ok || !method) throw new Error(`no saved card: ${pms.error?.message ?? "none on file"}`);
+  const r = await fetch("https://api.stripe.com/v1/payment_intents", {
+    method: "POST",
+    headers: { ...auth, "content-type": "application/x-www-form-urlencoded", "idempotency-key": opts.idempotencyKey },
+    body: form({
+      amount: Math.round(opts.amountMicros / 10_000),
+      currency: "usd",
+      customer: opts.customer,
+      payment_method: method,
+      off_session: "true",
+      confirm: "true",
+      "metadata[account_id]": opts.accountId,
+      "metadata[auto_recharge]": "1",
+    }),
+  });
+  const body = (await r.json()) as { id?: string; status?: string; error?: { message: string } };
+  if (!r.ok || !body.id) throw new Error(`Stripe error: ${body.error?.message ?? r.status}`);
+  return { id: body.id, status: body.status ?? "unknown" };
 }

@@ -20,8 +20,10 @@ registerSender("webhook", async (job, env) => {
       "x-subetha-signature": await signWebhook(String(ep.cfg.secret ?? ""), body),
     },
     body,
+    redirect: "manual", // a redirect could point back at the relay or somewhere private
     signal: AbortSignal.timeout(10_000),
   });
+  if (r.status >= 300 && r.status < 400) throw httpFailure(400, `webhook redirected (${r.status}); configure the final URL`);
   if (!r.ok) throw httpFailure(r.status, await r.text());
   return { detail: { status: r.status } };
 });

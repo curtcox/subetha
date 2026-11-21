@@ -20,10 +20,12 @@ const MAX_RETENTION_S = 30 * 86400;
 const ALARM_MS = 60_000;
 const KEEPALIVE_MS = 45_000;
 const MAX_BACKLOG = 1000;
+const MAX_CLOCK_SKEW_S = 300;
+const MAX_MESSAGE_AGE_S = 7 * 86400;
 
 interface Lease { ref: string; granted: number; remaining: number; at: number }
 type StreamFormat = "json" | "sse" | "raw";
-interface Stream { id: string; format: StreamFormat; filter: SubscriptionFilter; writer: WritableStreamDefaultWriter<Uint8Array> }
+interface Stream { id: string; format: StreamFormat; filter: SubscriptionFilter; send: (b: Uint8Array) => void; close: () => void }
 interface WsAttachment { id: string; filter: SubscriptionFilter }
 
 export interface SubscribeParams {
@@ -65,7 +67,8 @@ export class TopicDO extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS acks (id TEXT PRIMARY KEY, time INTEGER NOT NULL, via TEXT);
       CREATE TABLE IF NOT EXISTS subs (id TEXT PRIMARY KEY, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS traces (id TEXT PRIMARY KEY, json TEXT NOT NULL, expires INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS sent (ref TEXT PRIMARY KEY, at INTEGER NOT NULL);`);
     ctx.blockConcurrencyWhile(async () => {
       this.meta = this.kvGet<TopicMeta>("meta");
       this.leases = this.kvGet<Lease[]>("leases") ?? [];
@@ -116,8 +119,32 @@ export class TopicDO extends DurableObject<Env> {
   }
 
   // ---------- money ----------
+  /** Read-side spend (polls, streams, backlog) also counts toward the topic's daily cap. */
+  private async spendOwnerCapped(micros: number): Promise<"ok" | "cap" | "broke"> {
+    const cap = this.meta?.policy.daily_cap_micros;
+    const key = `topic_spend:${today()}`;
+    const spent = this.kvGet<number>(key) ?? 0;
+    if (cap != null && spent + micros > cap) return "cap";
+    if (!(await this.spendOwner(micros))) return "broke";
+    this.kvPut(key, spent + micros);
+    return "ok";
+  }
+
+  /** Lease bookkeeping spans awaits (input gates stay open during RPC), so it is serialized. */
+  private moneyLock: Promise<unknown> = Promise.resolve();
+  private withMoney<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.moneyLock.then(fn, fn);
+    this.moneyLock = run.catch(() => {});
+    return run;
+  }
+
   /** Spend µ$ from the owner's credit leases, taking a new lease if needed. */
-  private async spendOwner(micros: number, nanos = 0): Promise<boolean> {
+  private spendOwner(micros: number, nanos = 0): Promise<boolean> {
+    if (!Number.isSafeInteger(micros) || micros < 0 || !Number.isFinite(nanos) || nanos < 0) throw new Error(`invalid spend: ${micros} µ$ ${nanos} n$`);
+    return this.withMoney(() => this.spendOwnerLocked(micros, Math.ceil(nanos)));
+  }
+
+  private async spendOwnerLocked(micros: number, nanos: number): Promise<boolean> {
     this.nanoDebt += nanos;
     const fromNanos = Math.floor(this.nanoDebt / 1000);
     const total = micros + fromNanos;
@@ -141,18 +168,24 @@ export class TopicDO extends DurableObject<Env> {
       need -= take;
       if (!need) break;
     }
+    if (need !== 0) throw new Error(`lease accounting error: ${need} µ$ unpaid`);
     this.nanoDebt -= fromNanos * 1000;
     this.persistMoney();
     await this.ensureAlarm();
     return true;
   }
 
-  private refundOwner(micros: number) {
-    const l = this.leases[this.leases.length - 1];
-    if (l) {
-      l.remaining = Math.min(l.granted, l.remaining + micros);
-      this.persistMoney();
+  /** Give back owner spend for an action that didn't happen (spread across leases, newest first). */
+  private refundOwner(micros: number, nanos = 0) {
+    let left = micros;
+    for (let i = this.leases.length - 1; i >= 0 && left > 0; i--) {
+      const l = this.leases[i]!;
+      const back = Math.min(left, l.granted - l.remaining);
+      l.remaining += back;
+      left -= back;
     }
+    this.nanoDebt -= Math.ceil(nanos);
+    this.persistMoney();
   }
 
   private async takeLease(min: number): Promise<boolean> {
@@ -165,22 +198,24 @@ export class TopicDO extends DurableObject<Env> {
     return true;
   }
 
-  private async returnLeases(all: boolean) {
-    if (!this.meta) return;
-    const now = Date.now();
-    const keep: Lease[] = [];
-    for (const l of this.leases) {
-      if (all || now - l.at > LEASE_IDLE_MS || l.remaining === 0) {
+  private returnLeases(all: boolean): Promise<void> {
+    return this.withMoney(async () => {
+      if (!this.meta) return;
+      const now = Date.now();
+      // Detach first, so nothing can spend from a lease while its return is in flight.
+      const out = this.leases.filter((l) => all || now - l.at > LEASE_IDLE_MS || l.remaining === 0);
+      this.leases = this.leases.filter((l) => !out.includes(l));
+      this.persistMoney();
+      for (const l of out) {
         try {
           await accountStub(this.env, this.meta.owner).returnLease(l.ref, l.remaining, `topic=${this.meta.name}`);
         } catch (e) {
           console.error("returnLease failed", e);
-          keep.push(l);
+          this.leases.push(l);
+          this.persistMoney();
         }
-      } else keep.push(l);
-    }
-    this.leases = keep;
-    this.persistMoney();
+      }
+    });
   }
 
   private async chargeCaller(caller: Caller, micros: number, ref: string): Promise<void> {
@@ -188,6 +223,7 @@ export class TopicDO extends DurableObject<Env> {
     const r = await accountStub(this.env, caller.accountId).charge(micros, ref, caller.tokenId, { tokenDaily: caller.caps.daily, tokenTotal: caller.caps.total });
     if (!r.ok) {
       if (r.code === "insufficient_balance") throw rpcError("insufficient_balance", undefined, { shortfall_usd_micros: r.shortfall });
+      if (r.cap === "account_paused") throw rpcError("topic_paused", "account is paused");
       throw rpcError("spend_cap_exceeded", `spend cap reached: ${r.cap}`, { cap: r.cap, remaining_usd_micros: r.remaining });
     }
   }
@@ -225,7 +261,9 @@ export class TopicDO extends DurableObject<Env> {
       if (env.sig === undefined) throw rpcError("signature_required");
       if (!(await verifyEnvelope(env))) throw rpcError("bad_signature");
     }
-    const signer: Caller = env.sender ? { ...caller, deviceId: env.sender as string } : caller;
+    const signed = env.sig !== undefined;
+    if (env.sender !== undefined && !signed) throw rpcError("invalid_message", "sender is only accepted on signed messages");
+    const signer: Caller = signed ? { ...caller, deviceId: env.sender as string } : caller;
     if (!this.canPublish(signer)) throw rpcError("forbidden", "not allowed to publish to this topic");
     const anonymous = caller.accountId === null;
 
@@ -239,23 +277,31 @@ export class TopicDO extends DurableObject<Env> {
       }
     }
 
-    // Finalize the envelope.
+    // Finalize the envelope. Times come from clients, so bound them: they drive retention charges.
     const nowMs = Date.now();
-    const time = env.time ?? Math.floor(nowMs / 1000);
+    const nowSec = Math.floor(nowMs / 1000);
+    if (env.time !== undefined && (env.time > nowSec + MAX_CLOCK_SKEW_S || env.time < nowSec - MAX_MESSAGE_AGE_S)) {
+      throw rpcError("invalid_message", "time must be within 5 minutes in the future and 7 days in the past");
+    }
+    if (env.expires !== undefined && env.expires <= nowSec) throw rpcError("invalid_message", "message has already expired");
+    const time = env.time ?? nowSec;
     const retention = Math.min(meta.policy.retention_s ?? DEFAULT_RETENTION_S, MAX_RETENTION_S);
-    env = {
-      ...env,
-      id: (env.id ?? ulid(nowMs)).toUpperCase(),
-      time,
-      event: "message",
-      expires: Math.min(env.expires ?? time + retention, time + retention),
-    };
-    if (env.priority === 3) delete env.priority;
+    // Storage expiry: never longer than the topic's retention from now.
+    const storeUntil = Math.min(env.expires ?? nowSec + retention, nowSec + retention);
+    if (signed || env.enc) {
+      // Signed or encrypted envelopes are delivered exactly as sent: any rewrite would break the
+      // signature or the E2EE associated data (event is outside both).
+      if (!env.id || env.time === undefined) throw rpcError("invalid_message", "signed and encrypted messages must carry id and time");
+      env = { ...env, event: "message" };
+    } else {
+      env = { ...env, id: (env.id ?? ulid(nowMs)).toUpperCase(), time, event: "message", expires: storeUntil };
+      if (env.priority === 3) delete env.priority;
+    }
 
     const apiPrice = actionPriceMicros(PRICES, "api_request", this.tier());
     const dup = this.messageById(env.id!);
     if (dup) {
-      if (anonymous) { if (!(await this.spendOwner(apiPrice))) throw rpcError("no_funded_owner"); }
+      if (anonymous) { this.anonRateLimit(nowMs); if (!(await this.spendOwnerCapped(apiPrice).then((r) => r === "ok"))) throw rpcError("no_funded_owner"); }
       else await this.chargeCaller(caller, apiPrice, `dup:${env.id}:${ulid()}`);
       return { message: dup, created_topic: created, duplicate: true, cost_micros: anonymous ? 0 : apiPrice, plan: [], dry_run: input.dryRun };
     }
@@ -275,19 +321,20 @@ export class TopicDO extends DurableObject<Env> {
       tier: this.tier(),
       nowMs,
       units: { sms: smsSegments(smsBody(env)), voice: voiceMinutes(renderText(env, 1500)) },
+      tags: env.tags ?? [],
     });
     let publishPrice = actionPriceMicros(PRICES, "publish", this.tier());
     if (input.attachmentBytes) {
-      const mbDays = (input.attachmentBytes / 1_048_576) * ((env.expires! - time) / 86400);
+      const mbDays = (input.attachmentBytes / 1_048_576) * ((storeUntil - nowSec) / 86400);
       publishPrice += actionPriceMicros(PRICES, "attachment_upload", this.tier()) + Math.ceil(rentNanos(PRICES, "attachment_mb_day", mbDays, this.tier()) / 1000);
     }
     const liveCost = plan.deliveries.filter((d) => d.after_s === 0 && d.transport === "ws").reduce((n, d) => n + d.cost_micros, 0);
     const queued = plan.deliveries.filter((d) => !(d.after_s === 0 && d.transport === "ws"));
-    const retentionNanos = rentNanos(PRICES, "retention_message_day", (env.expires! - time) / 86400, this.tier());
+    const retentionNanos = rentNanos(PRICES, "retention_message_day", (storeUntil - nowSec) / 86400, this.tier());
 
     if (input.dryRun) {
-      if (anonymous) { if (!(await this.spendOwner(apiPrice))) throw rpcError("no_funded_owner"); }
-      else await this.chargeCaller(caller, apiPrice, `dry:${env.id}`);
+      if (anonymous) throw rpcError("unauthorized", "dry runs need an account (they're charged as an API request)");
+      await this.chargeCaller(caller, apiPrice, `dry:${env.id}`);
       const estimate = publishPrice + plan.costMicros + Math.ceil(retentionNanos / 1000);
       return { message: env, created_topic: created, duplicate: false, cost_micros: estimate, plan: caller.accountId === meta.owner ? plan.deliveries : [], dry_run: true };
     }
@@ -295,10 +342,7 @@ export class TopicDO extends DurableObject<Env> {
     // Anonymous limits.
     let ownerCost = liveCost;
     if (anonymous) {
-      const minute = Math.floor(nowMs / 60000);
-      if (this.anonWindow.minute !== minute) this.anonWindow = { minute, count: 0 };
-      if (this.anonWindow.count >= (meta.policy.anon_rate_per_min ?? 60)) throw rpcError("rate_limited");
-      this.anonWindow.count++;
+      this.anonRateLimit(nowMs);
       ownerCost += publishPrice;
       const spentKey = `anon_spend:${today()}`;
       const spent = this.kvGet<number>(spentKey) ?? 0;
@@ -314,6 +358,12 @@ export class TopicDO extends DurableObject<Env> {
       throw rpcError("spend_cap_exceeded", "topic daily cap reached", { cap: "topic_daily" });
     }
 
+    // A token of the owner's own account is capped on everything it causes, not just the publish.
+    if (caller.tokenId && caller.accountId === meta.owner) {
+      const r = await accountStub(this.env, meta.owner).trackTokenSpend(caller.tokenId, ownerTotal + Math.ceil(retentionNanos / 1000), { tokenDaily: caller.caps.daily, tokenTotal: caller.caps.total });
+      if (!r.ok && r.code === "spend_cap_exceeded") throw rpcError("spend_cap_exceeded", `spend cap reached: ${r.cap}`, { cap: r.cap, remaining_usd_micros: r.remaining });
+    }
+
     // Pay: owner first (lease), then the publisher (direct, with token caps).
     if (!(await this.spendOwner(ownerCost, retentionNanos))) {
       throw rpcError(anonymous ? "no_funded_owner" : "insufficient_balance", "topic owner's balance cannot cover delivery", { payer: "topic_owner" });
@@ -322,7 +372,7 @@ export class TopicDO extends DurableObject<Env> {
       try {
         await this.chargeCaller(caller, publishPrice, `pub:${env.id}`);
       } catch (e) {
-        this.refundOwner(ownerCost);
+        this.refundOwner(ownerCost, retentionNanos);
         throw e;
       }
     }
@@ -331,7 +381,7 @@ export class TopicDO extends DurableObject<Env> {
     // Store and fan out.
     const json = JSON.stringify(env);
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec("INSERT INTO messages (id, time, expires, json) VALUES (?, ?, ?, ?)", env.id!, time, env.expires!, json);
+      this.sql.exec("INSERT INTO messages (id, time, expires, json) VALUES (?, ?, ?, ?)", env.id!, time, storeUntil, json);
       if (input.idempotencyKey) this.sql.exec("INSERT OR REPLACE INTO idem (key, body_hash, message_id, created) VALUES (?, ?, ?, ?)", input.idempotencyKey, input.bodyHash, env.id!, nowMs);
     });
     this.broadcast(env);
@@ -339,24 +389,38 @@ export class TopicDO extends DurableObject<Env> {
     // Queued (paid) transports: reserve per job; the delivery consumer settles.
     const jobs: { body: DeliveryJob; delaySeconds?: number }[] = [];
     const subs = new Map(this.queuedSubs().map((s) => [s.id, s]));
+    const owner = accountStub(this.env, meta.owner);
+    try {
     for (const d of queued) {
       const sub = subs.get(d.subscriber);
       if (!sub || !this.env.DELIVERY) continue;
-      const ref = `dlv:${env.id}:${sub.id}`;
+      const ref = `dlv:${env.id}:${sub.id}:${ulid()}`;
       const r = await accountStub(this.env, meta.owner).reserve(d.cost_micros, ref, null, {}, d.transport === "sms" || d.transport === "voice" ? "telephony" : null);
       if (!r.ok) {
-        this.trace(env.id!, {}, env.expires!);
+        this.trace(env.id!, {}, storeUntil);
         await this.recordDelivery(env.id!, { sub: sub.id, transport: d.transport, result: "not sent", error: r.code });
         continue;
       }
       jobs.push({ body: { topic: meta.name, owner: meta.owner, message: env, sub, reservation: { ref, micros: d.cost_micros }, attempt: 0 }, delaySeconds: d.after_s || undefined });
     }
     if (jobs.length && this.env.DELIVERY) await this.env.DELIVERY.sendBatch(jobs);
+    } catch (e) {
+      // Nothing was queued: give every reservation back rather than leaving it stranded.
+      for (const j of jobs) await owner.release(j.body.reservation.ref).catch(() => {});
+      await this.recordDelivery(env.id!, { result: "queue failed", error: String((e as Error).message ?? e) });
+    }
 
     const callerCost = (anonymous ? 0 : publishPrice) + (caller.accountId === meta.owner ? liveCost + queued.reduce((n, d) => n + d.cost_micros, 0) : 0);
-    this.trace(env.id!, { published: nowMs, plan: plan.deliveries, dropped: plan.dropped, cost_micros: { publish: publishPrice, live: liveCost, queued: queued.reduce((n, d) => n + d.cost_micros, 0), retention_nanos: retentionNanos }, publisher: caller.tokenId ?? caller.deviceId ?? caller.accountId ?? "anonymous" }, env.expires!);
+    this.trace(env.id!, { published: nowMs, plan: plan.deliveries, dropped: plan.dropped, cost_micros: { publish: publishPrice, live: liveCost, queued: queued.reduce((n, d) => n + d.cost_micros, 0), retention_nanos: retentionNanos }, publisher: caller.tokenId ?? caller.deviceId ?? caller.accountId ?? "anonymous" }, storeUntil);
     await this.ensureAlarm();
     return { message: env, created_topic: created, duplicate: false, cost_micros: callerCost, plan: caller.accountId === meta.owner ? plan.deliveries : [], dry_run: false };
+  }
+
+  private anonRateLimit(nowMs: number) {
+    const minute = Math.floor(nowMs / 60000);
+    if (this.anonWindow.minute !== minute) this.anonWindow = { minute, count: 0 };
+    if (this.anonWindow.count >= (this.meta?.policy.anon_rate_per_min ?? 60)) throw rpcError("rate_limited");
+    this.anonWindow.count++;
   }
 
   private messageById(id: string): Envelope | null {
@@ -391,8 +455,25 @@ export class TopicDO extends DurableObject<Env> {
     return { id, ...JSON.parse(r.json), ack: acked ?? null };
   }
 
+  /** Ack from a subscriber: only callers who can read the topic may stop escalation. */
+  async ackAs(id: string, via: string, caller: Caller): Promise<RpcResult<boolean>> {
+    return asResult(async () => {
+      this.checkRead(caller);
+      await this.ack(id, via);
+      return true;
+    });
+  }
+
   async ack(id: string, via: string): Promise<void> {
     this.sql.exec("INSERT OR IGNORE INTO acks (id, time, via) VALUES (?, ?, ?)", id.toUpperCase(), Date.now(), via);
+  }
+
+  async markSent(ref: string): Promise<void> {
+    this.sql.exec("INSERT OR IGNORE INTO sent (ref, at) VALUES (?, ?)", ref, Date.now());
+  }
+
+  async wasSent(ref: string): Promise<boolean> {
+    return this.sql.exec("SELECT 1 FROM sent WHERE ref = ?", ref).toArray().length > 0;
   }
 
   async isAcked(id: string): Promise<boolean> {
@@ -446,7 +527,9 @@ export class TopicDO extends DurableObject<Env> {
     this.checkRead(params.caller);
     const msgs = this.backlog(params.since ?? "all", params.filter);
     const cost = actionPriceMicros(PRICES, "api_request", this.tier()) + msgs.length * actionPriceMicros(PRICES, "deliver_live", this.tier());
-    if (!(await this.spendOwner(cost))) throw rpcError("insufficient_balance", "topic owner's balance cannot cover delivery", { payer: "topic_owner" });
+    const paid = await this.spendOwnerCapped(cost);
+    if (paid === "cap") throw rpcError("spend_cap_exceeded", "topic daily cap reached", { cap: "topic_daily" });
+    if (paid === "broke") throw rpcError("insufficient_balance", "topic owner's balance cannot cover delivery", { payer: "topic_owner" });
     return msgs;
   }
 
@@ -460,7 +543,9 @@ export class TopicDO extends DurableObject<Env> {
     }
     const backlog = this.backlog(params.since, params.filter);
     const cost = actionPriceMicros(PRICES, "api_request", this.tier()) + backlog.length * actionPriceMicros(PRICES, "deliver_live", this.tier());
-    if (!(await this.spendOwner(cost))) return new Response("ApiError:insufficient_balance:topic owner's balance cannot cover delivery", { status: 402 });
+    const paid = await this.spendOwnerCapped(cost);
+    if (paid === "cap") return new Response("ApiError:spend_cap_exceeded:topic daily cap reached", { status: 403 });
+    if (paid === "broke") return new Response("ApiError:insufficient_balance:topic owner's balance cannot cover delivery", { status: 402 });
     const id = `c_${ulid()}`;
     const openEvt = { id: ulid(), time: Math.floor(Date.now() / 1000), event: "open", topic: this.meta!.name };
     await this.ensureAlarm();
@@ -475,13 +560,19 @@ export class TopicDO extends DurableObject<Env> {
       return new Response(null, { status: 101, webSocket: client });
     }
 
-    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-    const writer = writable.getWriter();
-    const stream: Stream = { id, format: params.format, filter: params.filter, writer };
-    if (params.format !== "raw") void writer.write(this.frame(params.format, openEvt as Envelope));
-    for (const m of backlog) void writer.write(this.frame(params.format, m));
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const readable = new ReadableStream<Uint8Array>({
+      start: (c) => { controller = c; },
+      cancel: () => { this.streams.delete(id); },
+    });
+    const stream: Stream = {
+      id, format: params.format, filter: params.filter,
+      send: (b) => { try { controller.enqueue(b); } catch { this.streams.delete(id); } },
+      close: () => { try { controller.close(); } catch { /* already closed */ } },
+    };
+    if (params.format !== "raw") stream.send(this.frame(params.format, openEvt as Envelope));
+    for (const m of backlog) stream.send(this.frame(params.format, m));
     this.streams.set(id, stream);
-    writer.closed.catch(() => {}).finally(() => this.streams.delete(id));
     this.startKeepalive();
     const ct = params.format === "sse" ? "text/event-stream" : params.format === "json" ? "application/x-ndjson" : "text/plain";
     return new Response(readable, { headers: { "content-type": `${ct}; charset=utf-8`, "cache-control": "no-cache", "x-accel-buffering": "no" } });
@@ -496,7 +587,7 @@ export class TopicDO extends DurableObject<Env> {
   private broadcast(m: Envelope) {
     for (const s of this.streams.values()) {
       if (!matchesFilter(m, s.filter)) continue;
-      s.writer.write(this.frame(s.format, m)).catch(() => this.streams.delete(s.id));
+      s.send(this.frame(s.format, m));
     }
     const data = JSON.stringify(m);
     for (const ws of this.ctx.getWebSockets()) {
@@ -516,12 +607,12 @@ export class TopicDO extends DurableObject<Env> {
         return;
       }
       const k = { id: ulid(), time: Math.floor(Date.now() / 1000), event: "keepalive", topic: this.meta?.name } as Envelope;
-      for (const s of this.streams.values()) s.writer.write(this.frame(s.format, k)).catch(() => this.streams.delete(s.id));
+      for (const s of this.streams.values()) s.send(this.frame(s.format, k));
     }, KEEPALIVE_MS);
   }
 
   private closeAll(code: number, reason: string) {
-    for (const s of this.streams.values()) s.writer.close().catch(() => {});
+    for (const s of this.streams.values()) s.close();
     this.streams.clear();
     for (const ws of this.ctx.getWebSockets()) {
       try { ws.close(code, reason); } catch { /* already closed */ }
@@ -549,6 +640,7 @@ export class TopicDO extends DurableObject<Env> {
     this.sql.exec("DELETE FROM messages WHERE expires < ?", Math.floor(now / 1000));
     this.sql.exec("DELETE FROM traces WHERE expires < ?", Math.floor(now / 1000));
     this.sql.exec("DELETE FROM idem WHERE created < ?", now - 86_400_000);
+    this.sql.exec("DELETE FROM sent WHERE at < ?", now - 7 * 86_400_000);
     // Connection rent since the last alarm.
     const conns = this.streams.size + this.ctx.getWebSockets().length;
     const last = this.kvGet<number>("rent_at") ?? now;
@@ -569,7 +661,7 @@ export class TopicDO extends DurableObject<Env> {
 }
 
 /** Typed RPC surface (Envelope's index signature defeats the generated Rpc types). */
-export type TopicRpc = Pick<TopicDO, "configure" | "getMeta" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "isAcked" | "flushLeases">;
+export type TopicRpc = Pick<TopicDO, "configure" | "getMeta" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases">;
 
 export function topicStub(env: Env, topic: string): TopicRpc {
   return env.TOPIC.get(env.TOPIC.idFromName(topic)) as unknown as TopicRpc;

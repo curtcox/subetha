@@ -60,7 +60,7 @@ export interface Subscription { close(): void; readonly closed: boolean }
 export async function signRequest(key: DeviceKey, method: string, url: string, body: Uint8Array, nowSec = Math.floor(Date.now() / 1000)): Promise<Record<string, string>> {
   const u = new URL(url);
   const digest = hexEncode(new Uint8Array(await crypto.subtle.digest("SHA-256", body as BufferSource)));
-  const input = `subetha-req-v1\n${method.toUpperCase()}\n${u.pathname}${u.search}\n${nowSec}\n${digest}`;
+  const input = `subetha-req-v1\n${method.toUpperCase()}\n${u.host}\n${u.pathname}${u.search}\n${nowSec}\n${digest}`;
   const sig = new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, key.privateKey, utf8.encode(input) as BufferSource));
   return { "x-device-id": key.deviceId, "x-device-time": String(nowSec), "x-device-signature": base64urlEncode(sig) };
 }

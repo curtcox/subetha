@@ -49,6 +49,7 @@ describe("signature vectors", () => {
     }
   });
   it("hops change keeps validity", async () => expect(await verifyEnvelope(v.hops_change.envelope)).toBe(true));
+  it("relay-added event keeps validity", async () => expect(await verifyEnvelope(v.event_added.envelope)).toBe(true));
   it("negative cases fail", async () => {
     for (const n of v.negative) expect(await verifyEnvelope(n.envelope), n.name).toBe(false);
   });

@@ -4,6 +4,7 @@
 // Use publishable (origin-bound, single-topic, capped) tokens on public pages.
 import { SubEtha } from "./client.ts";
 import * as protocol from "./protocol/index.ts";
+import { subscribeWebPush } from "./webpush.ts";
 
 const scriptOrigin = (() => {
   try {
@@ -75,4 +76,4 @@ class SubEthaSend extends HTMLElement {
 if (!customElements.get("subetha-feed")) customElements.define("subetha-feed", SubEthaFeed);
 if (!customElements.get("subetha-send")) customElements.define("subetha-send", SubEthaSend);
 
-(globalThis as Record<string, unknown>).SubEtha = Object.assign(SubEtha, { protocol });
+(globalThis as Record<string, unknown>).SubEtha = Object.assign(SubEtha, { protocol, subscribeWebPush });

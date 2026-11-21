@@ -235,3 +235,33 @@ describe("Clerk accounts", () => {
     expect((await SELF.fetch(`${BASE}/v1/account`, { headers: auth(await clerkJwt("user_123", { iss: "https://evil" })) })).status).toBe(401);
   });
 });
+
+describe("acks and read-side caps", () => {
+  it("only readers can ack, and anonymous readers count toward the topic cap", async () => {
+    const a = await bootstrap("acker");
+    const m = (await (await publish("@acker/alarm", "fire", auth(a.token))).json()) as { id: string };
+    const anon = await SELF.fetch(`${BASE}/v1/ack`, { method: "POST", body: JSON.stringify({ topic: "@acker/alarm", id: m.id }) });
+    expect(anon.status).toBe(403);
+    const ok = await SELF.fetch(`${BASE}/v1/ack`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ topic: "@acker/alarm", id: m.id }) });
+    expect(ok.status).toBe(200);
+
+    const topic = "t_" + "zyxwvutsrqponmlkjihgfedcba";
+    await publish(topic, "x", auth(a.token));
+    await SELF.fetch(`${BASE}/v1/topics/${topic}`, { method: "PUT", headers: auth(a.token), body: JSON.stringify({ policy: { daily_cap_micros: 20 } }) });
+    let last = 0;
+    for (let i = 0; i < 10; i++) last = (await SELF.fetch(`${BASE}/${topic}/json?poll=1`)).status;
+    expect(last).toBe(403);
+  });
+});
+
+describe("status", () => {
+  it("reports component health and configured transports", async () => {
+    const r = await SELF.fetch(`${BASE}/v1/status`);
+    expect(r.status).toBe(200);
+    const s = (await r.json()) as { ok: boolean; transports: Record<string, boolean>; components: Record<string, { ok: boolean }> };
+    expect(s.ok).toBe(true);
+    expect(s.components.d1!.ok).toBe(true);
+    expect(s.transports.ws).toBe(true);
+    expect(s.transports.sms).toBe(true);
+  });
+});

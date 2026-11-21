@@ -2,6 +2,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { Ledger, type Caps, type Entry, type LedgerStore, type Reservation, type ReserveResult } from "../ledger.ts";
 import type { Env } from "../types.ts";
+import { chargeSavedCard } from "../stripe.ts";
 
 class SqlLedgerStore implements LedgerStore {
   private readonly sql: SqlStorage;
@@ -51,6 +52,10 @@ class SqlLedgerStore implements LedgerStore {
 }
 
 const HOLD_DAYS = 7;
+const MAX_RECHARGES_PER_DAY = 3;
+const RECHARGE_COOLDOWN_MS = 10 * 60_000;
+
+export interface AutoRecharge { threshold_micros: number; amount_micros: number; customer: string }
 const TELEPHONY_HOLD_CAP_MICROS = 5_000_000;
 
 export interface Balance { available: number; reserved: number }
@@ -71,6 +76,35 @@ export class AccountDO extends DurableObject<Env> {
     return out;
   }
 
+  // ---------- auto-recharge ----------
+  /** Enable (or disable with null) auto-recharge. The alarm tops up when available < threshold. */
+  async setAutoRecharge(cfg: AutoRecharge | null): Promise<void> {
+    if (cfg) await this.ctx.storage.put("auto_recharge", cfg);
+    else await this.ctx.storage.delete("auto_recharge");
+    await this.scheduleJournal();
+  }
+
+  async autoRechargeFailed(reason: string): Promise<void> {
+    await this.ctx.storage.delete("auto_recharge");
+    await this.ctx.storage.put("auto_recharge_last_error", reason);
+  }
+
+  private async maybeRecharge(now: number) {
+    const cfg = await this.ctx.storage.get<AutoRecharge>("auto_recharge");
+    if (!cfg || this.ledger.available >= cfg.threshold_micros) return;
+    if (((await this.ctx.storage.get<number>("recharge_pending_until")) ?? 0) > now) return;
+    const day = new Date(now).toISOString().slice(0, 10);
+    const count = (await this.ctx.storage.get<number>(`recharges:${day}`)) ?? 0;
+    if (count >= MAX_RECHARGES_PER_DAY) return;
+    const accountId = (await this.ctx.storage.get<string>("account_id")) ?? this.ctx.id.toString();
+    await this.ctx.storage.put({ recharge_pending_until: now + RECHARGE_COOLDOWN_MS, [`recharges:${day}`]: count + 1 });
+    try {
+      await chargeSavedCard(this.env, { customer: cfg.customer, amountMicros: cfg.amount_micros, accountId, idempotencyKey: `recharge:${accountId}:${day}:${count}` });
+    } catch (e) {
+      await this.autoRechargeFailed(String((e as Error).message ?? e));
+    }
+  }
+
   private async scheduleJournal() {
     if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + 5_000);
   }
@@ -87,8 +121,28 @@ export class AccountDO extends DurableObject<Env> {
     });
   }
 
+  // ---------- account controls (kill switch, daily cap) ----------
+  async setControls(c: { paused: boolean; dailyCapMicros: number | null }): Promise<void> {
+    await this.ctx.storage.put("controls", c);
+    this.controls = c;
+  }
+
+  private controls: { paused: boolean; dailyCapMicros: number | null } | null = null;
+  private async getControls() {
+    this.controls ??= (await this.ctx.storage.get<{ paused: boolean; dailyCapMicros: number | null }>("controls")) ?? { paused: false, dailyCapMicros: null };
+    return this.controls;
+  }
+  private async withControls(caps: Caps): Promise<Caps | null> {
+    const c = await this.getControls();
+    if (c.paused) return null;
+    return { ...caps, accountDaily: c.dailyCapMicros ?? caps.accountDaily };
+  }
+  private static PAUSED: ReserveResult = { ok: false, code: "spend_cap_exceeded", cap: "account_paused", remaining: 0 };
+
   async charge(amount: number, ref: string, tokenId: string | null, caps: Caps, once = false): Promise<ReserveResult> {
-    return this.tx(() => this.ledger.charge(amount, ref, { tokenId, caps, once }));
+    const c = await this.withControls(caps);
+    if (!c) return AccountDO.PAUSED;
+    return this.tx(() => this.ledger.charge(amount, ref, { tokenId, caps: c, once }));
   }
 
   /**
@@ -96,6 +150,9 @@ export class AccountDO extends DurableObject<Env> {
    * until the first top-up is HOLD_DAYS old, total telephony spend is capped (PLAN §8).
    */
   async reserve(amount: number, ref: string, tokenId: string | null, caps: Caps, category: "telephony" | null = null): Promise<ReserveResult> {
+    const withCtl = await this.withControls(caps);
+    if (!withCtl) return AccountDO.PAUSED;
+    caps = withCtl;
     return this.tx(() => {
       if (category === "telephony") {
         const first = this.store.getSpend("first_topup_at", "ms");
@@ -111,6 +168,10 @@ export class AccountDO extends DurableObject<Env> {
     });
   }
 
+  async trackTokenSpend(tokenId: string, amount: number, caps: Caps): Promise<ReserveResult> {
+    return this.tx(() => this.ledger.trackTokenSpend(tokenId, amount, caps));
+  }
+
   async settle(ref: string, actual: number) {
     return this.tx(() => this.ledger.settle(ref, actual));
   }
@@ -120,6 +181,13 @@ export class AccountDO extends DurableObject<Env> {
   }
 
   async lease(min: number, max: number, ref: string) {
+    const c = await this.getControls();
+    if (c.paused) return { granted: 0 as const, shortfall: min };
+    if (c.dailyCapMicros != null) {
+      const left = c.dailyCapMicros - this.store.getSpend("a", new Date().toISOString().slice(0, 10));
+      if (left < min) return { granted: 0 as const, shortfall: min - Math.max(0, left) };
+      max = Math.min(max, left);
+    }
     return this.tx(() => this.ledger.lease(min, max, ref));
   }
 
@@ -140,6 +208,8 @@ export class AccountDO extends DurableObject<Env> {
 
   /** Journals new ledger entries to D1 (nightly reconciliation compares this to Stripe). */
   override async alarm() {
+    await this.maybeRecharge(Date.now());
+    this.sweepStaleReservations(Date.now());
     const accountId = (await this.ctx.storage.get<string>("account_id")) ?? this.ctx.id.toString();
     const journaled = (await this.ctx.storage.get<number>("journaled_seq")) ?? 0;
     const batch = await this.entries(journaled, 500);
@@ -155,12 +225,19 @@ export class AccountDO extends DurableObject<Env> {
     if (batch.length === 500) await this.ctx.storage.setAlarm(Date.now() + 1_000);
   }
 
+  /** Delivery reservations older than a day are settled in full (the action may have happened). */
+  private sweepStaleReservations(now: number) {
+    const stale = this.ctx.storage.sql.exec<{ ref: string; amount: number }>("SELECT ref, amount FROM reservations WHERE time < ? AND ref LIKE 'dlv:%'", now - 86_400_000).toArray();
+    for (const r of stale) this.tx(() => this.ledger.settle(r.ref, r.amount));
+    if (this.ctx.storage.sql.exec("SELECT 1 FROM reservations LIMIT 1").toArray().length) void this.ctx.storage.setAlarm(now + 3_600_000);
+  }
+
   async setAccountId(id: string) {
     await this.ctx.storage.put("account_id", id);
   }
 }
 
-export type AccountRpc = Pick<AccountDO, "balance" | "topup" | "charge" | "reserve" | "settle" | "release" | "lease" | "returnLease" | "adjust" | "entries" | "setAccountId">;
+export type AccountRpc = Pick<AccountDO, "balance" | "topup" | "charge" | "reserve" | "settle" | "release" | "lease" | "returnLease" | "adjust" | "entries" | "setAccountId" | "setAutoRecharge" | "autoRechargeFailed" | "trackTokenSpend" | "setControls">;
 
 export function accountStub(env: Env, accountId: string): AccountRpc {
   return env.ACCOUNT.get(env.ACCOUNT.idFromName(accountId)) as unknown as AccountRpc;

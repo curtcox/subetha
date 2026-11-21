@@ -69,10 +69,11 @@ const negative = [
   { name: "non-canonical sender id (unused low bits set)", envelope: { ...good, sender: (good.sender as string).slice(0, -1) + String.fromCharCode((good.sender as string).charCodeAt(55) + 1) } },
 ];
 write("signatures.json", {
-  description: "Device ids (spec §1.3) and Ed25519 envelope signatures (spec §4). `signed` must verify; signing `unsigned` with `seed` must yield `signed.sig` exactly. Changing `hops` must not affect verification. Every `negative` envelope must fail verification.",
+  description: "Device ids (spec §1.3) and Ed25519 envelope signatures (spec §4). `signed` must verify; signing `unsigned` with `seed` must yield `signed.sig` exactly. Changing `hops` or adding the relay-set `event` (event_added) must not affect verification. Every `negative` envelope must fail verification.",
   devices,
   cases: sigCases,
   hops_change: { envelope: { ...good, hops: 0 }, valid: true },
+  event_added: { envelope: { ...good, event: "message" }, valid: true },
   negative: negative.map((n) => ({ name: n.name, envelope: JSON.parse(JSON.stringify(n.envelope)) })),
 });
 
