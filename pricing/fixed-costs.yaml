@@ -1,0 +1,17 @@
+# Monthly fixed costs (USD). Covered by the top-up fee's fixed-cost contribution plus the
+# per-SKU floors (PLAN §8, rule 6). generated/report.md shows break-even volume.
+monthly:
+  cloudflare_workers_paid: 5.00
+  cloudflare_containers_base: 5.00
+  domain_subetha_org: 1.25          # ~$15/yr
+  clerk_pro: 25.00
+  twilio_number: 1.15
+  twilio_10dlc_campaign: 10.00       # ~$1.50–$10/mo + one-time vetting, amortized
+  apple_developer: 8.25              # $99/yr
+  google_play: 0.00                  # one-time $25
+  github: 0.00
+  monitoring_status_page: 0.00
+# Assumed traffic mix for the break-even report: share of revenue by SKU group.
+assumptions:
+  avg_topup_usd: 20
+  deliveries_per_publish: 2.0

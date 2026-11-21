@@ -1,0 +1,373 @@
+{
+  "version": 1,
+  "generated_from": "pricing/costs.yaml",
+  "currency": "USD",
+  "min_margin": 0.15,
+  "tiers": [
+    {
+      "id": "standard",
+      "min_topups_usd": 0
+    },
+    {
+      "id": "bulk",
+      "min_topups_usd": 500
+    },
+    {
+      "id": "volume",
+      "min_topups_usd": 5000
+    }
+  ],
+  "topup": {
+    "min_usd_micros": 5000000,
+    "max_usd_micros": 2000000000,
+    "fee_percent": 4.5,
+    "fee_fixed_usd_micros": 350000
+  },
+  "skus": {
+    "publish": {
+      "description": "Publish one message (≤ 4 KB) to a topic",
+      "unit": "message",
+      "charge": "action",
+      "transports": [],
+      "cost_nanos": 1500,
+      "price_nanos": {
+        "standard": 6000,
+        "bulk": 6000,
+        "volume": 6000
+      },
+      "margin": {
+        "standard": 0.75,
+        "bulk": 0.75,
+        "volume": 0.75
+      }
+    },
+    "deliver_live": {
+      "description": "Deliver to a live WebSocket / SSE / JSON-stream / poll subscriber",
+      "unit": "delivery",
+      "charge": "action",
+      "transports": [
+        "ws",
+        "sse",
+        "poll"
+      ],
+      "cost_nanos": 300,
+      "price_nanos": {
+        "standard": 2000,
+        "bulk": 2000,
+        "volume": 1000
+      },
+      "margin": {
+        "standard": 0.85,
+        "bulk": 0.85,
+        "volume": 0.7
+      }
+    },
+    "deliver_push": {
+      "description": "Deliver via Web Push, APNs, or FCM",
+      "unit": "delivery",
+      "charge": "action",
+      "transports": [
+        "webpush",
+        "apns",
+        "fcm"
+      ],
+      "cost_nanos": 2000,
+      "price_nanos": {
+        "standard": 6000,
+        "bulk": 6000,
+        "volume": 5000
+      },
+      "margin": {
+        "standard": 0.6667,
+        "bulk": 0.6667,
+        "volume": 0.6
+      }
+    },
+    "deliver_webhook": {
+      "description": "Deliver to an HMAC-signed webhook",
+      "unit": "delivery",
+      "charge": "action",
+      "transports": [
+        "webhook"
+      ],
+      "cost_nanos": 2300,
+      "price_nanos": {
+        "standard": 10000,
+        "bulk": 10000,
+        "volume": 9000
+      },
+      "margin": {
+        "standard": 0.77,
+        "bulk": 0.77,
+        "volume": 0.7444
+      }
+    },
+    "deliver_slack": {
+      "description": "Post to a bound Slack channel",
+      "unit": "delivery",
+      "charge": "action",
+      "transports": [
+        "slack"
+      ],
+      "cost_nanos": 2300,
+      "price_nanos": {
+        "standard": 10000,
+        "bulk": 10000,
+        "volume": 9000
+      },
+      "margin": {
+        "standard": 0.77,
+        "bulk": 0.77,
+        "volume": 0.7444
+      }
+    },
+    "deliver_mcp": {
+      "description": "Deliver to an MCP agent inbox (wait_for_message / poll)",
+      "unit": "delivery",
+      "charge": "action",
+      "transports": [
+        "mcp"
+      ],
+      "cost_nanos": 850,
+      "price_nanos": {
+        "standard": 7000,
+        "bulk": 7000,
+        "volume": 7000
+      },
+      "margin": {
+        "standard": 0.8786,
+        "bulk": 0.8786,
+        "volume": 0.8786
+      }
+    },
+    "deliver_email": {
+      "description": "Send one email to a verified address",
+      "unit": "email",
+      "charge": "action",
+      "transports": [
+        "email"
+      ],
+      "cost_nanos": 121200,
+      "price_nanos": {
+        "standard": 443000,
+        "bulk": 413000,
+        "volume": 382000
+      },
+      "margin": {
+        "standard": 0.7264,
+        "bulk": 0.7065,
+        "volume": 0.6827
+      }
+    },
+    "inbound_email": {
+      "description": "Receive one email at topic@in.subetha.org",
+      "unit": "email",
+      "charge": "action",
+      "transports": [],
+      "cost_nanos": 10000,
+      "price_nanos": {
+        "standard": 70000,
+        "bulk": 68000,
+        "volume": 65000
+      },
+      "margin": {
+        "standard": 0.8571,
+        "bulk": 0.8529,
+        "volume": 0.8462
+      }
+    },
+    "deliver_sms_us": {
+      "description": "Send one SMS segment to a verified US number",
+      "unit": "segment",
+      "charge": "action",
+      "transports": [
+        "sms"
+      ],
+      "cost_nanos": 11501200,
+      "price_nanos": {
+        "standard": 16602000,
+        "bulk": 15452000,
+        "volume": 14302000
+      },
+      "margin": {
+        "standard": 0.3072,
+        "bulk": 0.2557,
+        "volume": 0.1958
+      }
+    },
+    "inbound_sms_us": {
+      "description": "Receive one SMS segment on a SubEtha number",
+      "unit": "segment",
+      "charge": "action",
+      "transports": [],
+      "cost_nanos": 11000000,
+      "price_nanos": {
+        "standard": 15900000,
+        "bulk": 14800000,
+        "volume": 13700000
+      },
+      "margin": {
+        "standard": 0.3082,
+        "bulk": 0.2568,
+        "volume": 0.1971
+      }
+    },
+    "deliver_voice_us": {
+      "description": "One minute of a text-to-speech call to a verified US number",
+      "unit": "minute",
+      "charge": "action",
+      "transports": [
+        "voice"
+      ],
+      "cost_nanos": 16900000,
+      "price_nanos": {
+        "standard": 24660000,
+        "bulk": 22970000,
+        "volume": 21280000
+      },
+      "margin": {
+        "standard": 0.3147,
+        "bulk": 0.2643,
+        "volume": 0.2058
+      }
+    },
+    "deliver_lxmf": {
+      "description": "Deliver over the hosted Reticulum/LXMF gateway",
+      "unit": "delivery",
+      "charge": "action",
+      "transports": [
+        "lxmf"
+      ],
+      "cost_nanos": 15200,
+      "price_nanos": {
+        "standard": 51000,
+        "bulk": 47000,
+        "volume": 43000
+      },
+      "margin": {
+        "standard": 0.702,
+        "bulk": 0.6766,
+        "volume": 0.6465
+      }
+    },
+    "api_request": {
+      "description": "Any other metered API call (poll, list, dry-run, token ops)",
+      "unit": "request",
+      "charge": "action",
+      "transports": [],
+      "cost_nanos": 1000,
+      "price_nanos": {
+        "standard": 3000,
+        "bulk": 3000,
+        "volume": 3000
+      },
+      "margin": {
+        "standard": 0.6667,
+        "bulk": 0.6667,
+        "volume": 0.6667
+      }
+    },
+    "attachment_upload": {
+      "description": "Upload one attachment (≤ 15 MB) to R2",
+      "unit": "upload",
+      "charge": "action",
+      "transports": [],
+      "cost_nanos": 6800,
+      "price_nanos": {
+        "standard": 17000,
+        "bulk": 15000,
+        "volume": 14000
+      },
+      "margin": {
+        "standard": 0.6,
+        "bulk": 0.5467,
+        "volume": 0.5143
+      }
+    },
+    "retention_message_day": {
+      "description": "Keep one message in store-and-forward for one day",
+      "unit": "message-day",
+      "charge": "rent",
+      "transports": [],
+      "cost_nanos": 40,
+      "price_nanos": {
+        "standard": 100,
+        "bulk": 90,
+        "volume": 80
+      },
+      "margin": {
+        "standard": 0.6,
+        "bulk": 0.5556,
+        "volume": 0.5
+      }
+    },
+    "attachment_mb_day": {
+      "description": "Store 1 MB of attachments for one day",
+      "unit": "MB-day",
+      "charge": "rent",
+      "transports": [],
+      "cost_nanos": 600,
+      "price_nanos": {
+        "standard": 1600,
+        "bulk": 1450,
+        "volume": 1300
+      },
+      "margin": {
+        "standard": 0.625,
+        "bulk": 0.5862,
+        "volume": 0.5385
+      }
+    },
+    "device_day": {
+      "description": "Keep one enrolled device for one day",
+      "unit": "device-day",
+      "charge": "rent",
+      "transports": [],
+      "cost_nanos": 500,
+      "price_nanos": {
+        "standard": 2000,
+        "bulk": 1875,
+        "volume": 1750
+      },
+      "margin": {
+        "standard": 0.75,
+        "bulk": 0.7333,
+        "volume": 0.7143
+      }
+    },
+    "endpoint_day": {
+      "description": "Keep one verified paid endpoint (phone, email) for one day",
+      "unit": "endpoint-day",
+      "charge": "rent",
+      "transports": [],
+      "cost_nanos": 2100,
+      "price_nanos": {
+        "standard": 9200,
+        "bulk": 8675,
+        "volume": 8150
+      },
+      "margin": {
+        "standard": 0.7717,
+        "bulk": 0.7579,
+        "volume": 0.7423
+      }
+    },
+    "connection_hour": {
+      "description": "One hour of an open WebSocket/SSE subscription (hibernating)",
+      "unit": "connection-hour",
+      "charge": "rent",
+      "transports": [],
+      "cost_nanos": 1000,
+      "price_nanos": {
+        "standard": 3000,
+        "bulk": 2750,
+        "volume": 2500
+      },
+      "margin": {
+        "standard": 0.6667,
+        "bulk": 0.6364,
+        "volume": 0.6
+      }
+    }
+  }
+}

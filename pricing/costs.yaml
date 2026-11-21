@@ -1,0 +1,161 @@
+# Marginal cost per unit for every SKU, in USD. Prices are GENERATED from this file
+# (`pnpm pricing` → generated/prices.json, generated/report.md) and CI fails if any SKU
+# at any tier has a margin below policy.min_margin (PLAN §8, rule 2).
+#
+# Each SKU lists its cost components so the numbers can be re-derived from provider bills.
+# Cloudflare list prices used below (Workers Paid): requests $0.30/M, DO requests $0.15/M,
+# DO duration $12.50/M GB-s, Queues $0.40/M ops (write+read+delete = 3 ops), D1 writes $1.00/M rows,
+# D1 storage $0.75/GB-mo, R2 storage $0.015/GB-mo, R2 class A $4.50/M, KV reads $0.50/M.
+# "overhead" covers Stripe's share, Analytics Engine, logging, and support.
+
+version: 1
+
+policy:
+  markup: 1.0              # default: price ≈ cost × 2 before the floor
+  min_margin: 0.15         # (price − cost) / price must be ≥ this, at every tier
+  currency: USD
+
+# Volume tiers by cumulative top-ups in the last 12 months. A tier scales the markup down,
+# but never below what min_margin allows (PLAN §8, rule 7).
+tiers:
+  - { id: standard, min_topups_usd: 0,    markup_factor: 1.0 }
+  - { id: bulk,     min_topups_usd: 500,  markup_factor: 0.75 }
+  - { id: volume,   min_topups_usd: 5000, markup_factor: 0.5 }
+
+# Top-up fee: covers Stripe (2.9% + $0.30 card, worst case 4.4% + $0.30 international) and a
+# fixed-cost contribution (PLAN §8, rule 6).
+topup:
+  min_usd: 5
+  max_usd: 2000
+  fee_percent: 4.5
+  fee_fixed_usd: 0.35
+  stripe_worst_percent: 4.4
+  stripe_worst_fixed_usd: 0.30
+
+skus:
+  publish:
+    description: Publish one message (≤ 4 KB) to a topic
+    unit: message
+    charge: action
+    components: { worker_request: 0.0000003, do_request: 0.00000015, do_duration: 0.0000002, analytics: 0.0000001, overhead: 0.00000075 }
+    floor_usd: 0.000003
+  deliver_live:
+    description: Deliver to a live WebSocket / SSE / JSON-stream / poll subscriber
+    unit: delivery
+    transports: [ws, sse, poll]
+    charge: action
+    components: { do_duration: 0.0000001, egress_overhead: 0.0000002 }
+    floor_usd: 0.0000005
+  deliver_push:
+    description: Deliver via Web Push, APNs, or FCM
+    unit: delivery
+    transports: [webpush, apns, fcm]
+    charge: action
+    components: { queue_ops: 0.0000012, worker_request: 0.0000003, cpu: 0.0000002, overhead: 0.0000003 }
+    floor_usd: 0.000002
+  deliver_webhook:
+    description: Deliver to an HMAC-signed webhook
+    unit: delivery
+    transports: [webhook]
+    charge: action
+    components: { queue_ops: 0.0000012, worker_request: 0.0000003, cpu: 0.0000003, overhead: 0.0000005 }
+    floor_usd: 0.000005
+  deliver_slack:
+    description: Post to a bound Slack channel
+    unit: delivery
+    transports: [slack]
+    charge: action
+    components: { queue_ops: 0.0000012, worker_request: 0.0000003, cpu: 0.0000003, overhead: 0.0000005 }
+    floor_usd: 0.000005
+  deliver_mcp:
+    description: Deliver to an MCP agent inbox (wait_for_message / poll)
+    unit: delivery
+    transports: [mcp]
+    charge: action
+    components: { do_request: 0.00000015, do_duration: 0.0000002, overhead: 0.0000005 }
+    floor_usd: 0.000005
+  deliver_email:
+    description: Send one email to a verified address
+    unit: email
+    transports: [email]
+    charge: action
+    components: { provider: 0.0001, queue_ops: 0.0000012, overhead: 0.00002 }
+    floor_usd: 0.0002
+  inbound_email:
+    description: Receive one email at topic@in.subetha.org
+    unit: email
+    charge: action
+    components: { email_worker: 0.000003, parse_cpu: 0.000003, overhead: 0.000004 }
+    floor_usd: 0.00005
+  deliver_sms_us:
+    description: Send one SMS segment to a verified US number
+    unit: segment
+    transports: [sms]
+    charge: action
+    markup: 0.4
+    components: { twilio: 0.0083, carrier_fee: 0.003, queue_ops: 0.0000012, overhead: 0.0002 }
+    floor_usd: 0.0005
+  inbound_sms_us:
+    description: Receive one SMS segment on a SubEtha number
+    unit: segment
+    charge: action
+    markup: 0.4
+    components: { twilio: 0.0083, carrier_fee: 0.0025, overhead: 0.0002 }
+    floor_usd: 0.0005
+  deliver_voice_us:
+    description: One minute of a text-to-speech call to a verified US number
+    unit: minute
+    transports: [voice]
+    charge: action
+    markup: 0.4
+    components: { twilio: 0.014, tts: 0.0024, overhead: 0.0005 }
+    floor_usd: 0.001
+  deliver_lxmf:
+    description: Deliver over the hosted Reticulum/LXMF gateway
+    unit: delivery
+    transports: [lxmf]
+    charge: action
+    components: { container_time: 0.00001, queue_ops: 0.0000012, overhead: 0.000004 }
+    floor_usd: 0.00002
+  api_request:
+    description: Any other metered API call (poll, list, dry-run, token ops)
+    unit: request
+    charge: action
+    components: { worker_request: 0.0000003, kv_read: 0.0000005, overhead: 0.0000002 }
+    floor_usd: 0.000001
+  attachment_upload:
+    description: Upload one attachment (≤ 15 MB) to R2
+    unit: upload
+    charge: action
+    components: { r2_class_a: 0.0000045, worker_request: 0.0000003, overhead: 0.000002 }
+    floor_usd: 0.000003
+  retention_message_day:
+    description: Keep one message in store-and-forward for one day
+    unit: message-day
+    charge: rent
+    components: { do_storage: 0.00000003, d1_storage: 0.00000001 }
+    floor_usd: 0.00000002
+  attachment_mb_day:
+    description: Store 1 MB of attachments for one day
+    unit: MB-day
+    charge: rent
+    components: { r2_storage: 0.0000005, overhead: 0.0000001 }
+    floor_usd: 0.0000004
+  device_day:
+    description: Keep one enrolled device for one day
+    unit: device-day
+    charge: rent
+    components: { d1_storage: 0.0000001, overhead: 0.0000004 }
+    floor_usd: 0.000001
+  endpoint_day:
+    description: Keep one verified paid endpoint (phone, email) for one day
+    unit: endpoint-day
+    charge: rent
+    components: { d1_storage: 0.0000001, overhead: 0.000002 }
+    floor_usd: 0.000005
+  connection_hour:
+    description: One hour of an open WebSocket/SSE subscription (hibernating)
+    unit: connection-hour
+    charge: rent
+    components: { do_duration: 0.0000005, overhead: 0.0000005 }
+    floor_usd: 0.000001
