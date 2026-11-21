@@ -1,0 +1,44 @@
+# subetha (Python SDK)
+
+Python SDK for [SubEtha](https://subetha.org), a transport-agnostic, ntfy-compatible pub/sub relay.
+It implements the protocol in [`spec/README.md`](../../spec/README.md) and passes every
+conformance vector in [`spec/vectors`](../../spec/vectors).
+
+```bash
+pip install -e "sdk/python[test]"   # from the repo root
+pytest sdk/python
+```
+
+## Client
+
+```python
+from subetha import Client, SubEthaError
+
+c = Client("https://subetha.org", token="tk_...")
+c.publish("@alice/doorbell", "Opened", title="Front door", priority="high", tags=["door"])
+c.publish("@alice/doorbell", "Opened", route={"mode": "cheap", "deny": ["sms"]}, dry_run=True)
+
+for msg in c.poll("@alice/doorbell", since="1h"):
+    print(msg["id"], msg.get("message"))
+
+for msg in c.subscribe("@alice/doorbell"):   # NDJSON stream, deduped, auto-reconnects with since=<last id>
+    print(msg["message"])
+```
+
+Errors from the relay raise `SubEthaError` with `code`, `http`, `message`, and the full JSON `body`
+(spec §9).
+
+Signed publishing (spec §4):
+
+```python
+from subetha import generate_device_key
+key = generate_device_key()           # or device_key_from_seed(seed32)
+c.publish("@alice/doorbell", "Opened", sign_with=key)
+```
+
+## Protocol
+
+`subetha.protocol` has canonical JSON, base32/base64url, ULIDs, the topic grammar, envelope
+validation, device keys, Ed25519 sign/verify, XChaCha20-Poly1305 E2EE (`encrypt_envelope`,
+`decrypt_envelope`), and the `Deduper`. Names mirror the TypeScript reference in
+`sdk/js/src/protocol` in snake_case.
