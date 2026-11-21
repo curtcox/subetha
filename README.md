@@ -22,7 +22,7 @@ curl -H "Authorization: Bearer $SUBETHA_TOKEN" https://subetha.org/@me/backups/j
   `since`, filters, several topics), a `TopicDO` per topic (fan-out, buffer, traces, acks) and an
   `AccountDO` per account (prepaid ledger, credit leases, caps, new-funds hold), D1, KV, Queues,
   rate limits, and a daily cron for rent metering, freezing, reconciliation, and Twilio price checks.
-- **Control plane** (`/v1/*`): accounts (Clerk), Stripe Checkout top-ups and webhooks, scoped and
+- **Control plane** (`/v1/*`): accounts (Clerk), Stripe Checkout top-ups (and opt-in auto-recharge) and webhooks, scoped and
   capped API tokens (including origin-bound publishable tokens), topic policies, traces, dry runs,
   idempotency keys, endpoints with verification codes, subscriptions with escalation, device
   enrollment (device-code flow and request signatures), `/v1/status`.

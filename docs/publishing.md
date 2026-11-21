@@ -102,8 +102,10 @@ unsigned or badly signed messages get `401 signature_required` / `bad_signature`
 
 <!-- include: samples/ts/signed.ts#snippet -->
 
-Signed messages must carry their own `id` and `time` (the SDKs set them). The relay stores signed
-and encrypted envelopes exactly as sent, so the signature still verifies on the way out.
+Signed and encrypted messages must carry their own `id` and `time` (the SDKs set them), with
+`time` no more than 5 minutes ahead or 7 days behind the relay's clock. The relay delivers them
+exactly as sent apart from `event`, which is outside the signature, so they still verify on the
+way out.
 
 ## End-to-end encryption
 

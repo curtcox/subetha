@@ -421,6 +421,18 @@ paths:
                 handle: { type: string }
                 daily_cap_micros: { type: [integer, "null"], minimum: 0 }
                 paused: { type: boolean, description: Account-wide kill switch. }
+                auto_recharge:
+                  description: |
+                    Off-session top-up with the saved card when the balance drops below
+                    `threshold_usd` (`null` turns it off). Needs a card saved by a checkout with
+                    `save_card: true` (else `conflict`). Not a subscription; it stops after a decline.
+                  oneOf:
+                    - type: "null"
+                    - type: object
+                      required: [threshold_usd, amount_usd]
+                      properties:
+                        threshold_usd: { type: number, minimum: 0 }
+                        amount_usd: { type: number }
       responses:
         "200":
           description: The updated account record.
@@ -486,6 +498,7 @@ paths:
                 amount_usd: { type: number, description: "Top-up amount in USD (minimum $5)." }
                 success_url: { type: string, format: uri }
                 cancel_url: { type: string, format: uri }
+                save_card: { type: boolean, description: Save the card for auto-recharge. }
       responses:
         "200":
           description: Checkout session; redirect the user to `url`.
@@ -1140,7 +1153,7 @@ paths:
     post:
       tags: [hooks]
       operationId: stripeWebhook
-      summary: Stripe events (checkout.session.completed, charge.refunded, charge.dispute.created)
+      summary: Stripe events (checkout completion, auto-recharge payment intents, refunds, disputes)
       security: []
       parameters:
         - { name: Stripe-Signature, in: header, required: true, schema: { type: string } }
@@ -1183,6 +1196,31 @@ paths:
         - { name: topic, in: query, required: true, schema: { type: string } }
         - { name: id, in: query, required: true, schema: { type: string } }
         - { name: t, in: query, required: true, schema: { type: string }, description: Ack token bound to topic and id. }
+        - { name: X-Twilio-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { type: object, additionalProperties: { type: string } }
+      responses:
+        "200":
+          description: TwiML.
+          content:
+            text/xml:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/hooks/twilio/voice-status:
+    post:
+      tags: [hooks]
+      operationId: twilioVoiceStatus
+      summary: Call status callback (settles a voice delivery to its actual duration)
+      security: []
+      parameters:
+        - { name: acct, in: query, required: true, schema: { type: string } }
+        - { name: ref, in: query, required: true, schema: { type: string } }
+        - { name: max, in: query, required: true, schema: { type: integer } }
+        - { name: t, in: query, required: true, schema: { type: string }, description: Token bound to acct, ref, and max. }
         - { name: X-Twilio-Signature, in: header, required: true, schema: { type: string } }
       requestBody:
         required: true
@@ -1265,8 +1303,10 @@ components:
       name: X-Device-Id
       description: |
         Enrolled devices sign each request instead of sending a token. Headers:
-        `X-Device-Id: dev_…`, `X-Device-Time: <unix seconds, ±300 s>`, and
-        `X-Device-Signature: base64url(Ed25519(key, "subetha-req-v1\n" + METHOD + "\n" + path?query + "\n" + time + "\n" + hex(sha256(body))))`.
+        `X-Device-Id: dev_…`, `X-Device-Time: <unix seconds, ±300 s>`,
+        `X-Device-Nonce: <16–64 random base64url chars, single use>`, and
+        `X-Device-Signature: base64url(Ed25519(key, "subetha-req-v1\n" + METHOD + "\n" + host + "\n" + path?query + "\n" + time + "\n" + nonce + "\n" + hex(sha256(body))))`.
+        A replayed signature is rejected, and the host binds it to one deployment.
         Devices can publish and subscribe but not manage the account. The SDK does this with
         `new SubEtha({ deviceKey, signRequests: true })`.
     authQuery:

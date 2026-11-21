@@ -43,6 +43,20 @@ generated from the price list at build time, so it always matches what the relay
 
 <!-- include: samples/curl/billing.sh -->
 
+### Auto-recharge
+
+Optional, and not a subscription: top up once with `"save_card": true` in the checkout request,
+then turn it on with `PATCH /v1/account`:
+
+```json
+{ "auto_recharge": { "threshold_usd": 2, "amount_usd": 20 } }
+```
+
+When the balance drops below the threshold, the saved card is charged `amount_usd` (same fee as
+any top-up). A declined charge turns auto-recharge off. `{"auto_recharge": null}` turns it off.
+
+### Ledger
+
 The ledger is append-only: `topup`, `reserve`, `settle`, `release`, `refund`, and `adjust`
 entries, journaled and reconciled nightly against Stripe. Refunds and chargebacks are deducted
 from the balance (a chargeback also recovers the dispute fee where possible).

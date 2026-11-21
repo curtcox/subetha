@@ -41,12 +41,16 @@ Every request from an enrolled device carries:
 ```http
 X-Device-Id: dev_kxisxbay4mtidk6z454fh3jcjhf3wfpggcprvnuu42wa2fvbeiwa
 X-Device-Time: 1763750000
+X-Device-Nonce: 9f2Kx_Lq0aZ7mW3vB8cR1g
 X-Device-Signature: <base64url Ed25519 signature>
 ```
 
-The signature covers `"subetha-req-v1\n" + METHOD + "\n" + path?query + "\n" + time + "\n" +
-hex(sha256(body))`, and `X-Device-Time` must be within 5 minutes of the relay's clock. The
-TypeScript SDK does all of this with `new SubEtha({ deviceKey, signRequests: true })`.
+The signature covers `"subetha-req-v1\n" + METHOD + "\n" + host + "\n" + path?query + "\n" +
+time + "\n" + nonce + "\n" + hex(sha256(body))`. `X-Device-Time` must be within 5 minutes of the
+relay's clock, the nonce is 16–64 random base64url characters, and each signature is accepted
+once (a replay is `401`). Including the host means a signature made for staging isn't valid in
+production. The TypeScript SDK does all of this with
+`new SubEtha({ deviceKey, signRequests: true })`.
 
 ## Keys
 
