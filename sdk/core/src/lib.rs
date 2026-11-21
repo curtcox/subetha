@@ -11,7 +11,11 @@
 //!
 //! Bindings: [`ffi`] (string/bytes helpers shaped for UniFFI; see `BINDINGS.md`).
 
-#![forbid(unsafe_code)]
+// UniFFI's generated scaffolding is the only unsafe code, and only with the feature on.
+#![cfg_attr(not(feature = "uniffi"), forbid(unsafe_code))]
+
+#[cfg(feature = "uniffi")]
+uniffi::setup_scaffolding!();
 
 pub mod canonical;
 pub mod crc;
@@ -20,7 +24,7 @@ pub mod e2ee;
 pub mod edge;
 pub mod encoding;
 pub mod envelope;
-// pub mod ffi;
+pub mod ffi;
 pub mod random;
 pub mod routing;
 pub mod sign;

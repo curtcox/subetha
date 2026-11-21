@@ -16,3 +16,9 @@ ed25519-dalek = "2"
 chacha20poly1305 = "0.10"
 getrandom = "0.2"
 thiserror = "1"
+uniffi = { version = "0.28", optional = true }
+
+[features]
+default = []
+# Export the `ffi` module through UniFFI proc-macros (see BINDINGS.md).
+uniffi = ["dep:uniffi"]
