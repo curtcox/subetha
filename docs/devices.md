@@ -26,7 +26,7 @@ short code, you approve it in the console, the device is enrolled.
    proof: an Ed25519 signature over `"subetha-enroll-v1\n" + device_id + "\n" + time`
    (`enrollmentProof(key)` in the SDK). It gets a `user_code` like `BCDF-GHJK`, valid for 10
    minutes, and a `device_code` to poll with.
-2. **`POST /v1/device/approve`** by the owner (the console's device page, or an admin token).
+2. **`POST /v1/device/approve`** by the owner: open `verification_uri_complete` (the console's **Devices** tab with the code filled in) and press Approve, or call it with an admin token.
 3. **`POST /v1/device/token`** by the device, every `interval` seconds, until it stops answering
    `{"error": "authorization_pending"}`.
 

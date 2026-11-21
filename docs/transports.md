@@ -130,7 +130,9 @@ that sends to the Worker (`INBOUND_EMAIL_DOMAIN`).
 
 Install the SubEtha Slack app in a workspace, then bind channels to topics. Outbound, topic
 messages are posted to the channel; inbound, channel messages publish to the topic (tagged
-`slack`, never echoed back into the same channel).
+`slack`, never echoed back into the same channel). In the console, **Endpoints → Add to Slack**
+installs the app and **Bind channel** binds one; from scripts, `GET /v1/slack/teams` lists the
+workspaces you installed it in (their `team_id`s):
 
 <!-- include: samples/curl/slack.sh -->
 

@@ -86,4 +86,4 @@ token, and message settings. Nothing a publisher sends can widen what the owner 
 ## Account-level controls
 
 `PATCH /v1/account` sets an account-wide `daily_cap_micros` and an account kill switch
-(`paused`). Every change to tokens, topics, endpoints, and devices is written to an audit log.
+(`paused`). Every change to tokens, topics, endpoints, and devices is written to an audit log: `GET /v1/audit` (admin), or the console's **Audit log** tab.

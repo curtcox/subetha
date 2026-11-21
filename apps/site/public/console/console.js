@@ -65,7 +65,7 @@ async function refresh() {
   $("subTopic").value ||= `${h}test`;
   const hash = new URLSearchParams(location.hash.slice(1));
   if (hash.get("topic")) { $("subTopic").value = hash.get("topic"); subscribe(); }
-  if (hash.get("tab")) showTab(hash.get("tab"));
+  routeHash(hash);
 }
 
 $("tokenBtn").onclick = () => { store("subetha.token", $("tokenInput").value.trim()); refresh(); };
@@ -75,12 +75,33 @@ $("createBtn").onclick = async () => {
   refresh();
 };
 
+/** Deep links: #tab=…, #topic=…, #device[=CODE] (device flow), #slack=installed (Slack OAuth), #topup=ok (Stripe). */
+function routeHash(hash) {
+  if (hash.has("device")) {
+    showTab("devices");
+    if (hash.get("device")) $("devCode").value = hash.get("device");
+    $("devCode").focus();
+    return;
+  }
+  if (hash.get("slack") === "installed") {
+    $("epNotice").hidden = false;
+    $("epNotice").textContent = `Slack is installed in ${hash.get("team") || "your workspace"}. Bind a channel below.`;
+    slackTeamHint = hash.get("team_id");
+  }
+  if (hash.get("topup") === "ok") {
+    $("billNotice").hidden = false;
+    $("billNotice").textContent = "Payment received. Your balance updates as soon as Stripe confirms it.";
+  }
+  if (hash.get("tab")) showTab(hash.get("tab"));
+}
+let slackTeamHint = null;
+
 function showTab(name) {
   const b = document.querySelector(`#tabs button[data-tab="${name}"]`);
   if (!b) return;
   document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("active", x === b));
   document.querySelectorAll("[data-panel]").forEach((p) => p.hidden = p.dataset.panel !== name);
-  ({ topics: loadTopics, tokens: loadTokens, billing: loadBilling, explorer: loadExplorer })[name]?.();
+  ({ topics: loadTopics, endpoints: loadEndpoints, devices: loadDevices, tokens: loadTokens, billing: loadBilling, audit: () => loadAudit(true), explorer: loadExplorer })[name]?.();
 }
 document.querySelectorAll("#tabs button").forEach((b) => b.onclick = () => {
   showTab(b.dataset.tab);
@@ -202,6 +223,116 @@ $("traceBtn").onclick = async () => {
   try { out.textContent = JSON.stringify(await client.trace($("traceTopic").value.trim(), $("traceId").value.trim()), null, 2); }
   catch (e) { out.textContent = `${e.code}: ${e.message}`; }
 };
+
+// ---------- endpoints, subscriptions, Slack ----------
+const when = (ms) => (ms ? new Date(ms).toLocaleString() : "");
+const PLACEHOLDER = { email: "you@example.com", sms: "+15551234567", voice: "+15551234567", webhook: "https://example.com/hook", lxmf: "32 hex characters", fcm: "FCM registration token", apns: "APNs device token (hex)" };
+$("epKind").onchange = () => { $("epAddr").placeholder = PLACEHOLDER[$("epKind").value] ?? ""; };
+let endpoints = [];
+async function loadEndpoints() {
+  const [eps, subs, teams] = await Promise.all([
+    client.request("GET", "/v1/endpoints"),
+    client.request("GET", "/v1/subscriptions"),
+    client.request("GET", "/v1/slack/teams").catch(() => ({ teams: [] })),
+  ]);
+  endpoints = eps.endpoints;
+  $("epRows").innerHTML = endpoints.map((e) => `<tr><td>${esc(e.kind)}</td><td><code>${esc(e.address)}</code>${e.name ? ` <span class="muted">${esc(e.name)}</span>` : ""}</td><td>${e.verified ? '<span class="ok">verified</span>' : `<span class="row"><input data-code="${esc(e.id)}" placeholder="6-digit code" inputmode="numeric" maxlength="6" aria-label="Verification code"><button class="secondary" data-verify="${esc(e.id)}">Verify</button></span>`}</td><td><button class="secondary" data-epdel="${esc(e.id)}">Delete</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">No endpoints yet. "Notify this browser" on Send / receive adds a Web Push one.</td></tr>`;
+  const label = (id) => { const e = endpoints.find((x) => x.id === id); return e ? `${e.kind} ${e.address}` : id; };
+  $("subEp").innerHTML = endpoints.filter((e) => e.verified).map((e) => `<option value="${esc(e.id)}">${esc(label(e.id))}</option>`).join("") || `<option value="">No verified endpoints</option>`;
+  $("subRows").innerHTML = subs.subscriptions.map((s) => `<tr><td><code>${esc(s.topic)}</code></td><td>${esc(label(s.endpoint_id))}</td><td>${s.after_s ? `${s.after_s}s` : "now"}</td><td>${s.min_priority ?? ""}</td><td><code>${esc([s.filter?.tags?.length ? `tags ${s.filter.tags.join(",")}` : "", s.filter?.priority?.length ? `priority ${s.filter.priority.join(",")}` : ""].filter(Boolean).join("; "))}</code></td><td><button class="secondary" data-subdel="${esc(s.id)}">Remove</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">No endpoint subscriptions.</td></tr>`;
+  $("slackTeam").innerHTML = teams.teams.map((t) => `<option value="${esc(t.team_id)}">${esc(t.team_name || t.team_id)}</option>`).join("") || `<option value="">Install the app first</option>`;
+  if (slackTeamHint && teams.teams.some((t) => t.team_id === slackTeamHint)) $("slackTeam").value = slackTeamHint;
+  const h = me?.handle ? `@${me.handle}/` : "";
+  $("subTopicNew").value ||= $("pubTopic").value || `${h}alerts`;
+  $("slackTopic").value ||= $("subTopicNew").value;
+  document.querySelectorAll("[data-verify]").forEach((b) => b.onclick = async () => {
+    const id = b.dataset.verify;
+    const code = document.querySelector(`[data-code="${CSS.escape(id)}"]`).value.trim();
+    try { await client.request("POST", `/v1/endpoints/${encodeURIComponent(id)}/verify`, { code }); loadEndpoints(); }
+    catch (e) { alert(`${e.code}: ${e.message}`); }
+  });
+  document.querySelectorAll("[data-epdel]").forEach((b) => b.onclick = async () => {
+    if (!confirm("Delete this endpoint and its subscriptions?")) return;
+    await client.request("DELETE", `/v1/endpoints/${encodeURIComponent(b.dataset.epdel)}`).catch((e) => alert(e.message));
+    loadEndpoints();
+  });
+  document.querySelectorAll("[data-subdel]").forEach((b) => b.onclick = async () => {
+    await client.request("DELETE", `/v1/subscriptions/${encodeURIComponent(b.dataset.subdel)}`).catch((e) => alert(e.message));
+    loadEndpoints();
+  });
+}
+$("epAdd").onclick = async () => {
+  const out = $("epOut"); out.hidden = false;
+  try {
+    const e = await client.request("POST", "/v1/endpoints", { kind: $("epKind").value, address: $("epAddr").value.trim(), name: $("epName").value.trim() || undefined });
+    out.textContent = [e.secret ? `Signing secret (shown once): ${e.secret}` : "", e.note ?? "", e.verified ? "Verified." : "We sent a 6-digit code to the address: enter it in the table above."].filter(Boolean).join("\n");
+    $("epAddr").value = "";
+    loadEndpoints();
+  } catch (e) { out.textContent = `${e.code}: ${e.message}`; }
+};
+$("subAdd").onclick = async () => {
+  const say = (t) => { $("subMsg").textContent = t; };
+  const tags = $("subTags").value.split(",").map((x) => x.trim()).filter(Boolean);
+  try {
+    await client.request("POST", "/v1/subscriptions", {
+      topic: $("subTopicNew").value.trim(),
+      endpoint_id: $("subEp").value,
+      after_s: Number($("subAfter").value) || 0,
+      min_priority: $("subMinPrio").value ? Number($("subMinPrio").value) : undefined,
+      filter: tags.length ? { tags } : undefined,
+    });
+    say("Added."); loadEndpoints();
+  } catch (e) { say(`${e.code}: ${e.message}`); }
+};
+$("slackInstall").onclick = async () => {
+  try { location.href = (await client.request("GET", "/v1/slack/install")).url; }
+  catch (e) { $("slackMsg").textContent = `${e.code}: ${e.message}`; }
+};
+$("slackBind").onclick = async () => {
+  try {
+    await client.request("POST", "/v1/slack/bindings", { team_id: $("slackTeam").value, channel: $("slackChannel").value.trim(), topic: $("slackTopic").value.trim() });
+    $("slackMsg").textContent = "Bound."; loadEndpoints();
+  } catch (e) { $("slackMsg").textContent = `${e.code}: ${e.message}`; }
+};
+
+// ---------- devices ----------
+async function loadDevices() {
+  const { devices } = await client.request("GET", "/v1/devices");
+  $("devRows").innerHTML = devices.map((d) => `<tr><td>${esc(d.name || "")}</td><td><code title="${esc(d.id)}">${esc(d.id.slice(0, 14))}…</code></td><td>${esc((d.capabilities ?? []).join(", "))}</td><td>${esc(when(d.last_seen_at))}</td><td>${d.revoked_at ? '<span class="bad">revoked</span>' : '<span class="ok">active</span>'}</td><td>${d.revoked_at ? "" : `<button class="secondary" data-devrevoke="${esc(d.id)}">Revoke</button>`}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No devices yet.</td></tr>`;
+  document.querySelectorAll("[data-devrevoke]").forEach((b) => b.onclick = async () => {
+    if (!confirm("Revoke this device? It can no longer sign requests.")) return;
+    await client.request("DELETE", `/v1/devices/${encodeURIComponent(b.dataset.devrevoke)}`).catch((e) => alert(e.message));
+    loadDevices();
+  });
+}
+$("devApprove").onclick = async () => {
+  const say = (t) => { $("devMsg").textContent = t; };
+  try {
+    const r = await client.request("POST", "/v1/device/approve", { user_code: $("devCode").value.trim() });
+    say(`Enrolled ${r.name || r.device_id}. The device will finish signing in by itself.`);
+    $("devCode").value = "";
+    if (new URLSearchParams(location.hash.slice(1)).has("device")) history.replaceState(null, "", "#tab=devices");
+    loadDevices();
+  } catch (e) { say(e.code === "not_found" ? "That code is unknown or expired. Ask the device for a new one." : `${e.code}: ${e.message}`); }
+};
+$("devEnroll").onclick = async () => {
+  try {
+    await client.request("POST", "/v1/devices", { device_id: $("devId").value.trim(), name: $("devName").value.trim() || undefined });
+    $("devEnrollMsg").textContent = "Enrolled."; loadDevices();
+  } catch (e) { $("devEnrollMsg").textContent = `${e.code}: ${e.message}`; }
+};
+
+// ---------- audit log ----------
+let auditBefore = null;
+async function loadAudit(reset) {
+  if (reset) { auditBefore = null; $("auditRows").innerHTML = ""; }
+  const r = await client.request("GET", `/v1/audit?limit=50${auditBefore ? `&before=${auditBefore}` : ""}`);
+  $("auditRows").insertAdjacentHTML("beforeend", r.entries.map((e) => `<tr><td>${esc(when(e.time))}</td><td><code>${esc(e.action)}</code></td><td>${esc(e.actor)}</td><td><code>${esc(e.detail == null ? "" : typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail))}</code></td></tr>`).join(""));
+  if (reset && !r.entries.length) $("auditRows").innerHTML = `<tr><td colspan="4" class="muted">Nothing yet.</td></tr>`;
+  auditBefore = r.next_before;
+  $("auditMore").hidden = !auditBefore;
+}
+$("auditMore").onclick = () => loadAudit(false);
 
 // ---------- API explorer ----------
 let exOps = null;

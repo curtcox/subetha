@@ -184,6 +184,20 @@ app.get("/v1/ledger", async (c) => {
   return c.json({ entries: await accountStub(c.env, id).entries(after, Number(c.req.query("limit") ?? 100)) });
 });
 
+app.get("/v1/audit", async (c) => {
+  const id = requireAdmin(await principal(c));
+  const before = Number(c.req.query("before") ?? 0) || Number.MAX_SAFE_INTEGER;
+  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50) || 50, 1), 200);
+  const { results } = await c.env.DB.prepare("SELECT id, actor, action, detail, time FROM audit_log WHERE account_id = ? AND id < ? ORDER BY id DESC LIMIT ?")
+    .bind(id, before, limit).all<{ id: number; actor: string; action: string; detail: string | null; time: number }>();
+  const entries = results.map((r) => {
+    let detail: unknown = r.detail;
+    try { detail = r.detail ? JSON.parse(r.detail) : null; } catch { /* stored as text */ }
+    return { ...r, detail };
+  });
+  return c.json({ entries, next_before: entries.length === limit ? entries[entries.length - 1]!.id : null });
+});
+
 // ---------------- billing ----------------
 app.post("/v1/billing/checkout", async (c) => {
   const id = requireAdmin(await principal(c));
@@ -196,7 +210,7 @@ app.post("/v1/billing/checkout", async (c) => {
   }
   const acct = await getAccount(c.env, id);
   const base = c.env.BASE_URL;
-  const s = await createCheckoutSession(c.env, { accountId: id, amountMicros, successUrl: body.success_url ?? `${base}/console/#billing?ok=1`, cancelUrl: body.cancel_url ?? `${base}/console/#billing`, email: acct?.email, saveCard: !!body.save_card, customer: (acct as { stripe_customer_id?: string | null } | null)?.stripe_customer_id ?? null });
+  const s = await createCheckoutSession(c.env, { accountId: id, amountMicros, successUrl: body.success_url ?? `${base}/console/#tab=billing&topup=ok`, cancelUrl: body.cancel_url ?? `${base}/console/#tab=billing`, email: acct?.email, saveCard: !!body.save_card, customer: (acct as { stripe_customer_id?: string | null } | null)?.stripe_customer_id ?? null });
   return c.json({ id: s.id, url: s.url, ...topupSplit(PRICES, amountMicros) });
 });
 

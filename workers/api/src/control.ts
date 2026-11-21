@@ -307,7 +307,14 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     if (!j.ok || !j.access_token || !j.team) throw new ApiError("provider_unavailable", `Slack: ${j.error ?? "install failed"}`);
     await c.env.DB.prepare("INSERT INTO slack_teams (team_id, account_id, team_name, bot_token, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(team_id, account_id) DO UPDATE SET bot_token = excluded.bot_token, team_name = excluded.team_name")
       .bind(j.team.id, accountId, j.team.name, j.access_token, Date.now()).run();
-    return c.redirect(`/console/#slack=installed&team=${encodeURIComponent(j.team.name)}`, 302);
+    return c.redirect(`/console/#tab=endpoints&slack=installed&team=${encodeURIComponent(j.team.name)}&team_id=${encodeURIComponent(j.team.id)}`, 302);
+  });
+
+  /** Slack workspaces this account installed the app in (for binding channels). */
+  app.get("/v1/slack/teams", async (c) => {
+    const accountId = requireAdmin(await principal(c));
+    const { results } = await c.env.DB.prepare("SELECT team_id, team_name, created_at FROM slack_teams WHERE account_id = ? ORDER BY created_at").bind(accountId).all<{ team_id: string; team_name: string; created_at: number }>();
+    return c.json({ teams: results });
   });
 
   /** Bind a Slack channel to a topic: messages flow both ways (topic → channel via an endpoint; channel → topic via Events). */

@@ -29,9 +29,12 @@
     <div class="tabs" id="tabs">
       <button data-tab="messages" class="active">Send / receive</button>
       <button data-tab="topics">Topics</button>
+      <button data-tab="endpoints">Endpoints</button>
+      <button data-tab="devices">Devices</button>
       <button data-tab="tokens">Tokens</button>
       <button data-tab="billing">Billing</button>
       <button data-tab="traces">Traces</button>
+      <button data-tab="audit">Audit log</button>
       <button data-tab="explorer">API explorer</button>
     </div>
 
@@ -74,6 +77,75 @@
       </div>
     </section>
 
+    <section data-panel="endpoints" hidden>
+      <p id="epNotice" class="card ok" hidden></p>
+      <div class="card">
+        <h3>Endpoints</h3>
+        <p class="muted">Where paid deliveries go. Email and phone endpoints are verified with a code sent to them; each verified endpoint is billed per day.</p>
+        <div class="scroll"><table><thead><tr><th>Kind</th><th>Address</th><th>Status</th><th></th></tr></thead><tbody id="epRows"></tbody></table></div>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h3>Add an endpoint</h3>
+          <div class="row">
+            <div><label for="epKind">Kind</label><select id="epKind"><option>email</option><option>sms</option><option>voice</option><option>webhook</option><option>lxmf</option><option>fcm</option><option>apns</option></select></div>
+            <div><label for="epName">Name</label><input id="epName"></div>
+          </div>
+          <label for="epAddr">Address</label><input id="epAddr" placeholder="you@example.com">
+          <p><button id="epAdd">Add</button></p>
+          <pre id="epOut" hidden></pre>
+        </div>
+        <div class="card">
+          <h3>Slack</h3>
+          <p class="muted">Install the SubEtha app in a workspace, then bind a channel to a topic. Messages flow both ways.</p>
+          <p><button id="slackInstall" class="secondary">Add to Slack</button></p>
+          <div class="row">
+            <div><label for="slackTeam">Workspace</label><select id="slackTeam"></select></div>
+            <div><label for="slackChannel">Channel id</label><input id="slackChannel" placeholder="C0123456789"></div>
+            <div><label for="slackTopic">Topic</label><input id="slackTopic"></div>
+          </div>
+          <p><button id="slackBind">Bind channel</button> <span id="slackMsg" class="muted"></span></p>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Subscriptions</h3>
+        <p class="muted">Deliver a topic to an endpoint. <b>After</b> makes it an escalation step: it runs only if the message is still unacked after that many seconds. Try a chain in the <a href="/tools/simulator.html">route simulator</a> first.</p>
+        <div class="scroll"><table><thead><tr><th>Topic</th><th>Endpoint</th><th>After</th><th>Min priority</th><th>Filter</th><th></th></tr></thead><tbody id="subRows"></tbody></table></div>
+        <div class="row">
+          <div><label for="subTopicNew">Topic</label><input id="subTopicNew"></div>
+          <div><label for="subEp">Endpoint</label><select id="subEp"></select></div>
+          <div><label for="subAfter">After (s)</label><input id="subAfter" type="number" min="0" max="3600" value="0"></div>
+          <div><label for="subMinPrio">Min priority</label><select id="subMinPrio"><option value="">any</option><option>2</option><option>3</option><option>4</option><option>5</option></select></div>
+          <div><label for="subTags">Only tags</label><input id="subTags" placeholder="a,b"></div>
+          <button id="subAdd">Add</button>
+        </div>
+        <p id="subMsg" class="muted"></p>
+      </div>
+    </section>
+
+    <section data-panel="devices" hidden>
+      <div class="grid">
+        <div class="card">
+          <h3>Approve a device</h3>
+          <p class="muted">Enter the code a device, CLI, or app is showing (<code>subetha login</code>, a sample app, a TV-style screen).</p>
+          <div class="row"><input id="devCode" placeholder="BCDF-GHJK" autocomplete="off" aria-label="Device code"><button id="devApprove">Approve</button></div>
+          <p id="devMsg" class="muted"></p>
+        </div>
+        <div class="card">
+          <h3>Enroll by device id</h3>
+          <p class="muted">For devices you provision yourself. The id is the device's public key (<code>dev_…</code>).</p>
+          <label for="devId">Device id</label><input id="devId" placeholder="dev_…" autocomplete="off">
+          <label for="devName">Name</label><input id="devName">
+          <p><button id="devEnroll" class="secondary">Enroll</button> <span id="devEnrollMsg" class="muted"></span></p>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Devices</h3>
+        <p class="muted">Enrolled devices sign their own requests; each active device is billed per day. Revoking takes effect immediately.</p>
+        <div class="scroll"><table><thead><tr><th>Name</th><th>Id</th><th>Capabilities</th><th>Last seen</th><th>Status</th><th></th></tr></thead><tbody id="devRows"></tbody></table></div>
+      </div>
+    </section>
+
     <section data-panel="tokens" hidden>
       <div class="card">
         <h3>API tokens</h3>
@@ -96,6 +168,7 @@
     </section>
 
     <section data-panel="billing" hidden>
+      <p id="billNotice" class="card ok" hidden></p>
       <div class="grid">
         <div class="card">
           <h3>Top up</h3>
@@ -105,6 +178,15 @@
         <div class="card"><h3>Pricing</h3><div id="priceTable" class="muted">Loading…</div></div>
       </div>
       <div class="card"><h3>Ledger</h3><table><thead><tr><th>#</th><th>Kind</th><th>Amount</th><th>Available after</th><th>Ref</th><th>Time</th></tr></thead><tbody id="ledgerRows"></tbody></table></div>
+    </section>
+
+    <section data-panel="audit" hidden>
+      <div class="card">
+        <h3>Audit log</h3>
+        <p class="muted">Changes to tokens, devices, endpoints, subscriptions, topics, and billing, and who made them.</p>
+        <div class="scroll"><table><thead><tr><th>Time</th><th>Action</th><th>Actor</th><th>Detail</th></tr></thead><tbody id="auditRows"></tbody></table></div>
+        <p><button id="auditMore" class="secondary" hidden>Older</button></p>
+      </div>
     </section>
 
     <section data-panel="explorer" hidden>
