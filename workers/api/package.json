@@ -1,0 +1,25 @@
+{
+  "name": "@subetha/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "typecheck": "tsc -p .",
+    "types": "wrangler types --env-interface CloudflareEnv"
+  },
+  "dependencies": {
+    "@subetha/pricing": "workspace:*",
+    "@subetha/sdk": "workspace:*",
+    "hono": "^4.13.19"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.9.0",
+    "@cloudflare/workers-types": "^5.20261121.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.124.0"
+  }
+}

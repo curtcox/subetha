@@ -1,0 +1,60 @@
+import { describe, expect, it } from "vitest";
+import { parseActions, parseTopicPath } from "../src/ntfy.ts";
+import { planDeliveries, inQuietHours } from "../src/routing.ts";
+import prices from "@subetha/pricing/prices.json";
+import type { PriceTable } from "@subetha/pricing";
+
+describe("parseTopicPath", () => {
+  it("handles namespaced, secret, multi-topic and format suffixes", () => {
+    expect(parseTopicPath("/@alice/door")).toEqual({ topics: ["@alice/door"], format: null });
+    expect(parseTopicPath("/@alice/door/json")).toEqual({ topics: ["@alice/door"], format: "json" });
+    expect(parseTopicPath("/@alice/ws")).toEqual({ topics: ["@alice/ws"], format: null });
+    expect(parseTopicPath("/@alice/ws/ws")).toEqual({ topics: ["@alice/ws"], format: "ws" });
+    expect(parseTopicPath("/@a/x,@a/y/sse")).toEqual({ topics: ["@a/x", "@a/y"], format: "sse" });
+    expect(parseTopicPath("/t_abcdefghijklmnopqrstuvwxyz/raw")).toEqual({ topics: ["t_abcdefghijklmnopqrstuvwxyz"], format: "raw" });
+    expect(parseTopicPath("/v1/health")).toBeNull();
+    expect(parseTopicPath("/")).toBeNull();
+    expect(() => parseTopicPath("/@Alice/x")).toThrow();
+  });
+});
+
+describe("parseActions", () => {
+  it("parses the ntfy short format and JSON", () => {
+    expect(parseActions("view, Open, https://a.b; http, Close, https://c.d, clear=true")).toEqual([
+      { action: "view", label: "Open", url: "https://a.b" },
+      { action: "http", label: "Close", url: "https://c.d", clear: true },
+    ]);
+    expect(parseActions('[{"action":"view","label":"x","url":"y"}]')).toHaveLength(1);
+  });
+});
+
+describe("planDeliveries", () => {
+  const base = { liveSubscribers: ["c1"], mode: "any" as const, priority: 3, allowLists: [], denyLists: [], policy: {}, maxCostMicros: null, prices: prices as unknown as PriceTable, tier: "standard", nowMs: Date.UTC(2026, 0, 1, 12) };
+  const queued = [
+    { id: "push", transport: "webpush" as const, endpoint: "e1" },
+    { id: "sms", transport: "sms" as const, endpoint: "e2", after_s: 60, min_priority: 4 },
+    { id: "voice", transport: "voice" as const, endpoint: "e3", after_s: 300 },
+  ];
+  it("applies min priority, deny lists, and escalation delays", () => {
+    const p = planDeliveries({ ...base, queued, priority: 5, denyLists: [["voice"]] });
+    expect(p.deliveries.map((d) => [d.subscriber, d.after_s])).toEqual([["c1", 0], ["push", 0], ["sms", 60]]);
+    expect(p.dropped).toEqual([{ subscriber: "voice", transport: "voice", reason: "transport denied by policy" }]);
+    const low = planDeliveries({ ...base, queued, priority: 3 });
+    expect(low.dropped.find((d) => d.subscriber === "sms")?.reason).toBe("below minimum priority");
+  });
+  it("cheap mode drops paid transports; all mode sends immediately", () => {
+    expect(planDeliveries({ ...base, queued, mode: "cheap" }).deliveries.map((d) => d.subscriber)).toEqual(["c1"]);
+    expect(planDeliveries({ ...base, queued, mode: "all", priority: 5 }).deliveries.every((d) => d.after_s === 0)).toBe(true);
+  });
+  it("drops the latest, most expensive steps to fit max cost", () => {
+    const p = planDeliveries({ ...base, queued, priority: 5, maxCostMicros: 20_000 });
+    expect(p.deliveries.map((d) => d.subscriber)).toEqual(["c1", "push", "sms"]);
+    expect(p.costMicros).toBeLessThanOrEqual(20_000);
+  });
+  it("quiet hours suppress paid transports, including across midnight", () => {
+    expect(inQuietHours({ start: "22:00", end: "07:00" }, Date.UTC(2026, 0, 1, 23))).toBe(true);
+    expect(inQuietHours({ start: "22:00", end: "07:00" }, Date.UTC(2026, 0, 1, 12))).toBe(false);
+    const p = planDeliveries({ ...base, queued, priority: 5, policy: { quiet_hours: { start: "11:00", end: "13:00" } } });
+    expect(p.deliveries.map((d) => d.subscriber)).toEqual(["c1"]);
+  });
+});

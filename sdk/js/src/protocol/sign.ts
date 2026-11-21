@@ -36,7 +36,7 @@ export async function deviceKeyFromSeed(seed: Uint8Array): Promise<DeviceKey> {
     true,
     ["sign"],
   );
-  const jwk = await crypto.subtle.exportKey("jwk", privateKey);
+  const jwk = (await crypto.subtle.exportKey("jwk", privateKey)) as JsonWebKey;
   const publicKey = base64urlDecode(jwk.x!);
   return { deviceId: deviceIdFromPublicKey(publicKey), publicKey, privateKey, seed };
 }

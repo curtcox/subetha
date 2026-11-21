@@ -1,0 +1,61 @@
+// SubEtha relay: api Worker + Durable Objects + delivery queue consumer.
+// Environments: top level = local (wrangler dev), env.staging, env.production (PLAN §7).
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "subetha-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ENVIRONMENT": "local",
+    "BASE_URL": "http://localhost:8787",
+    "DEV_BOOTSTRAP_SECRET": "local-dev-only"
+  },
+  "assets": { "directory": "../../apps/site/public", "binding": "ASSETS", "run_worker_first": true },
+  "durable_objects": {
+    "bindings": [
+      { "name": "TOPIC", "class_name": "TopicDO" },
+      { "name": "ACCOUNT", "class_name": "AccountDO" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TopicDO", "AccountDO"] }],
+  "d1_databases": [{ "binding": "DB", "database_name": "subetha-local", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
+  "kv_namespaces": [{ "binding": "CACHE", "id": "00000000000000000000000000000000" }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "subetha-files-local" }],
+  "queues": {
+    "producers": [{ "binding": "DELIVERY", "queue": "subetha-delivery-local" }],
+    "consumers": [{ "queue": "subetha-delivery-local", "max_batch_size": 20, "max_retries": 5, "dead_letter_queue": "subetha-delivery-dlq-local" }]
+  },
+  "triggers": { "crons": ["*/10 * * * *", "17 3 * * *"] },
+  "observability": { "enabled": true },
+  "env": {
+    "staging": {
+      "name": "subetha-api-staging",
+      "routes": [{ "pattern": "staging.subetha.org", "custom_domain": true }],
+      "vars": { "ENVIRONMENT": "staging", "BASE_URL": "https://staging.subetha.org" },
+      "durable_objects": { "bindings": [{ "name": "TOPIC", "class_name": "TopicDO" }, { "name": "ACCOUNT", "class_name": "AccountDO" }] },
+      "d1_databases": [{ "binding": "DB", "database_name": "subetha-staging", "database_id": "REPLACE_WITH_STAGING_D1_ID", "migrations_dir": "migrations" }],
+      "kv_namespaces": [{ "binding": "CACHE", "id": "REPLACE_WITH_STAGING_KV_ID" }],
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "subetha-files-staging" }],
+      "queues": {
+        "producers": [{ "binding": "DELIVERY", "queue": "subetha-delivery-staging" }],
+        "consumers": [{ "queue": "subetha-delivery-staging", "max_batch_size": 20, "max_retries": 5, "dead_letter_queue": "subetha-delivery-dlq-staging" }]
+      },
+      "triggers": { "crons": ["*/10 * * * *", "17 3 * * *"] }
+    },
+    "production": {
+      "name": "subetha-api-production",
+      "routes": [{ "pattern": "subetha.org", "custom_domain": true }, { "pattern": "mcp.subetha.org", "custom_domain": true }],
+      "vars": { "ENVIRONMENT": "production", "BASE_URL": "https://subetha.org" },
+      "durable_objects": { "bindings": [{ "name": "TOPIC", "class_name": "TopicDO" }, { "name": "ACCOUNT", "class_name": "AccountDO" }] },
+      "d1_databases": [{ "binding": "DB", "database_name": "subetha-production", "database_id": "REPLACE_WITH_PRODUCTION_D1_ID", "migrations_dir": "migrations" }],
+      "kv_namespaces": [{ "binding": "CACHE", "id": "REPLACE_WITH_PRODUCTION_KV_ID" }],
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "subetha-files-production" }],
+      "queues": {
+        "producers": [{ "binding": "DELIVERY", "queue": "subetha-delivery-production" }],
+        "consumers": [{ "queue": "subetha-delivery-production", "max_batch_size": 20, "max_retries": 5, "dead_letter_queue": "subetha-delivery-dlq-production" }]
+      },
+      "triggers": { "crons": ["*/10 * * * *", "17 3 * * *"] }
+    }
+  }
+}

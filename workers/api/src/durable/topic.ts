@@ -1,0 +1,565 @@
+// TopicDO: one per topic. Stores recent messages, holds live connections (WebSocket hibernation
+// plus SSE / JSON / raw streams), plans fan-out, and pays for it from credit leases taken from the
+// owner's AccountDO (PLAN §5, §7).
+import { DurableObject } from "cloudflare:workers";
+import { ulid, verifyEnvelope, type Envelope } from "@subetha/sdk/protocol";
+import { actionPriceMicros, rentNanos, type PriceTable } from "@subetha/pricing";
+import prices from "@subetha/pricing/prices.json";
+import { asResult, rpcError, type RpcResult } from "../errors.ts";
+import { planDeliveries } from "../routing.ts";
+import type { Caller, DeliveryJob, Env, PublishInput, PublishResult, QueuedSubscription, SubscriptionFilter, TopicMeta } from "../types.ts";
+import { accountStub } from "./account.ts";
+
+const PRICES = prices as unknown as PriceTable;
+const LEASE_MICROS = 10_000; // 1¢
+const LEASE_IDLE_MS = 60_000;
+const DEFAULT_RETENTION_S = 12 * 3600;
+const MAX_RETENTION_S = 30 * 86400;
+const ALARM_MS = 60_000;
+const KEEPALIVE_MS = 45_000;
+const MAX_BACKLOG = 1000;
+
+interface Lease { ref: string; granted: number; remaining: number; at: number }
+type StreamFormat = "json" | "sse" | "raw";
+interface Stream { id: string; format: StreamFormat; filter: SubscriptionFilter; writer: WritableStreamDefaultWriter<Uint8Array> }
+interface WsAttachment { id: string; filter: SubscriptionFilter }
+
+export interface SubscribeParams {
+  format: StreamFormat | "ws";
+  since: string | null;
+  filter: SubscriptionFilter;
+  caller: Caller;
+  poll: boolean;
+}
+
+const enc = new TextEncoder();
+const today = () => new Date().toISOString().slice(0, 10);
+
+export function matchesFilter(m: Envelope, f: SubscriptionFilter): boolean {
+  if (f.priority?.length && !f.priority.includes(m.priority ?? 3)) return false;
+  if (f.tags?.length && !f.tags.every((t) => m.tags?.includes(t))) return false;
+  return true;
+}
+
+function idMatch(list: string[] | undefined, c: Caller): boolean {
+  if (!list) return false;
+  return [c.accountId, c.tokenId, c.deviceId].some((x) => x !== null && list.includes(x));
+}
+
+export class TopicDO extends DurableObject<Env> {
+  private readonly sql: SqlStorage;
+  private meta: TopicMeta | null = null;
+  private leases: Lease[] = [];
+  private nanoDebt = 0;
+  private readonly streams = new Map<string, Stream>();
+  private keepalive: ReturnType<typeof setInterval> | null = null;
+  private anonWindow = { minute: 0, count: 0 };
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.sql = ctx.storage.sql;
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS messages (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, time INTEGER NOT NULL, expires INTEGER NOT NULL, json TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS idem (key TEXT PRIMARY KEY, body_hash TEXT NOT NULL, message_id TEXT NOT NULL, created INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS acks (id TEXT PRIMARY KEY, time INTEGER NOT NULL, via TEXT);
+      CREATE TABLE IF NOT EXISTS subs (id TEXT PRIMARY KEY, json TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS traces (id TEXT PRIMARY KEY, json TEXT NOT NULL, expires INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);`);
+    ctx.blockConcurrencyWhile(async () => {
+      this.meta = this.kvGet<TopicMeta>("meta");
+      this.leases = this.kvGet<Lease[]>("leases") ?? [];
+      this.nanoDebt = this.kvGet<number>("nano_debt") ?? 0;
+    });
+  }
+
+  // ---------- small storage helpers ----------
+  private kvGet<T>(k: string): T | null {
+    const r = this.sql.exec<{ v: string }>("SELECT v FROM kv WHERE k = ?", k).toArray()[0];
+    return r ? (JSON.parse(r.v) as T) : null;
+  }
+  private kvPut(k: string, v: unknown) {
+    this.sql.exec("INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", k, JSON.stringify(v));
+  }
+  private persistMoney() {
+    this.kvPut("leases", this.leases);
+    this.kvPut("nano_debt", this.nanoDebt);
+  }
+  private async ensureAlarm() {
+    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + ALARM_MS);
+  }
+
+  // ---------- configuration ----------
+  async configure(meta: TopicMeta): Promise<void> {
+    this.meta = meta;
+    this.kvPut("meta", meta);
+    if (meta.policy.paused) this.closeAll(4403, "topic paused");
+  }
+
+  async getMeta(): Promise<TopicMeta | null> {
+    return this.meta;
+  }
+
+  async setSubscriptions(subs: QueuedSubscription[]): Promise<void> {
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("DELETE FROM subs");
+      for (const s of subs) this.sql.exec("INSERT INTO subs (id, json) VALUES (?, ?)", s.id, JSON.stringify(s));
+    });
+  }
+
+  private queuedSubs(): QueuedSubscription[] {
+    return this.sql.exec<{ json: string }>("SELECT json FROM subs").toArray().map((r) => JSON.parse(r.json));
+  }
+
+  private tier(): string {
+    return (this.meta as TopicMeta & { tier?: string })?.tier ?? "standard";
+  }
+
+  // ---------- money ----------
+  /** Spend µ$ from the owner's credit leases, taking a new lease if needed. */
+  private async spendOwner(micros: number, nanos = 0): Promise<boolean> {
+    this.nanoDebt += nanos;
+    const fromNanos = Math.floor(this.nanoDebt / 1000);
+    const total = micros + fromNanos;
+    if (total === 0) {
+      this.persistMoney();
+      return true;
+    }
+    const have = this.leases.reduce((n, l) => n + l.remaining, 0);
+    if (have < total) {
+      const ok = await this.takeLease(total - have);
+      if (!ok) {
+        this.nanoDebt -= nanos;
+        return false;
+      }
+    }
+    let need = total;
+    for (const l of this.leases) {
+      const take = Math.min(l.remaining, need);
+      l.remaining -= take;
+      l.at = Date.now();
+      need -= take;
+      if (!need) break;
+    }
+    this.nanoDebt -= fromNanos * 1000;
+    this.persistMoney();
+    await this.ensureAlarm();
+    return true;
+  }
+
+  private refundOwner(micros: number) {
+    const l = this.leases[this.leases.length - 1];
+    if (l) {
+      l.remaining = Math.min(l.granted, l.remaining + micros);
+      this.persistMoney();
+    }
+  }
+
+  private async takeLease(min: number): Promise<boolean> {
+    if (!this.meta) return false;
+    const ref = `lease:${this.meta.name}:${ulid()}`;
+    const r = await accountStub(this.env, this.meta.owner).lease(min, Math.max(min, LEASE_MICROS), ref);
+    if (r.granted === 0) return false;
+    this.leases.push({ ref, granted: r.granted, remaining: r.granted, at: Date.now() });
+    this.persistMoney();
+    return true;
+  }
+
+  private async returnLeases(all: boolean) {
+    if (!this.meta) return;
+    const now = Date.now();
+    const keep: Lease[] = [];
+    for (const l of this.leases) {
+      if (all || now - l.at > LEASE_IDLE_MS || l.remaining === 0) {
+        try {
+          await accountStub(this.env, this.meta.owner).returnLease(l.ref, l.remaining, `topic=${this.meta.name}`);
+        } catch (e) {
+          console.error("returnLease failed", e);
+          keep.push(l);
+        }
+      } else keep.push(l);
+    }
+    this.leases = keep;
+    this.persistMoney();
+  }
+
+  private async chargeCaller(caller: Caller, micros: number, ref: string): Promise<void> {
+    if (!caller.accountId || micros === 0) return;
+    const r = await accountStub(this.env, caller.accountId).charge(micros, ref, caller.tokenId, { tokenDaily: caller.caps.daily, tokenTotal: caller.caps.total });
+    if (!r.ok) {
+      if (r.code === "insufficient_balance") throw rpcError("insufficient_balance", undefined, { shortfall_usd_micros: r.shortfall });
+      throw rpcError("spend_cap_exceeded", `spend cap reached: ${r.cap}`, { cap: r.cap, remaining_usd_micros: r.remaining });
+    }
+  }
+
+  // ---------- permissions ----------
+  private canPublish(c: Caller): boolean {
+    const m = this.meta!;
+    return c.accountId === m.owner || !!m.policy.public_publish || idMatch(m.policy.allowed_publishers, c);
+  }
+
+  private canRead(c: Caller): boolean {
+    const m = this.meta!;
+    return m.name.startsWith("t_") || c.accountId === m.owner || !!m.policy.public_read || idMatch(m.policy.allowed_readers, c);
+  }
+
+  // ---------- publish ----------
+  async publish(input: PublishInput): Promise<RpcResult<PublishResult>> {
+    return asResult(() => this.publishInner(input));
+  }
+
+  private async publishInner(input: PublishInput): Promise<PublishResult> {
+    let created = false;
+    if (!this.meta) {
+      if (!input.autoCreateOwner) throw rpcError("no_funded_owner", "topic has no owner; create it first");
+      await this.configure({ name: input.envelope.topic, owner: input.autoCreateOwner, policy: {}, created_at: Date.now() });
+      created = true;
+    }
+    const meta = this.meta!;
+    const { caller } = input;
+    if (meta.policy.paused) throw rpcError("topic_paused");
+
+    // Signatures (spec §4).
+    let env = { ...input.envelope };
+    if (env.sig !== undefined || meta.policy.require_signature) {
+      if (env.sig === undefined) throw rpcError("signature_required");
+      if (!(await verifyEnvelope(env))) throw rpcError("bad_signature");
+    }
+    const signer: Caller = env.sender ? { ...caller, deviceId: env.sender as string } : caller;
+    if (!this.canPublish(signer)) throw rpcError("forbidden", "not allowed to publish to this topic");
+    const anonymous = caller.accountId === null;
+
+    // Idempotency.
+    if (input.idempotencyKey) {
+      const row = this.sql.exec<{ body_hash: string; message_id: string }>("SELECT body_hash, message_id FROM idem WHERE key = ?", input.idempotencyKey).toArray()[0];
+      if (row) {
+        if (row.body_hash !== input.bodyHash) throw rpcError("conflict", "Idempotency-Key reused with a different request");
+        const msg = this.messageById(row.message_id);
+        if (msg) return { message: msg, created_topic: false, duplicate: true, cost_micros: 0, plan: [], dry_run: input.dryRun };
+      }
+    }
+
+    // Finalize the envelope.
+    const nowMs = Date.now();
+    const time = env.time ?? Math.floor(nowMs / 1000);
+    const retention = Math.min(meta.policy.retention_s ?? DEFAULT_RETENTION_S, MAX_RETENTION_S);
+    env = {
+      ...env,
+      id: (env.id ?? ulid(nowMs)).toUpperCase(),
+      time,
+      event: "message",
+      expires: Math.min(env.expires ?? time + retention, time + retention),
+    };
+    if (env.priority === 3) delete env.priority;
+
+    const apiPrice = actionPriceMicros(PRICES, "api_request", this.tier());
+    const dup = this.messageById(env.id!);
+    if (dup) {
+      if (anonymous) { if (!(await this.spendOwner(apiPrice))) throw rpcError("no_funded_owner"); }
+      else await this.chargeCaller(caller, apiPrice, `dup:${env.id}:${ulid()}`);
+      return { message: dup, created_topic: created, duplicate: true, cost_micros: anonymous ? 0 : apiPrice, plan: [], dry_run: input.dryRun };
+    }
+
+    // Plan.
+    const live = this.liveSubscribers(env);
+    const plan = planDeliveries({
+      liveSubscribers: live,
+      queued: this.queuedSubs(),
+      mode: input.route.mode,
+      priority: env.priority ?? 3,
+      allowLists: [input.route.allow, caller.transports],
+      denyLists: [input.route.deny],
+      policy: meta.policy,
+      maxCostMicros: input.route.maxCost,
+      prices: PRICES,
+      tier: this.tier(),
+      nowMs,
+    });
+    const publishPrice = actionPriceMicros(PRICES, "publish", this.tier());
+    const liveCost = plan.deliveries.filter((d) => d.after_s === 0 && d.transport === "ws").reduce((n, d) => n + d.cost_micros, 0);
+    const queued = plan.deliveries.filter((d) => !(d.after_s === 0 && d.transport === "ws"));
+    const retentionNanos = rentNanos(PRICES, "retention_message_day", (env.expires! - time) / 86400, this.tier());
+
+    if (input.dryRun) {
+      if (anonymous) { if (!(await this.spendOwner(apiPrice))) throw rpcError("no_funded_owner"); }
+      else await this.chargeCaller(caller, apiPrice, `dry:${env.id}`);
+      const estimate = publishPrice + plan.costMicros + Math.ceil(retentionNanos / 1000);
+      return { message: env, created_topic: created, duplicate: false, cost_micros: estimate, plan: caller.accountId === meta.owner ? plan.deliveries : [], dry_run: true };
+    }
+
+    // Anonymous limits.
+    let ownerCost = liveCost;
+    if (anonymous) {
+      const minute = Math.floor(nowMs / 60000);
+      if (this.anonWindow.minute !== minute) this.anonWindow = { minute, count: 0 };
+      if (this.anonWindow.count >= (meta.policy.anon_rate_per_min ?? 60)) throw rpcError("rate_limited");
+      this.anonWindow.count++;
+      ownerCost += publishPrice;
+      const spentKey = `anon_spend:${today()}`;
+      const spent = this.kvGet<number>(spentKey) ?? 0;
+      const cap = meta.policy.anon_daily_cap_micros ?? 1_000_000;
+      if (spent + ownerCost > cap) throw rpcError("spend_cap_exceeded", "anonymous daily cap reached for this topic");
+      this.kvPut(spentKey, spent + ownerCost);
+    }
+    // Topic daily cap (owner-side spend, including queued reservations).
+    const topicKey = `topic_spend:${today()}`;
+    const topicSpent = this.kvGet<number>(topicKey) ?? 0;
+    const ownerTotal = ownerCost + queued.reduce((n, d) => n + d.cost_micros, 0);
+    if (meta.policy.daily_cap_micros != null && topicSpent + ownerTotal > meta.policy.daily_cap_micros) {
+      throw rpcError("spend_cap_exceeded", "topic daily cap reached", { cap: "topic_daily" });
+    }
+
+    // Pay: owner first (lease), then the publisher (direct, with token caps).
+    if (!(await this.spendOwner(ownerCost, retentionNanos))) {
+      throw rpcError(anonymous ? "no_funded_owner" : "insufficient_balance", "topic owner's balance cannot cover delivery", { payer: "topic_owner" });
+    }
+    if (!anonymous) {
+      try {
+        await this.chargeCaller(caller, publishPrice, `pub:${env.id}`);
+      } catch (e) {
+        this.refundOwner(ownerCost);
+        throw e;
+      }
+    }
+    this.kvPut(topicKey, topicSpent + ownerTotal);
+
+    // Store and fan out.
+    const json = JSON.stringify(env);
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec("INSERT INTO messages (id, time, expires, json) VALUES (?, ?, ?, ?)", env.id!, time, env.expires!, json);
+      if (input.idempotencyKey) this.sql.exec("INSERT OR REPLACE INTO idem (key, body_hash, message_id, created) VALUES (?, ?, ?, ?)", input.idempotencyKey, input.bodyHash, env.id!, nowMs);
+    });
+    this.broadcast(env);
+
+    // Queued (paid) transports: reserve per job; the delivery consumer settles.
+    const jobs: { body: DeliveryJob; delaySeconds?: number }[] = [];
+    const subs = new Map(this.queuedSubs().map((s) => [s.id, s]));
+    for (const d of queued) {
+      const sub = subs.get(d.subscriber);
+      if (!sub || !this.env.DELIVERY) continue;
+      const ref = `dlv:${env.id}:${sub.id}`;
+      const r = await accountStub(this.env, meta.owner).reserve(d.cost_micros, ref, null, {});
+      if (!r.ok) continue;
+      jobs.push({ body: { topic: meta.name, owner: meta.owner, message: env, sub, reservation: { ref, micros: d.cost_micros }, attempt: 0 }, delaySeconds: d.after_s || undefined });
+    }
+    if (jobs.length && this.env.DELIVERY) await this.env.DELIVERY.sendBatch(jobs);
+
+    const callerCost = (anonymous ? 0 : publishPrice) + (caller.accountId === meta.owner ? liveCost + queued.reduce((n, d) => n + d.cost_micros, 0) : 0);
+    this.trace(env.id!, { published: nowMs, plan: plan.deliveries, dropped: plan.dropped, cost_micros: { publish: publishPrice, live: liveCost, queued: queued.reduce((n, d) => n + d.cost_micros, 0), retention_nanos: retentionNanos }, publisher: caller.tokenId ?? caller.deviceId ?? caller.accountId ?? "anonymous" }, env.expires!);
+    await this.ensureAlarm();
+    return { message: env, created_topic: created, duplicate: false, cost_micros: callerCost, plan: caller.accountId === meta.owner ? plan.deliveries : [], dry_run: false };
+  }
+
+  private messageById(id: string): Envelope | null {
+    const r = this.sql.exec<{ json: string }>("SELECT json FROM messages WHERE id = ?", id.toUpperCase()).toArray()[0];
+    return r ? JSON.parse(r.json) : null;
+  }
+
+  // ---------- traces & acks ----------
+  private trace(id: string, data: Record<string, unknown>, expires: number) {
+    const prev = this.sql.exec<{ json: string }>("SELECT json FROM traces WHERE id = ?", id).toArray()[0];
+    const merged = prev ? { ...JSON.parse(prev.json), ...data } : data;
+    this.sql.exec("INSERT OR REPLACE INTO traces (id, json, expires) VALUES (?, ?, ?)", id, JSON.stringify(merged), expires);
+  }
+
+  async recordDelivery(id: string, event: Record<string, unknown>): Promise<void> {
+    const prev = this.sql.exec<{ json: string; expires: number }>("SELECT json, expires FROM traces WHERE id = ?", id).toArray()[0];
+    if (!prev) return;
+    const t = JSON.parse(prev.json);
+    (t.events ??= []).push({ at: Date.now(), ...event });
+    this.sql.exec("UPDATE traces SET json = ? WHERE id = ?", JSON.stringify(t), id);
+  }
+
+  async getTrace(id: string, caller: Caller): Promise<RpcResult<Record<string, unknown> | null>> {
+    return asResult(async () => this.getTraceInner(id, caller));
+  }
+
+  private getTraceInner(id: string, caller: Caller): Record<string, unknown> | null {
+    if (!this.meta || caller.accountId !== this.meta.owner) throw rpcError("forbidden", "only the topic owner can see traces");
+    const r = this.sql.exec<{ json: string }>("SELECT json FROM traces WHERE id = ?", id.toUpperCase()).toArray()[0];
+    if (!r) return null;
+    const acked = this.sql.exec<{ time: number; via: string }>("SELECT time, via FROM acks WHERE id = ?", id.toUpperCase()).toArray()[0];
+    return { id, ...JSON.parse(r.json), ack: acked ?? null };
+  }
+
+  async ack(id: string, via: string): Promise<void> {
+    this.sql.exec("INSERT OR IGNORE INTO acks (id, time, via) VALUES (?, ?, ?)", id.toUpperCase(), Date.now(), via);
+  }
+
+  async isAcked(id: string): Promise<boolean> {
+    return this.sql.exec("SELECT 1 FROM acks WHERE id = ?", id.toUpperCase()).toArray().length > 0;
+  }
+
+  // ---------- subscribe ----------
+  private liveSubscribers(m: Envelope): string[] {
+    const ids: string[] = [];
+    for (const s of this.streams.values()) if (matchesFilter(m, s.filter)) ids.push(s.id);
+    for (const ws of this.ctx.getWebSockets()) {
+      const a = ws.deserializeAttachment() as WsAttachment | null;
+      if (a && matchesFilter(m, a.filter)) ids.push(a.id);
+    }
+    return ids;
+  }
+
+  private backlog(since: string | null, filter: SubscriptionFilter): Envelope[] {
+    if (!since) return [];
+    const now = Math.floor(Date.now() / 1000);
+    let rows: { json: string }[];
+    if (since === "all") {
+      rows = this.sql.exec<{ json: string }>("SELECT json FROM messages WHERE expires >= ? ORDER BY seq LIMIT ?", now, MAX_BACKLOG).toArray();
+    } else if (/^\d+$/.test(since)) {
+      rows = this.sql.exec<{ json: string }>("SELECT json FROM messages WHERE time >= ? AND expires >= ? ORDER BY seq LIMIT ?", Number(since), now, MAX_BACKLOG).toArray();
+    } else if (/^\d+[smhd]$/.test(since)) {
+      const mult = { s: 1, m: 60, h: 3600, d: 86400 }[since.slice(-1) as "s" | "m" | "h" | "d"];
+      const from = now - Number(since.slice(0, -1)) * mult;
+      rows = this.sql.exec<{ json: string }>("SELECT json FROM messages WHERE time >= ? AND expires >= ? ORDER BY seq LIMIT ?", from, now, MAX_BACKLOG).toArray();
+    } else {
+      const seq = this.sql.exec<{ seq: number }>("SELECT seq FROM messages WHERE id = ?", since.toUpperCase()).toArray()[0]?.seq;
+      rows = seq === undefined
+        ? this.sql.exec<{ json: string }>("SELECT json FROM messages WHERE expires >= ? ORDER BY seq LIMIT ?", now, MAX_BACKLOG).toArray()
+        : this.sql.exec<{ json: string }>("SELECT json FROM messages WHERE seq > ? AND expires >= ? ORDER BY seq LIMIT ?", seq, now, MAX_BACKLOG).toArray();
+    }
+    return rows.map((r) => JSON.parse(r.json) as Envelope).filter((m) => matchesFilter(m, filter));
+  }
+
+  private checkRead(caller: Caller) {
+    if (!this.meta) throw rpcError("not_found", "no such topic");
+    if (this.meta.policy.paused) throw rpcError("topic_paused");
+    if (!this.canRead(caller)) throw rpcError("forbidden", "not allowed to read this topic");
+  }
+
+  /** Poll: cached messages since `since`. Charged to the topic owner (D2). */
+  async poll(params: SubscribeParams): Promise<RpcResult<Envelope[]>> {
+    return asResult(() => this.pollInner(params));
+  }
+
+  private async pollInner(params: SubscribeParams): Promise<Envelope[]> {
+    this.checkRead(params.caller);
+    const msgs = this.backlog(params.since ?? "all", params.filter);
+    const cost = actionPriceMicros(PRICES, "api_request", this.tier()) + msgs.length * actionPriceMicros(PRICES, "deliver_live", this.tier());
+    if (!(await this.spendOwner(cost))) throw rpcError("insufficient_balance", "topic owner's balance cannot cover delivery", { payer: "topic_owner" });
+    return msgs;
+  }
+
+  override async fetch(req: Request): Promise<Response> {
+    const params = JSON.parse(req.headers.get("x-subetha-subscribe") ?? "null") as SubscribeParams | null;
+    if (!params) return new Response("bad internal request", { status: 400 });
+    try {
+      this.checkRead(params.caller);
+    } catch (e) {
+      return new Response((e as Error).message, { status: 403 });
+    }
+    const backlog = this.backlog(params.since, params.filter);
+    const cost = actionPriceMicros(PRICES, "api_request", this.tier()) + backlog.length * actionPriceMicros(PRICES, "deliver_live", this.tier());
+    if (!(await this.spendOwner(cost))) return new Response("ApiError:insufficient_balance:topic owner's balance cannot cover delivery", { status: 402 });
+    const id = `c_${ulid()}`;
+    const openEvt = { id: ulid(), time: Math.floor(Date.now() / 1000), event: "open", topic: this.meta!.name };
+    await this.ensureAlarm();
+
+    if (params.format === "ws") {
+      const pair = new WebSocketPair();
+      const [client, server] = [pair[0], pair[1]];
+      this.ctx.acceptWebSocket(server);
+      server.serializeAttachment({ id, filter: params.filter } satisfies WsAttachment);
+      server.send(JSON.stringify(openEvt));
+      for (const m of backlog) server.send(JSON.stringify(m));
+      return new Response(null, { status: 101, webSocket: client });
+    }
+
+    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+    const writer = writable.getWriter();
+    const stream: Stream = { id, format: params.format, filter: params.filter, writer };
+    if (params.format !== "raw") void writer.write(this.frame(params.format, openEvt as Envelope));
+    for (const m of backlog) void writer.write(this.frame(params.format, m));
+    this.streams.set(id, stream);
+    writer.closed.catch(() => {}).finally(() => this.streams.delete(id));
+    this.startKeepalive();
+    const ct = params.format === "sse" ? "text/event-stream" : params.format === "json" ? "application/x-ndjson" : "text/plain";
+    return new Response(readable, { headers: { "content-type": `${ct}; charset=utf-8`, "cache-control": "no-cache", "x-accel-buffering": "no" } });
+  }
+
+  private frame(format: StreamFormat, m: Envelope): Uint8Array {
+    if (format === "sse") return enc.encode(`${m.event && m.event !== "message" ? `event: ${m.event}\n` : ""}${m.id ? `id: ${m.id}\n` : ""}data: ${JSON.stringify(m)}\n\n`);
+    if (format === "raw") return enc.encode((m.event === "keepalive" ? "" : (m.message ?? "").replace(/\n/g, " ")) + "\n");
+    return enc.encode(JSON.stringify(m) + "\n");
+  }
+
+  private broadcast(m: Envelope) {
+    for (const s of this.streams.values()) {
+      if (!matchesFilter(m, s.filter)) continue;
+      s.writer.write(this.frame(s.format, m)).catch(() => this.streams.delete(s.id));
+    }
+    const data = JSON.stringify(m);
+    for (const ws of this.ctx.getWebSockets()) {
+      const a = ws.deserializeAttachment() as WsAttachment | null;
+      if (a && matchesFilter(m, a.filter)) {
+        try { ws.send(data); } catch { /* closed */ }
+      }
+    }
+  }
+
+  private startKeepalive() {
+    if (this.keepalive) return;
+    this.keepalive = setInterval(() => {
+      if (this.streams.size === 0) {
+        clearInterval(this.keepalive!);
+        this.keepalive = null;
+        return;
+      }
+      const k = { id: ulid(), time: Math.floor(Date.now() / 1000), event: "keepalive", topic: this.meta?.name } as Envelope;
+      for (const s of this.streams.values()) s.writer.write(this.frame(s.format, k)).catch(() => this.streams.delete(s.id));
+    }, KEEPALIVE_MS);
+  }
+
+  private closeAll(code: number, reason: string) {
+    for (const s of this.streams.values()) s.writer.close().catch(() => {});
+    this.streams.clear();
+    for (const ws of this.ctx.getWebSockets()) {
+      try { ws.close(code, reason); } catch { /* already closed */ }
+    }
+  }
+
+  override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+    if (typeof message !== "string") return;
+    try {
+      const m = JSON.parse(message) as { event?: string; id?: string };
+      if (m.event === "ack" && typeof m.id === "string") await this.ack(m.id, "ws");
+      else if (m.event === "ping") ws.send(JSON.stringify({ event: "pong", time: Math.floor(Date.now() / 1000) }));
+    } catch {
+      /* ignore malformed frames */
+    }
+  }
+
+  override async webSocketClose(ws: WebSocket, code: number) {
+    try { ws.close(code, "closing"); } catch { /* ignore */ }
+  }
+
+  // ---------- housekeeping ----------
+  override async alarm() {
+    const now = Date.now();
+    this.sql.exec("DELETE FROM messages WHERE expires < ?", Math.floor(now / 1000));
+    this.sql.exec("DELETE FROM traces WHERE expires < ?", Math.floor(now / 1000));
+    this.sql.exec("DELETE FROM idem WHERE created < ?", now - 86_400_000);
+    // Connection rent since the last alarm.
+    const conns = this.streams.size + this.ctx.getWebSockets().length;
+    const last = this.kvGet<number>("rent_at") ?? now;
+    if (conns > 0) {
+      const nanos = rentNanos(PRICES, "connection_hour", (conns * (now - last)) / 3_600_000, this.tier());
+      if (!(await this.spendOwner(0, nanos))) this.closeAll(4402, "topic owner's balance is empty");
+    }
+    this.kvPut("rent_at", now);
+    await this.returnLeases(conns === 0);
+    const remaining = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM messages").one().n;
+    if (conns > 0 || this.leases.length > 0 || remaining > 0) await this.ctx.storage.setAlarm(now + ALARM_MS);
+  }
+
+  /** Test/ops hook: return all leases now. */
+  async flushLeases(): Promise<void> {
+    await this.returnLeases(true);
+  }
+}
+
+/** Typed RPC surface (Envelope's index signature defeats the generated Rpc types). */
+export type TopicRpc = Pick<TopicDO, "configure" | "getMeta" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "isAcked" | "flushLeases">;
+
+export function topicStub(env: Env, topic: string): TopicRpc {
+  return env.TOPIC.get(env.TOPIC.idFromName(topic)) as unknown as TopicRpc;
+}
