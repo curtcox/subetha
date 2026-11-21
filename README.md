@@ -25,19 +25,28 @@ curl -H "Authorization: Bearer $SUBETHA_TOKEN" https://subetha.org/@me/backups/j
 - **Control plane** (`/v1/*`): accounts (Clerk), Stripe Checkout top-ups (and opt-in auto-recharge) and webhooks, scoped and
   capped API tokens (including origin-bound publishable tokens), topic policies, traces, dry runs,
   idempotency keys, endpoints with verification codes, subscriptions with escalation, device
-  enrollment (device-code flow and request signatures), `/v1/status`.
+  enrollment (device-code flow and request signatures), an audit log, `/v1/status`.
 - **Transports**: live WS/SSE/poll; Web Push, FCM, APNs; HMAC-signed webhooks; email out
   (Cloudflare Email Service or SES) and in (Email Routing); Slack (OAuth install, both
   directions); Twilio SMS and voice (US, with STOP/HELP/ACK and DTMF ack); remote MCP server at
-  `/mcp`; Reticulum/LXMF through the gateway.
+  `/mcp` (API tokens, or OAuth access tokens from Clerk with a per-client spend cap);
+  Reticulum/LXMF through the gateway.
 - **SDKs**: TypeScript SDK + CLI + web components (`sdk/js`), Python SDK (`sdk/python`), Rust core
-  with edge-transport protocol logic and UniFFI-shaped bindings (`sdk/core`). All pass the shared
-  conformance vectors in `spec/vectors`.
-- **Gateway**: Reticulum/LXMF bridge (`gateways/reticulum`), Docker image included.
+  with edge-transport protocol logic and UniFFI bindings (`sdk/core`), Swift (`sdk/swift`), Kotlin
+  (`sdk/kotlin`), Dart/Flutter (`sdk/flutter`), and React Native (`sdk/react-native`). All pass the
+  shared conformance vectors in `spec/vectors`. Doorbell sample apps for web, CLI, agents, Python,
+  iOS, Android, Flutter, and React Native (`samples/`).
+- **Gateways**: Reticulum/LXMF bridge (`gateways/reticulum`) and an HTTP/1.1 → HTTP/2 APNs relay
+  (`gateways/apns-relay`), each with a Docker image.
 - **Pricing**: generated price table with margin invariants enforced in CI (`pricing/`).
 - **Docs and tooling**: developer docs with CI-tested samples (`docs/`), OpenAPI 3.1 with a drift
-  test (`spec/openapi.yaml`), `llms.txt`, web console (`apps/site/public/console`), GitHub Pages
-  and deploy workflows, infrastructure notes (`infra/`), legal drafts (`docs/legal/`).
+  test (`spec/openapi.yaml`), `llms.txt`, GitHub Pages and deploy workflows, infrastructure notes
+  (`infra/`), legal drafts (`docs/legal/`).
+- **Web console and tools** (`apps/site`): the console (send/receive, topics, endpoints and
+  escalation subscriptions, Slack, devices, tokens, billing and limits, traces, audit log, and an
+  OpenAPI-driven API explorer; "copy as" curl/JS/Python/Swift/Kotlin/Dart), plus a pricing
+  calculator and an offline route simulator at `/tools/` that bundle the relay's own price table
+  and planner.
 
 ## Repository layout
 
@@ -49,12 +58,14 @@ workers/api/      the relay Worker: src/ (Hono app, Durable Objects, delivery se
 sdk/js/           TypeScript SDK, CLI (`subetha`), web components (sdk.js), Web Push helper
 sdk/python/       Python SDK
 sdk/core/         Rust core (protocol, store-and-forward, routing, edge transports, FFI)
+sdk/swift/ sdk/kotlin/ sdk/flutter/ sdk/react-native/   mobile SDKs (see sdk/core/BINDINGS.md)
 gateways/reticulum/  Python Reticulum/LXMF gateway
-apps/site/        landing page, web console, service worker, docs builder (build.mjs)
+gateways/apns-relay/ HTTP/1.1 → HTTP/2 relay for APNs (Node, no dependencies)
+apps/site/        landing page, web console, tools (src/ → tools.js), docs builder (build.mjs)
 docs/             developer docs (Markdown), samples/ (runnable, CI-tested), legal/ (drafts)
 infra/            Cloudflare setup, secrets manifest, zone notes
 scripts/          file-size check, load test
-.github/workflows ci.yml, pages.yml, deploy.yml, file-size-check.yml
+.github/workflows ci.yml, mobile.yml, pages.yml, deploy.yml, file-size-check.yml
 ```
 
 ## Tests
@@ -98,13 +109,13 @@ in this repository; nothing is deployed to staging or production yet.
 |---|---|---|---|
 | **Phase 0** Foundations | Mostly done | Monorepo, CI, spec v0 + vectors, pricing generator + invariants, Pages workflow with build info | Provision the Cloudflare zone and staging; long-lead accounts (10DLC, Apple/Google, Slack, Stripe, Clerk prod) |
 | **Phase 1** Core relay MVP | Done (code) | ntfy publish/subscribe (HTTP, JSON, SSE, WS), TopicDO, D1, Clerk, tokens, ledger + leases, Stripe top-ups, 402s, console, TS SDK + CLI, ledger property tests | Staging verification of the exit criteria |
-| **A** Control plane | Mostly done | Device enrollment (device-code) + request signatures, policies, traces, dry runs, escalation, Web Push / APNs / FCM, webhooks | devicebasedauth.org (open question 1); APNs HTTP/2 path; escalation E2E in staging |
-| **B** Email + Slack + MCP | Mostly done | Email in/out, Slack app both ways, MCP server with protected-resource metadata | MCP OAuth flow via Clerk (bearer tokens work today); staging round trip |
+| **A** Control plane | Mostly done | Device enrollment (device-code) + request signatures, policies, traces, dry runs, escalation, Web Push / APNs (via the HTTP/2 relay) / FCM, webhooks, audit log | devicebasedauth.org (open question 1); escalation E2E in staging |
+| **B** Email + Slack + MCP | Mostly done | Email in/out, Slack app both ways, MCP server with API tokens or OAuth access tokens (Clerk as authorization server; JWT or introspected) | Clerk OAuth app + dynamic client registration setup; staging round trip from a real MCP client |
 | **C** Twilio SMS/voice | Code done, blocked | SMS in/out, voice + DTMF ack, verified US numbers, STOP/HELP, new-funds hold, Twilio price check + circuit breaker | A2P 10DLC approval; live per-destination repricing; staging escalation test |
 | **D** Reticulum gateway | Mostly done | Gateway (both directions, `/deliver` for LXMF endpoints), Docker, Python SDK, BYO-gateway docs | Hosted deployment (Containers or VPS); Sideband round trip |
-| **E** Rust core + mobile SDKs | In progress | Rust core passing all vectors, UniFFI-shaped FFI | Swift/Kotlin/Flutter/RN bindings and sample apps |
+| **E** Rust core + mobile SDKs | Mostly done | Rust core passing all vectors; UniFFI bindings; Swift, Kotlin, Dart, and React Native SDKs; doorbell sample apps on all four platforms; mobile CI | flutter_rust_bridge plugin for the core in Flutter; running the scripted flow on devices |
 | **F** Edge transports | In progress | Protocol logic in the core: audio modem, fountain-coded QR, BLE chunking, gossip | Platform shims (BLE, audio, camera), demos |
-| **G** Docs + dev tools | Partly done | Docs with CI-run samples, OpenAPI + drift test, llms.txt, static docs build | API explorer, route simulator, token builder, pricing calculator; nightly samples against staging |
+| **G** Docs + dev tools | Mostly done | Docs with CI-run samples, OpenAPI + drift test, llms.txt, static docs build; pricing calculator, route simulator, token builder, API explorer, copy-as for six languages, trace viewer | Usage charts; nightly samples against staging |
 | **Phase 3** Launch hardening | Started | Rate limits, load-test script, legal drafts, `/v1/status` | Load tests, abuse tuning, legal review, status page, backups, security review |
 
 ## File size limits
