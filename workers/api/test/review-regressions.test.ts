@@ -64,3 +64,77 @@ describe("review regressions", () => {
     expect((await publish("@anondry/x", "x", { "X-Dry-Run": "1" })).status).toBe(401);
   });
 });
+
+import { env } from "cloudflare:test";
+import { vi } from "vitest";
+import { processJob } from "../src/delivery/consumer.ts";
+import { signStripePayload } from "../src/stripe.ts";
+import type { DeliveryJob, Env } from "../src/types.ts";
+import { balance } from "./helpers.ts";
+import { reserve } from "./reserve.ts";
+
+const E = env as unknown as Env;
+const stripe = async (evt: unknown) => {
+  const payload = JSON.stringify(evt);
+  return SELF.fetch(`${BASE}/v1/hooks/stripe`, { method: "POST", body: payload, headers: { "stripe-signature": await signStripePayload(payload, "whsec_test") } });
+};
+
+describe("review regressions, batch 2", () => {
+  it("keeps account data and topic names away from non-admin tokens", async () => {
+    const a = await bootstrap("leak");
+    await publish("t_" + "q".repeat(26), "secret", auth(a.token));
+    const t = await json(await SELF.fetch(`${BASE}/v1/tokens`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ scopes: ["publish:@leak/door"] }) }));
+    for (const path of ["/v1/topics", "/v1/account", "/v1/balance", "/v1/ledger", "/v1/endpoints", "/v1/subscriptions", "/v1/devices"]) {
+      expect((await SELF.fetch(`${BASE}${path}`, { headers: auth(t.token as string) })).status, path).toBe(403);
+    }
+  });
+
+  it("rejects unknown Authorization schemes instead of treating them as anonymous", async () => {
+    expect((await SELF.fetch(`${BASE}/v1/topics`, { headers: { authorization: "Foo abc" } })).status).toBe(401);
+  });
+
+  it("enforces the account kill switch", async () => {
+    const a = await bootstrap("killed");
+    await publish("@killed/x", "init", auth(a.token));
+    await SELF.fetch(`${BASE}/v1/account`, { method: "PATCH", headers: auth(a.token), body: JSON.stringify({ paused: true }) });
+    expect((await publish("@killed/x", "after", auth(a.token))).status).toBe(403);
+    await SELF.fetch(`${BASE}/v1/account`, { method: "PATCH", headers: auth(a.token), body: JSON.stringify({ paused: false }) });
+    expect((await publish("@killed/x", "back", auth(a.token))).status).toBe(200);
+  });
+
+  it("recovers disputes once and deducts only newly refunded amounts", async () => {
+    const a = await bootstrap("refundee", 0);
+    await stripe({ id: "evt_r1", type: "checkout.session.completed", data: { object: { id: "cs_r1", payment_intent: "pi_r1", payment_status: "paid", amount_total: 5000, metadata: { account_id: a.account_id } } } });
+    const start = await balance(a.token);
+    await stripe({ id: "evt_r2", type: "charge.refunded", data: { object: { payment_intent: "pi_r1", amount: 5000, amount_refunded: 1000 } } });
+    await stripe({ id: "evt_r3", type: "charge.refunded", data: { object: { payment_intent: "pi_r1", amount: 5000, amount_refunded: 1500 } } });
+    expect(await balance(a.token)).toBe(start - 15_000_000);
+    await stripe({ id: "evt_r4", type: "charge.dispute.created", data: { object: { payment_intent: "pi_r1", amount: 1000 } } });
+    await stripe({ id: "evt_r5", type: "charge.dispute.created", data: { object: { payment_intent: "pi_r1", amount: 1000 } } });
+    expect(await balance(a.token)).toBe(Math.max(0, start - 15_000_000 - 10_000_000 - 15_000_000));
+  });
+
+  it("never re-sends a delivery that already went out", async () => {
+    const a = await bootstrap("resend", 1);
+    await publish("@resend/x", "init", auth(a.token));
+    const ep = await json(await SELF.fetch(`${BASE}/v1/endpoints`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ kind: "webhook", address: "https://hooks.example.com/r" }) }));
+    let sends = 0;
+    const real = globalThis.fetch;
+    vi.stubGlobal("fetch", async (i: RequestInfo | URL, init?: RequestInit) => (String(i instanceof Request ? i.url : i).startsWith(BASE) ? real(i, init) : (sends++, new Response("ok"))));
+    const ref = await reserve(E, a.account_id, 1000);
+    const job: DeliveryJob = { topic: "@resend/x", owner: a.account_id, message: { topic: "@resend/x", id: "01JD0000000000000000000077", message: "x" }, sub: { id: "s", transport: "webhook", endpoint: ep.id as string }, reservation: { ref, micros: 1000 }, attempt: 0 };
+    expect(await processJob(job, E)).toBe("delivered");
+    expect(await processJob({ ...job, attempt: 1 }, E)).toBe("delivered");
+    expect(sends).toBe(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects webhook IP literals and bare publishable scopes", async () => {
+    const a = await bootstrap("hard");
+    for (const address of ["https://10.0.0.1/x", "https://[::1]/x", "https://subetha.org./x", "https://intranet/x"]) {
+      expect((await SELF.fetch(`${BASE}/v1/endpoints`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ kind: "webhook", address }) })).status, address).toBe(400);
+    }
+    const r = await SELF.fetch(`${BASE}/v1/tokens`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ scopes: ["publish"], origins: ["https://example.com"], daily_cap_usd: 1 }) });
+    expect(r.status).toBe(400);
+  });
+});

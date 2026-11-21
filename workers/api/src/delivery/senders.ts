@@ -7,7 +7,7 @@ import type { DeliveryJob, Env } from "../types.ts";
 
 export class PermanentError extends Error {}
 
-export interface SendResult { costMicros?: number; detail?: unknown }
+export interface SendResult { costMicros?: number; detail?: unknown; /** Leave the reservation open; a provider callback settles it. */ deferSettle?: boolean }
 export type Sender = (job: DeliveryJob, env: Env) => Promise<SendResult>;
 
 export interface EndpointRow {

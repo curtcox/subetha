@@ -5,11 +5,12 @@
 // Signed requests carry:
 //   X-Device-Id: dev_…            (Ed25519 public key, spec §1.3)
 //   X-Device-Time: <unix seconds> (±300 s)
-//   X-Device-Signature: base64url(Ed25519("subetha-req-v1\n" + METHOD + "\n" + path?query + "\n" + time + "\n" + hex(sha256(body))))
+//   X-Device-Signature: base64url(Ed25519("subetha-req-v1\n" + METHOD + "\n" + host + "\n" + path?query + "\n" + time + "\n" + hex(sha256(body))))
+// The host binds a signature to one deployment (a staging signature isn't valid in production).
 import type { Context, Hono } from "hono";
 import { base64urlDecode, DEVICE_ID_RE, publicKeyFromDeviceId, utf8 } from "@subetha/sdk/protocol";
 import { audit } from "./accounts.ts";
-import { requireAccount, requireAdmin } from "./auth.ts";
+import { requireAdmin } from "./auth.ts";
 import { randomBase32, sha256Hex } from "./crypto.ts";
 import { ApiError } from "./errors.ts";
 import type { Env, Principal } from "./types.ts";
@@ -37,7 +38,7 @@ async function ed25519Verify(deviceId: string, sigB64: string, data: string): Pr
 
 export async function requestSigningInput(method: string, url: string, time: string, body: Uint8Array): Promise<string> {
   const u = new URL(url);
-  return `${REQ_DOMAIN}${method.toUpperCase()}\n${u.pathname}${u.search}\n${time}\n${await sha256Hex(body)}`;
+  return `${REQ_DOMAIN}${method.toUpperCase()}\n${u.host}\n${u.pathname}${u.search}\n${time}\n${await sha256Hex(body)}`;
 }
 
 /** Returns a device principal for a correctly signed request from an enrolled device, null if unsigned. */
@@ -63,7 +64,7 @@ function userCode(): string {
 
 export function registerDeviceRoutes(app: Hono<Vars>, principal: PrincipalFn) {
   app.get("/v1/devices", async (c) => {
-    const id = requireAccount(await principal(c));
+    const id = requireAdmin(await principal(c));
     const { results } = await c.env.DB.prepare("SELECT id, name, capabilities, created_at, last_seen_at, revoked_at FROM devices WHERE account_id = ? ORDER BY created_at DESC").bind(id).all();
     return c.json({ devices: results.map((d) => ({ ...d, capabilities: JSON.parse(d.capabilities as string) })) });
   });
@@ -113,7 +114,8 @@ export function registerDeviceRoutes(app: Hono<Vars>, principal: PrincipalFn) {
     if (!row || row.expires_at < Date.now() || row.account_id) throw new ApiError("not_found", "unknown or expired code");
     await c.env.DB.batch([
       c.env.DB.prepare("UPDATE device_codes SET account_id = ? WHERE device_code_hash = ?").bind(accountId, row.device_code_hash),
-      c.env.DB.prepare("INSERT INTO devices (id, account_id, name, capabilities, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, revoked_at = NULL").bind(row.device_id, accountId, row.name, row.capabilities, Date.now()),
+      // Re-enrolling a revoked device (or one already ours) is fine; taking over another account's active device is not.
+      c.env.DB.prepare("INSERT INTO devices (id, account_id, name, capabilities, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, revoked_at = NULL WHERE devices.revoked_at IS NOT NULL OR devices.account_id = excluded.account_id").bind(row.device_id, accountId, row.name, row.capabilities, Date.now()),
     ]);
     await audit(c.env, accountId, p.kind, "device.enroll", { id: row.device_id, via: "code" });
     return c.json({ device_id: row.device_id, name: row.name, enrolled: true });

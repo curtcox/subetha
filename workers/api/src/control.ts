@@ -5,16 +5,17 @@ import { isTopic, ulid, type Transport } from "@subetha/sdk/protocol";
 import { actionPriceMicros, skuForTransport, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { audit } from "./accounts.ts";
-import { requireAccount, requireAdmin } from "./auth.ts";
+import { requireAdmin } from "./auth.ts";
 import { randomBase32, randomDigits, sha256Hex, timingSafeEqual } from "./crypto.ts";
 import { accountStub } from "./durable/account.ts";
 import { topicStub } from "./durable/topic.ts";
 import { ApiError, unwrap } from "./errors.ts";
 import { EMAIL_RE, sendEmail } from "./delivery/email.ts";
 import { verifySlackSignature } from "./delivery/slack.ts";
-import { ackToken, makeCall, sendSms, US_E164, verifyTwilioSignature, voiceTwiml } from "./delivery/twilio.ts";
+import { ackToken, makeCall, sendSms, US_E164, verifyTwilioSignature, voiceMinutes, voiceTwiml } from "./delivery/twilio.ts";
 import type { Env, Principal, QueuedSubscription, SubscriptionFilter } from "./types.ts";
 import { registerDeviceRoutes } from "./devices.ts";
+import { CIRCUIT_KEY } from "./cron.ts";
 
 const PRICES = prices as unknown as PriceTable;
 type Vars = { Bindings: Env; Variables: { principal: Principal } };
@@ -22,10 +23,21 @@ type App = Hono<Vars>;
 type PrincipalFn = (c: Context<Vars>) => Promise<Principal>;
 
 const VERIFY_TTL_MS = 30 * 60_000;
+const MAX_PENDING_VERIFICATIONS = 5;
 const NEEDS_CODE: Transport[] = ["email", "sms", "voice"];
 const CREATABLE: Transport[] = ["email", "sms", "voice", "webhook", "webpush", "apns", "fcm", "lxmf"];
 
 interface EndpointRecord { id: string; account_id: string; kind: Transport; address: string; config: string; verify_code_hash: string | null; verify_attempts: number; verified_at: number | null; created_at: number }
+
+/** Webhooks must name a public host by DNS name, never the relay itself or an IP literal. */
+export function assertPublicWebhook(address: string, baseUrl: string) {
+  const host = new URL(address).hostname.toLowerCase().replace(/\.+$/, "");
+  const own = new URL(baseUrl).hostname.toLowerCase();
+  const ipLiteral = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":") || host.startsWith("[");
+  if (ipLiteral || host === own || host === "subetha.org" || host.endsWith(".subetha.org") || host === "localhost" || host.endsWith(".localhost") || !host.includes(".")) {
+    throw new ApiError("bad_request", "webhooks must use a public DNS name (no IP literals, localhost, or the relay itself)");
+  }
+}
 
 export function validateAddress(kind: Transport, address: unknown): string {
   if (typeof address !== "string" || !address) throw new ApiError("bad_request", "address is required");
@@ -50,11 +62,26 @@ function publicEndpoint(e: EndpointRecord) {
 }
 
 async function sendCode(env: Env, e: EndpointRecord, code: string) {
-  // The verification message costs the same as a delivery and is charged before it is sent.
+  const telephony = e.kind === "sms" || e.kind === "voice";
+  // One code per destination per hour, and a few pending verifications per account per day:
+  // verification sends go to unverified numbers/addresses, so they're the abuse surface.
+  const perDest = `verify:${e.kind}:${e.address.toLowerCase()}`;
+  if (await env.CACHE.get(perDest)) throw new ApiError("rate_limited", "a code was sent to this destination recently; try again in an hour");
+  const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM endpoints WHERE account_id = ? AND verified_at IS NULL AND created_at > ?").bind(e.account_id, Date.now() - 86_400_000).first<{ n: number }>();
+  if ((pending?.n ?? 0) > MAX_PENDING_VERIFICATIONS) throw new ApiError("rate_limited", "too many unverified endpoints in the last day");
+  if (telephony && (await env.CACHE.get(CIRCUIT_KEY))) throw new ApiError("provider_unavailable", "SMS and voice are temporarily paused");
+  // The verification message costs the same as a delivery and is paid before it is sent; SMS and
+  // calls count toward the new-funds telephony hold.
   const sku = skuForTransport(PRICES, e.kind)!;
   const price = actionPriceMicros(PRICES, sku);
-  const r = await accountStub(env, e.account_id).charge(price, `verify:${e.id}:${ulid()}`, null, {});
-  if (!r.ok) throw new ApiError("insufficient_balance", "balance can't cover the verification message", r.code === "insufficient_balance" ? { shortfall_usd_micros: r.shortfall } : {});
+  const ref = `verify:${e.id}:${ulid()}`;
+  const account = accountStub(env, e.account_id);
+  const r = await account.reserve(price, ref, null, {}, telephony ? "telephony" : null);
+  if (!r.ok) throw r.code === "insufficient_balance"
+    ? new ApiError("insufficient_balance", "balance can't cover the verification message", { shortfall_usd_micros: r.shortfall })
+    : new ApiError("spend_cap_exceeded", "SMS/voice spend is limited for new funds; try again later or use email");
+  await account.settle(ref, price);
+  await env.CACHE.put(perDest, "1", { expirationTtl: 3600 });
   const text = `Your SubEtha verification code is ${code}. If you didn't request this, ignore it.`;
   if (e.kind === "email") await sendEmail(env, { to: e.address, subject: `SubEtha verification code ${code}`, text });
   else if (e.kind === "sms") await sendSms(env, e.address, text);
@@ -83,7 +110,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
   registerDeviceRoutes(app, principal);
   // ---------------- endpoints ----------------
   app.get("/v1/endpoints", async (c) => {
-    const id = requireAccount(await principal(c));
+    const id = requireAdmin(await principal(c));
     const { results } = await c.env.DB.prepare("SELECT * FROM endpoints WHERE account_id = ? ORDER BY created_at DESC").bind(id).all<EndpointRecord>();
     return c.json({ endpoints: results.map(publicEndpoint) });
   });
@@ -95,13 +122,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     const kind = body.kind!;
     if (!CREATABLE.includes(kind)) throw new ApiError("bad_request", kind === "slack" ? "Slack endpoints are created by installing the Slack app (GET /v1/slack/install)" : `kind must be one of ${CREATABLE.join(", ")}`);
     const address = validateAddress(kind, body.address);
-    if (kind === "webhook") {
-      const host = new URL(address).hostname.toLowerCase();
-      const own = new URL(c.env.BASE_URL).hostname.toLowerCase();
-      if (host === own || host.endsWith(".subetha.org") || host === "subetha.org" || /^(localhost|127\.|10\.|192\.168\.|169\.254\.|\[?::1)/.test(host)) {
-        throw new ApiError("bad_request", "webhooks can't target the relay itself or private addresses (use a topic subscription instead)");
-      }
-    }
+    if (kind === "webhook") assertPublicWebhook(address, c.env.BASE_URL);
     const now = Date.now();
     const id = `ep_${ulid()}`;
     const config: Record<string, unknown> = { name: body.name ?? "" };
@@ -152,7 +173,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
 
   // ---------------- subscriptions ----------------
   app.get("/v1/subscriptions", async (c) => {
-    const accountId = requireAccount(await principal(c));
+    const accountId = requireAdmin(await principal(c));
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.topic, s.endpoint_id, s.filter, s.after_s, s.min_priority, s.created_at, e.kind FROM subscriptions s
        JOIN endpoints e ON e.id = s.endpoint_id WHERE e.account_id = ? ORDER BY s.created_at DESC`).bind(accountId).all();
@@ -211,6 +232,17 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     return twiml(c, "<Response><Say>Not acknowledged. Goodbye.</Say></Response>");
   });
 
+  // Call finished: settle the reservation to the billed minutes (never more than reserved).
+  app.post("/v1/hooks/twilio/voice-status", async (c) => {
+    const params = await twilioParams(c);
+    const acct = c.req.query("acct") ?? "", ref = c.req.query("ref") ?? "", max = Number(c.req.query("max") ?? 0);
+    if (c.req.query("t") !== (await ackToken(c.env.TWILIO_AUTH_TOKEN!, acct, `${ref}:${max}`))) throw new ApiError("forbidden");
+    const minutes = Math.ceil(Number(params.CallDuration ?? 0) / 60);
+    const perMinute = Math.floor(max / voiceMinutes(""));
+    await accountStub(c.env, acct).settle(ref, Math.min(max, minutes * perMinute));
+    return twiml(c);
+  });
+
   // Inbound SMS from a verified number publishes to the topic bound to that endpoint (config.inbound_topic).
   app.post("/v1/hooks/twilio/sms", async (c) => {
     const params = await twilioParams(c);
@@ -233,7 +265,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     }
     if (!cfg.inbound_topic) return twiml(c);
     const price = actionPriceMicros(PRICES, "inbound_sms_us");
-    const charge = await accountStub(c.env, ep.account_id).charge(price, `insms:${params.MessageSid}`, null, {});
+    const charge = await accountStub(c.env, ep.account_id).charge(price, `insms:${params.MessageSid}`, null, {}, true);
     if (!charge.ok) return twiml(c);
     unwrap(await topicStub(c.env, cfg.inbound_topic).publish({
       envelope: { topic: cfg.inbound_topic, message: body.slice(0, 4096), tags: ["sms"], sms_from: maskAddress("sms", from) } as never,
@@ -250,6 +282,8 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     if (!c.env.SLACK_CLIENT_ID) throw new ApiError("provider_unavailable", "Slack app not configured");
     const state = `${accountId}.${randomBase32(10)}`;
     await c.env.CACHE.put(`slack_state:${state}`, accountId, { expirationTtl: 600 });
+    // Bind the OAuth state to this browser, so an install link can't be replayed by someone else.
+    c.header("set-cookie", `slack_state=${state}; Path=/v1/slack/oauth; Max-Age=600; HttpOnly; Secure; SameSite=Lax`);
     const u = new URL("https://slack.com/oauth/v2/authorize");
     u.searchParams.set("client_id", c.env.SLACK_CLIENT_ID);
     u.searchParams.set("scope", "chat:write,channels:history,groups:history,channels:read");
@@ -260,8 +294,9 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
 
   app.get("/v1/slack/oauth", async (c) => {
     const state = c.req.query("state") ?? "";
+    const cookie = /(?:^|;\s*)slack_state=([^;]+)/.exec(c.req.header("cookie") ?? "")?.[1];
     const accountId = await c.env.CACHE.get(`slack_state:${state}`);
-    if (!accountId) throw new ApiError("forbidden", "invalid or expired state");
+    if (!accountId || cookie !== state) throw new ApiError("forbidden", "invalid or expired state; start the install from the console");
     await c.env.CACHE.delete(`slack_state:${state}`);
     const r = await fetch("https://slack.com/api/oauth.v2.access", {
       method: "POST",
@@ -293,6 +328,8 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
       await syncTopicSubscriptions(c.env, body.topic);
     }
     if (body.inbound !== false) {
+      const existing = await c.env.DB.prepare("SELECT account_id FROM slack_bindings WHERE team_id = ? AND channel = ?").bind(body.team_id, body.channel).first<{ account_id: string }>();
+      if (existing && existing.account_id !== accountId) throw new ApiError("conflict", "this channel is bound by another account");
       await c.env.DB.prepare("INSERT OR REPLACE INTO slack_bindings (team_id, channel, topic, account_id, endpoint_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(body.team_id, body.channel, body.topic, accountId, endpointId, Date.now()).run();
     }
     return c.json({ bound: true, endpoint_id: endpointId }, 201);

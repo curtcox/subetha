@@ -67,7 +67,8 @@ export class TopicDO extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS acks (id TEXT PRIMARY KEY, time INTEGER NOT NULL, via TEXT);
       CREATE TABLE IF NOT EXISTS subs (id TEXT PRIMARY KEY, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS traces (id TEXT PRIMARY KEY, json TEXT NOT NULL, expires INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS sent (ref TEXT PRIMARY KEY, at INTEGER NOT NULL);`);
     ctx.blockConcurrencyWhile(async () => {
       this.meta = this.kvGet<TopicMeta>("meta");
       this.leases = this.kvGet<Lease[]>("leases") ?? [];
@@ -222,6 +223,7 @@ export class TopicDO extends DurableObject<Env> {
     const r = await accountStub(this.env, caller.accountId).charge(micros, ref, caller.tokenId, { tokenDaily: caller.caps.daily, tokenTotal: caller.caps.total });
     if (!r.ok) {
       if (r.code === "insufficient_balance") throw rpcError("insufficient_balance", undefined, { shortfall_usd_micros: r.shortfall });
+      if (r.cap === "account_paused") throw rpcError("topic_paused", "account is paused");
       throw rpcError("spend_cap_exceeded", `spend cap reached: ${r.cap}`, { cap: r.cap, remaining_usd_micros: r.remaining });
     }
   }
@@ -466,6 +468,14 @@ export class TopicDO extends DurableObject<Env> {
     this.sql.exec("INSERT OR IGNORE INTO acks (id, time, via) VALUES (?, ?, ?)", id.toUpperCase(), Date.now(), via);
   }
 
+  async markSent(ref: string): Promise<void> {
+    this.sql.exec("INSERT OR IGNORE INTO sent (ref, at) VALUES (?, ?)", ref, Date.now());
+  }
+
+  async wasSent(ref: string): Promise<boolean> {
+    return this.sql.exec("SELECT 1 FROM sent WHERE ref = ?", ref).toArray().length > 0;
+  }
+
   async isAcked(id: string): Promise<boolean> {
     return this.sql.exec("SELECT 1 FROM acks WHERE id = ?", id.toUpperCase()).toArray().length > 0;
   }
@@ -630,6 +640,7 @@ export class TopicDO extends DurableObject<Env> {
     this.sql.exec("DELETE FROM messages WHERE expires < ?", Math.floor(now / 1000));
     this.sql.exec("DELETE FROM traces WHERE expires < ?", Math.floor(now / 1000));
     this.sql.exec("DELETE FROM idem WHERE created < ?", now - 86_400_000);
+    this.sql.exec("DELETE FROM sent WHERE at < ?", now - 7 * 86_400_000);
     // Connection rent since the last alarm.
     const conns = this.streams.size + this.ctx.getWebSockets().length;
     const last = this.kvGet<number>("rent_at") ?? now;
@@ -650,7 +661,7 @@ export class TopicDO extends DurableObject<Env> {
 }
 
 /** Typed RPC surface (Envelope's index signature defeats the generated Rpc types). */
-export type TopicRpc = Pick<TopicDO, "configure" | "getMeta" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "flushLeases">;
+export type TopicRpc = Pick<TopicDO, "configure" | "getMeta" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases">;
 
 export function topicStub(env: Env, topic: string): TopicRpc {
   return env.TOPIC.get(env.TOPIC.idFromName(topic)) as unknown as TopicRpc;

@@ -48,7 +48,7 @@ export interface LedgerStore {
 export type ReserveResult =
   | { ok: true; available: number }
   | { ok: false; code: "insufficient_balance"; shortfall: number; available: number }
-  | { ok: false; code: "spend_cap_exceeded"; cap: "token_daily" | "token_total" | "account_daily"; remaining: number };
+  | { ok: false; code: "spend_cap_exceeded"; cap: "token_daily" | "token_total" | "account_daily" | "account_paused"; remaining: number };
 
 const day = (t: number) => new Date(t).toISOString().slice(0, 10);
 const assertAmount = (n: number) => {
