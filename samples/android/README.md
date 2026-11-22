@@ -23,6 +23,10 @@ adb install app/build/outputs/apk/debug/app-debug.apk
   ```
 
   (from the repo root). Without it the app still runs and the Edge tab says what's missing.
+- **QR** on the Edge tab: "Show as QR" animates a message as fountain-coded frames
+  (`org.subetha.core.QrSender`, spec §11.2) at 8 frames a second; "Scan QR" decodes them from
+  the camera (CameraX frames, ZXing, `QrReceiver`). The scanner can start late or miss frames.
+  The Edge lab page (`/tools/edge.html`) shows and scans the same codes.
 - **Bluetooth** on the Edge tab: `AndroidBle` makes the phone both a peripheral (GATT server
   with the spec §11.3 service, advertising) and a central (scans for that service and
   connects), and gives every connection an `org.subetha.core.BleLink` for chunking and gossip.
@@ -46,5 +50,3 @@ Two phones with the core library, the same topic on both Edge tabs:
    A shows `relay: ding` and B shows `Bluetooth: ding`.
 4. On B, type a message and tap **Send by sound**: it also goes out over Bluetooth, A uplinks
    it, and it shows up in the console and on the Doorbell tab.
-
-QR (camera) comes next.

@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Edge tab: listening for messages sent by sound. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Edge tab: scanning animated QR codes. -->
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-permission android:name="android.permission.CAMERA" />
     <!-- Edge tab: Bluetooth LE gossip (AndroidBle). Android 12+ asks for the BLUETOOTH_* runtime
          permissions; Android 8–11 needs location for scanning. -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />

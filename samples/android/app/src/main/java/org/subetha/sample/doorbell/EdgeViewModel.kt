@@ -18,6 +18,8 @@ import org.subetha.SubEtha
 import org.subetha.core.AudioLink
 import org.subetha.core.Core
 import org.subetha.core.EdgeBridge
+import org.subetha.core.QrReceiver
+import org.subetha.core.QrSender
 import org.subetha.core.acceptPayload
 import org.subetha.core.deliverPayload
 import org.subetha.core.ffi.EdgeGossipNode
@@ -32,6 +34,9 @@ data class EdgeState(
     val bluetooth: Boolean = false,
     val bluetoothPeers: Int = 0,
     val bridging: Boolean = false,
+    /** The animated QR code being shown, if any. */
+    val qr: QrSender? = null,
+    val scanning: Boolean = false,
     val heard: List<String> = emptyList(),
     val status: String = "",
 )
@@ -40,6 +45,8 @@ data class EdgeState(
  * Edge transports between phones, no network. One gossip node holds what this phone has seen:
  * - Sound: "Send by sound" plays a message as a modem frame (a gossip `deliver`, spec
  *   §11.1/§11.4); "Listen" decodes what the microphone hears.
+ * - QR: "Show as QR" animates a message as fountain-coded QR frames (spec §11.2); "Scan QR"
+ *   decodes them from the camera.
  * - Bluetooth: [AndroidBle] connects to nearby phones (and Web Bluetooth pages) and gossips
  *   (spec §11.3/§11.4), so messages hop between phones in range.
  * - Bridge: with the Doorbell tab connected, relay messages on the topic enter the node (and
@@ -55,6 +62,7 @@ class EdgeViewModel(app: Application) : AndroidViewModel(app) {
     private var stopRecording: (() -> Unit)? = null
     private var ble: AndroidBle? = null
     private var bridge: EdgeBridge? = null
+    private val qrReceiver by lazy { QrReceiver { payload -> node?.let { n -> acceptPayload(n, payload, now()).forEach { onEnvelope(it, "QR") } } } }
 
     private fun now() = (System.currentTimeMillis() / 1000).toULong()
 
@@ -73,28 +81,65 @@ class EdgeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun editTopic(topic: String) = _state.update { it.copy(topic = topic) }
 
+    /** A new envelope for [text], also held by the node (so Bluetooth peers get it) and uplinked. */
+    private suspend fun publishLocally(text: String): String {
+        val env = buildJsonObject {
+            put("id", newMessageId())
+            put("time", now().toLong())
+            put("topic", _state.value.topic)
+            put("message", text)
+            put("hops", 1)
+        }.toString()
+        ensureNode().publish(env, now())
+        ble?.resyncAll()
+        bridge?.uplink(env)
+        return env
+    }
+
     fun send(text: String) {
         if (!_state.value.coreAvailable || text.isBlank()) return
         _state.update { it.copy(sending = true, status = "Playing…") }
         viewModelScope.launch(Dispatchers.Default) {
             try {
-                val (n, l) = ensureLink()
-                val env = buildJsonObject {
-                    put("id", newMessageId())
-                    put("time", now().toLong())
-                    put("topic", _state.value.topic)
-                    put("message", text)
-                    put("hops", 1)
-                }.toString()
-                n.publish(env, now())
-                ble?.resyncAll()
-                bridge?.uplink(env)
+                val (_, l) = ensureLink()
+                val env = publishLocally(text)
                 l.send(deliverPayload(listOf(env)))
                 _state.update { it.copy(status = "Sent ${text.length} characters by sound" + if (ble != null) " and Bluetooth" else "") }
             } catch (e: Exception) {
                 _state.update { it.copy(sending = false, status = "Couldn't send: ${e.message}") }
             }
         }
+    }
+
+    /** Shows [text] as an animated QR code, or hides the one showing. */
+    fun toggleQr(text: String) {
+        if (!_state.value.coreAvailable) return
+        if (_state.value.qr != null) {
+            _state.update { it.copy(qr = null) }
+            return
+        }
+        if (text.isBlank()) return
+        viewModelScope.launch(Dispatchers.Default) {
+            try {
+                val sender = QrSender(deliverPayload(listOf(publishLocally(text))))
+                _state.update { it.copy(qr = sender, status = "Showing ${sender.sourceBlocks} block(s) as QR frames") }
+            } catch (e: Exception) {
+                _state.update { it.copy(status = "Couldn't make QR frames: ${e.message}") }
+            }
+        }
+    }
+
+    /** Starts or stops the camera. The UI asks for CAMERA first. */
+    fun toggleScanning() {
+        if (!_state.value.coreAvailable) return
+        ensureNode()
+        _state.update { it.copy(scanning = !it.scanning, status = if (it.scanning) "Stopped scanning" else "Point the camera at an animated QR code") }
+    }
+
+    /** One decoded QR string, from the scanner's thread. */
+    fun onQrText(text: String) {
+        val p = qrReceiver.push(text) ?: return
+        if (!p.complete) _state.update { it.copy(status = "QR: ${p.known} of ${p.total} blocks") }
     }
 
     /** Starts or stops listening. The UI asks for RECORD_AUDIO first. */

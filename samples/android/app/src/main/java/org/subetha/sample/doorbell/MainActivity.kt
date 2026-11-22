@@ -119,11 +119,14 @@ fun EdgeScreen(doorbell: DoorbellViewModel, vm: EdgeViewModel = viewModel()) {
     val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) vm.toggleListening()
     }
+    val askCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) vm.toggleScanning()
+    }
     val askBluetooth = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         if (result.values.all { it }) vm.toggleBluetooth()
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Edge: sound and Bluetooth", style = MaterialTheme.typography.titleLarge)
+        Text("Edge: sound, QR and Bluetooth", style = MaterialTheme.typography.titleLarge)
         if (!s.coreAvailable) {
             Text(
                 "libsubetha_core.so isn't bundled in this build. Build it with cargo-ndk into " +
@@ -147,6 +150,17 @@ fun EdgeScreen(doorbell: DoorbellViewModel, vm: EdgeViewModel = viewModel()) {
                 if (granted || s.listening) vm.toggleListening() else askMic.launch(Manifest.permission.RECORD_AUDIO)
             }) { Text(if (s.listening) "Stop listening" else "Listen") }
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { vm.toggleQr(text) }, enabled = s.qr != null || text.isNotBlank()) {
+                Text(if (s.qr != null) "Hide QR" else "Show as QR")
+            }
+            OutlinedButton(onClick = {
+                val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                if (granted || s.scanning) vm.toggleScanning() else askCamera.launch(Manifest.permission.CAMERA)
+            }) { Text(if (s.scanning) "Stop scanning" else "Scan QR") }
+        }
+        s.qr?.let { AnimatedQr(it) }
+        if (s.scanning) QrScanner(vm::onQrText)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = {
                 val needed = bluetoothPermissions().filter {

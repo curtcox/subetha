@@ -32,6 +32,11 @@ dependencies {
     implementation("org.subetha:subetha-core:0.1.0") { exclude(group = "net.java.dev.jna", module = "jna") }
     implementation("net.java.dev.jna:jna:5.15.0@aar")
     implementation("androidx.core:core-ktx:1.15.0")
+    // Edge tab: animated QR codes (ZXing encodes and decodes; CameraX supplies frames).
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("androidx.camera:camera-camera2:1.4.1")
+    implementation("androidx.camera:camera-lifecycle:1.4.1")
+    implementation("androidx.camera:camera-view:1.4.1")
 
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.material3:material3")
