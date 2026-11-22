@@ -159,6 +159,26 @@ jobs:
           name: doorbell-debug.apk
           path: samples/android/app/build/outputs/apk/debug/app-debug.apk
 
+  ios-sample:
+    name: iOS sample (simulator build)
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the core XCFramework (iOS device + simulator + macOS)
+        run: sdk/swift/scripts/build-xcframework.sh --debug
+      - run: brew install xcodegen
+      - name: Generate Doorbell.xcodeproj
+        working-directory: samples/ios
+        run: xcodegen
+      - name: xcodebuild (iOS Simulator, unsigned)
+        working-directory: samples/ios
+        run: >-
+          xcodebuild -project Doorbell.xcodeproj -scheme Doorbell -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+
   flutter-sample:
     name: Flutter sample (analyze)
     runs-on: ubuntu-latest

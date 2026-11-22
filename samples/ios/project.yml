@@ -12,9 +12,14 @@ targets:
     type: application
     platform: iOS
     sources: [Doorbell]
+    scheme: {}
     dependencies:
       - package: SubEtha
         product: SubEtha
+      # The Rust core (edge transports). Needs sdk/swift/build/subetha_coreFFI.xcframework:
+      # run sdk/swift/scripts/build-xcframework.sh first (see README.md).
+      - package: SubEtha
+        product: SubEthaCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.subetha.sample.doorbell
@@ -22,3 +27,5 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: Doorbell
         SWIFT_VERSION: "5.9"
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: The Edge tab listens for messages sent by sound.
+        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: The Edge tab exchanges messages with nearby phones over Bluetooth.

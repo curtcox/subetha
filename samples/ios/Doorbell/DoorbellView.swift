@@ -56,12 +56,38 @@ struct DoorbellView: View {
 }
 
 struct EdgeView: View {
+    @EnvironmentObject private var doorbell: DoorbellModel
+    @EnvironmentObject private var edge: EdgeModel
+    @State private var text = "Ding dong"
+
     var body: some View {
         NavigationStack {
-            List {
-                Text("Offline delivery over BLE (store-and-forward gossip), data-over-sound (16-FSK audio modem) and animated QR (fountain codes) come from the Rust core: sdk/core edge::ble, edge::gossip, edge::audio and edge::qr, through the SubEthaCore package (UniFFI).")
-                Text("This screen is a stub (track F). The app supplies the radios: CoreBluetooth with the core's GATT UUIDs and MTU chunking, AVAudioEngine at 48 kHz, and AVCaptureSession frames for QR.")
-                    .font(.footnote).foregroundStyle(.secondary)
+            Form {
+                Section {
+                    Text("Two phones, no network: one plays a message as a 16-FSK modem frame, the other listens and decodes it (about 50 bytes a second). With Bluetooth on, phones in range gossip what they hold, so a message hops from phone to phone. Same topic on all of them.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    TextField("Topic", text: $edge.topic)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Message", text: $text)
+                }
+                Section("Sound") {
+                    Button("Send by sound") { edge.send(text) }
+                        .disabled(edge.sending || text.isEmpty)
+                    Button(edge.listening ? "Stop listening" : "Listen", action: edge.toggleListening)
+                }
+                Section("Bluetooth and relay") {
+                    Button(edge.bluetooth ? "Bluetooth off (\(edge.peers) peers)" : "Bluetooth on", action: edge.toggleBluetooth)
+                    Button(edge.bridging ? "Stop bridging" : "Bridge to relay") { edge.toggleBridge(client: doorbell.connectedClient) }
+                        .disabled(!edge.bridging && !doorbell.connected)
+                }
+                if !edge.status.isEmpty {
+                    Section { Text(edge.status).font(.footnote).foregroundStyle(.secondary) }
+                }
+                Section("Heard") {
+                    if edge.heard.isEmpty { Text("Nothing yet").foregroundStyle(.secondary) }
+                    ForEach(Array(edge.heard.enumerated()), id: \.offset) { _, m in Text(m) }
+                }
             }
             .navigationTitle("Edge")
         }

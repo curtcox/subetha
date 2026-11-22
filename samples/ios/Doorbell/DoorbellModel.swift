@@ -14,6 +14,9 @@ final class DoorbellModel: ObservableObject {
     @Published private(set) var busy = false
 
     private var client: SubEtha?
+
+    /// The connected client, for the Edge tab's relay bridge.
+    var connectedClient: SubEtha? { connected ? client : nil }
     private var subscription: Task<Void, Never>?
 
     func connect() {
