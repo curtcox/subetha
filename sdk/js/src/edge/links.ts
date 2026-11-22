@@ -5,7 +5,7 @@
 // receiving GossipNode applies the usual checks: dedupe, expiry, hops, signatures.
 
 import type { Envelope } from "../protocol/envelope.ts";
-import { demodulate, resample, AUDIO_SAMPLE_RATE } from "./audio.ts";
+import { demodulate, AUDIO_SAMPLE_RATE, Resampler } from "./audio.ts";
 import { base45Decode, base45Encode } from "./base45.ts";
 import { chunk, DEFAULT_ATT_MTU, Reassembler } from "./ble.ts";
 import { FountainDecoder, FountainEncoder, FountainError, type FountainProgress } from "./fountain.ts";
@@ -43,14 +43,16 @@ export class AudioFrameReceiver {
   private sinceScan = 0;
   private readonly scanEvery: number;
   private readonly opts: AudioReceiverOptions;
+  private readonly resampler: Resampler;
   constructor(opts: AudioReceiverOptions) {
     this.opts = opts;
+    this.resampler = new Resampler(opts.sampleRate);
     this.buf = new Float32Array(Math.ceil((opts.windowSeconds ?? 6) * AUDIO_SAMPLE_RATE));
     this.scanEvery = Math.ceil((opts.scanSeconds ?? 0.5) * AUDIO_SAMPLE_RATE);
   }
 
   push(samples: Float32Array): void {
-    const x = resample(samples, this.opts.sampleRate);
+    const x = this.resampler.push(samples);
     if (x.length >= this.buf.length) {
       this.buf.set(x.subarray(x.length - this.buf.length));
       this.len = this.buf.length;

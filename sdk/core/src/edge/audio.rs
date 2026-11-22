@@ -216,11 +216,57 @@ pub fn resample(x: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
         .collect()
 }
 
+/// `resample` for a stream that arrives in blocks (mirrors `Resampler` in the TS SDK). It keeps its
+/// phase and the previous block's last sample, so block boundaries neither drop nor repeat time.
+/// Resampling each block on its own loses a fraction of a sample per block: with 128-sample blocks
+/// at 44.1 kHz that's 0.23%, more than a symbol over a long frame.
+#[derive(Debug, Clone)]
+pub struct Resampler {
+    from_rate: u32,
+    to_rate: u32,
+    step: f64,
+    /// The next output's position, in input samples from the start of the next block.
+    pos: f64,
+    /// The previous block's last sample (input index -1).
+    prev: f32,
+}
+
+impl Resampler {
+    pub fn new(from_rate: u32, to_rate: u32) -> Self {
+        Resampler { from_rate, to_rate, step: f64::from(from_rate) / f64::from(to_rate), pos: 0.0, prev: 0.0 }
+    }
+
+    /// Resamples the next block. Outputs that need the next block's first sample wait for it.
+    pub fn push(&mut self, x: &[f32]) -> Vec<f32> {
+        if self.from_rate == self.to_rate {
+            return x.to_vec();
+        }
+        let Some(&last) = x.last() else { return Vec::new() };
+        let m = x.len();
+        // Positions before m - 1, where x[j + 1] is in this block.
+        let n = ((m as f64 - 1.0 - self.pos) / self.step).ceil().max(0.0) as usize;
+        let out = (0..n)
+            .map(|i| {
+                let p = self.pos + i as f64 * self.step;
+                let j = p.floor();
+                let f = (p - j) as f32;
+                let a = if j < 0.0 { self.prev } else { x[j as usize] };
+                // x[m] only through rounding, where f ≈ 0.
+                let b = x.get((j + 1.0) as usize).copied().unwrap_or(a);
+                a * (1.0 - f) + b * f
+            })
+            .collect();
+        self.pos += n as f64 * self.step - m as f64;
+        self.prev = last;
+        out
+    }
+}
+
 /// Buffers microphone samples (any rate) and scans them for frames every `scan_seconds`.
 /// Mirrors `AudioFrameReceiver` in the TS SDK.
 #[derive(Debug, Clone)]
 pub struct Receiver {
-    rate: u32,
+    resampler: Resampler,
     buf: Vec<f32>,
     cap: usize,
     since_scan: usize,
@@ -232,12 +278,12 @@ impl Receiver {
     pub fn new(sample_rate: u32, window_seconds: f32, scan_seconds: f32) -> Self {
         let cap = (window_seconds.max(1.0) * SAMPLE_RATE as f32).ceil() as usize;
         let scan_every = (scan_seconds.max(0.05) * SAMPLE_RATE as f32).ceil() as usize;
-        Receiver { rate: sample_rate, buf: Vec::with_capacity(cap), cap, since_scan: 0, scan_every }
+        Receiver { resampler: Resampler::new(sample_rate, SAMPLE_RATE), buf: Vec::with_capacity(cap), cap, since_scan: 0, scan_every }
     }
 
     /// Adds samples; returns a payload when a complete frame has been heard.
     pub fn push(&mut self, samples: &[f32]) -> Option<Vec<u8>> {
-        let x = resample(samples, self.rate, SAMPLE_RATE);
+        let x = self.resampler.push(samples);
         self.buf.extend_from_slice(&x);
         if self.buf.len() > self.cap {
             let drop = self.buf.len() - self.cap;
@@ -329,9 +375,45 @@ mod tests {
         let mut stream = vec![0.0f32; 20_000];
         stream.extend_from_slice(&mic);
         stream.extend(std::iter::repeat_n(0.0, 44_100));
-        let mut rx = Receiver::new(44_100, 4.0, 0.5);
-        let got: Vec<Vec<u8>> = stream.chunks(4096).filter_map(|c| rx.push(c)).collect();
-        assert_eq!(got, vec![payload]);
+        // 128 is the AudioWorklet render quantum; 441 and 4096 are typical native buffers.
+        for block in [128, 441, 4096] {
+            let mut rx = Receiver::new(44_100, 4.0, 0.5);
+            let got: Vec<Vec<u8>> = stream.chunks(block).filter_map(|c| rx.push(c)).collect();
+            assert_eq!(got, vec![payload.clone()], "{block}-sample blocks");
+        }
+    }
+
+    #[test]
+    fn receiver_hears_a_long_frame_in_small_blocks() {
+        // ~7 s of tones: per-block resampling used to drift by more than a symbol over a frame this long.
+        let payload = vec![0x5a; 340];
+        for rate in [44_100u32, 16_000] {
+            let mic = resample(&modulate(&payload), SAMPLE_RATE, rate);
+            let mut stream = vec![0.0f32; rate as usize / 4];
+            stream.extend_from_slice(&mic);
+            stream.extend(std::iter::repeat_n(0.0, rate as usize));
+            let mut rx = Receiver::new(rate, 10.0, 0.5);
+            let got: Vec<Vec<u8>> = stream.chunks(128).filter_map(|c| rx.push(c)).collect();
+            assert_eq!(got, vec![payload.clone()], "{rate} Hz");
+        }
+    }
+
+    #[test]
+    fn streaming_resampler_matches_resampling_at_once() {
+        let x: Vec<f32> = (0..10_000).map(|i| (i as f32 * 0.05).sin() + 0.3 * (i as f32 * 0.71).sin()).collect();
+        for (from, to) in [(44_100, 48_000), (16_000, 48_000), (96_000, 48_000), (48_000, 44_100)] {
+            let whole = resample(&x, from, to);
+            for block in [1, 7, 128, 1000] {
+                let mut r = Resampler::new(from, to);
+                let parts: Vec<f32> = x.chunks(block).flat_map(|c| r.push(c)).collect();
+                // Outputs past the last sample wait for a next block.
+                let held = whole.len() - parts.len();
+                assert!(held <= to.div_ceil(from) as usize, "{from}->{to} in {block}s: {held} held");
+                for (a, b) in parts.iter().zip(&whole) {
+                    assert!((a - b).abs() < 1e-4, "{from}->{to} in {block}s: {a} vs {b}");
+                }
+            }
+        }
     }
 
     #[test]
