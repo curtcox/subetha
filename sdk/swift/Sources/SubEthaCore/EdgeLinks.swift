@@ -126,6 +126,51 @@ public final class AudioLink {
     }
 }
 
+/// Animated-QR sender (spec §11.2): an endless stream of fountain-coded frames for a payload, as
+/// base45 text for alphanumeric QR codes. Show `text(0)`, `text(1)`, … one after another (5–10 a
+/// second); a receiver needs about 1.1–1.5 × `sourceBlocks` of them, in any order.
+public final class QrSender {
+    /// Fills a version 12 QR code at error correction L (535 alphanumeric characters).
+    public static let defaultFrameSize = 356
+    private let encoder: EdgeQrEncoder
+
+    public init(payload: Data, frameSize: Int = QrSender.defaultFrameSize) throws {
+        encoder = try EdgeQrEncoder(payload: payload, frameSize: UInt32(frameSize))
+    }
+
+    /// How many frames carry the payload's blocks directly.
+    public var sourceBlocks: Int { Int(encoder.sourceBlocks()) }
+
+    /// Frame `seq` as base45 text.
+    public func text(_ seq: Int) -> String { encoder.frameText(seq: UInt32(seq)) }
+
+    /// The frame size that fills a QR code holding `alphanumericChars` characters.
+    public static func frameSize(alphanumericChars c: Int) -> Int { c / 3 * 2 + (c % 3 == 2 ? 1 : 0) }
+}
+
+/// Collects scanned QR strings into a payload. Other QR codes are ignored, and a new transfer
+/// replaces an unfinished one. `onPayload` gets each completed payload once (use
+/// `Edge.acceptPayload` for envelopes). Feed it from one queue.
+public final class QrReceiver {
+    private let decoder = EdgeQrDecoder()
+    private let onPayload: (Data) -> Void
+    private var last: Data?
+
+    public init(onPayload: @escaping (Data) -> Void) { self.onPayload = onPayload }
+
+    /// Feeds one scanned string; returns progress, or nil if it wasn't a SubEtha frame.
+    @discardableResult
+    public func push(_ text: String) -> EdgeQrProgress? {
+        let p = decoder.pushText(text: text)
+        guard p.accepted else { return nil }
+        if p.complete, let result = decoder.result(), result != last {
+            last = result
+            onPayload(result)
+        }
+        return p
+    }
+}
+
 /// Edge ↔ relay bridge (PLAN §3: a phone with internet is a gateway for nearby offline devices).
 /// Relay messages on `topics` enter `node` (given `hops` if they carry none) so edge peers pick
 /// them up; call `uplink(_:)` from your links' onMessage to publish edge messages to the relay

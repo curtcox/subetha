@@ -36,6 +36,31 @@ class EdgeLinksTest {
     private fun message(json: String) = Json.parseToJsonElement(json).jsonObject["message"]!!.jsonPrimitive.content
 
     @Test
+    fun qrSenderToReceiver() {
+        val node = EdgeGossipNode(false).apply { subscribe(topic) }
+        val got = mutableListOf<String>()
+        val receiver = QrReceiver { got += acceptPayload(node, it) }
+        val envs = (1..6).map { env("message $it with some padding to need several frames") }
+        val sender = QrSender(deliverPayload(envs), frameSize = 120)
+        assertTrue(sender.sourceBlocks > 1)
+        assertEquals(null, receiver.push("https://example.com/not-ours"))
+        // Start late and skip every third frame, as a camera would.
+        var seq = 3
+        while (got.isEmpty() && seq < 200) {
+            if (seq % 3 != 0) receiver.push(sender.text(seq))
+            seq++
+        }
+        assertEquals(envs.map(::message), got.map(::message))
+        // More frames of the same transfer don't deliver again.
+        receiver.push(sender.text(seq))
+        assertEquals(6, got.size)
+        // A new transfer replaces it, even a one-frame one.
+        receiver.push(QrSender(deliverPayload(listOf(env("next")))).text(0))
+        assertEquals("next", message(got.last()))
+        assertEquals(356, QrSender.frameSizeFor(535))
+    }
+
+    @Test
     fun bleLinksGossipBothWays() {
         val phone = EdgeGossipNode(false).apply { subscribe(topic) }
         val watch = EdgeGossipNode(false).apply { subscribe(topic) }

@@ -15,6 +15,9 @@ import org.subetha.SubscribeOptions
 import org.subetha.core.ffi.EdgeAudioReceiver
 import org.subetha.core.ffi.EdgeChunkReassembler
 import org.subetha.core.ffi.EdgeGossipNode
+import org.subetha.core.ffi.EdgeQrDecoder
+import org.subetha.core.ffi.EdgeQrEncoder
+import org.subetha.core.ffi.EdgeQrProgress
 import org.subetha.core.ffi.FfiException
 import org.subetha.core.ffi.audioModulate
 import org.subetha.core.ffi.audioResample
@@ -139,6 +142,53 @@ public class AudioLink @JvmOverloads constructor(
 
     public companion object {
         public const val MODEM_RATE: Int = 48_000
+    }
+}
+
+/**
+ * Animated-QR sender (spec §11.2): an endless stream of fountain-coded frames for [payload],
+ * as base45 text for alphanumeric QR codes. Show `text(0)`, `text(1)`, … one after another
+ * (5–10 a second); a receiver needs about 1.1–1.5 × [sourceBlocks] of them, in any order.
+ */
+public class QrSender @JvmOverloads constructor(payload: ByteArray, frameSize: Int = DEFAULT_FRAME_SIZE) {
+    private val encoder = EdgeQrEncoder(payload, frameSize.toUInt())
+
+    /** How many frames carry the payload's blocks directly. */
+    public val sourceBlocks: Int get() = encoder.sourceBlocks().toInt()
+
+    /** Frame [seq] as base45 text. */
+    public fun text(seq: Int): String = encoder.frameText(seq.toUInt())
+
+    public companion object {
+        /** Fills a version 12 QR code at error correction L (535 alphanumeric characters). */
+        public const val DEFAULT_FRAME_SIZE: Int = 356
+
+        /** The frame size that fills a QR code holding [alphanumericChars] characters. */
+        public fun frameSizeFor(alphanumericChars: Int): Int = alphanumericChars / 3 * 2 + if (alphanumericChars % 3 == 2) 1 else 0
+    }
+}
+
+/**
+ * Collects scanned QR strings into a payload. Other QR codes are ignored, and a new transfer
+ * replaces an unfinished one. [onPayload] gets each completed payload once (use
+ * [acceptPayload] for envelopes). Feed it from one thread.
+ */
+public class QrReceiver(private val onPayload: (ByteArray) -> Unit) {
+    private val decoder = EdgeQrDecoder()
+    private var last: ByteArray? = null
+
+    /** Feeds one scanned string; returns progress, or null if it wasn't a SubEtha frame. */
+    public fun push(text: String): EdgeQrProgress? {
+        val p = decoder.pushText(text)
+        if (!p.accepted) return null
+        if (p.complete) {
+            val result = decoder.result()
+            if (result != null && !result.contentEquals(last)) {
+                last = result
+                onPayload(result)
+            }
+        }
+        return p
     }
 }
 

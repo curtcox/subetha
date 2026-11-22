@@ -33,6 +33,29 @@ final class EdgeLinkTests: XCTestCase {
         XCTAssertEqual(atWatch.count, 1)
     }
 
+    func testQrSenderToReceiver() throws {
+        let node = EdgeGossipNode(requireSignatures: false)
+        node.subscribe(topic: topic)
+        var got: [String] = []
+        let receiver = QrReceiver { got += Edge.acceptPayload(node, $0) }
+        let envs = (1...6).map { env("message \($0) with some padding to need several frames") }
+        let sender = try QrSender(payload: try Edge.deliverPayload(envs), frameSize: 120)
+        XCTAssertGreaterThan(sender.sourceBlocks, 1)
+        XCTAssertNil(receiver.push("https://example.com/not-ours"))
+        // Start late and skip every third frame, as a camera would.
+        var seq = 3
+        while got.isEmpty && seq < 200 {
+            if seq % 3 != 0 { receiver.push(sender.text(seq)) }
+            seq += 1
+        }
+        XCTAssertEqual(got.compactMap(message), envs.compactMap(message))
+        receiver.push(sender.text(seq)) // same transfer: not delivered again
+        XCTAssertEqual(got.count, 6)
+        receiver.push(try QrSender(payload: try Edge.deliverPayload([env("next")])).text(0))
+        XCTAssertEqual(got.last.flatMap(message), "next")
+        XCTAssertEqual(QrSender.frameSize(alphanumericChars: 535), 356)
+    }
+
     func testAudioLinkRoundTripAt44k() throws {
         let node = EdgeGossipNode(requireSignatures: false)
         node.subscribe(topic: topic)
