@@ -69,6 +69,7 @@ gateways/apns-relay/ HTTP/1.1 → HTTP/2 relay for APNs (Node, no dependencies)
 apps/site/        landing page, web console, tools (src/ → tools.js), docs builder (build.mjs)
 docs/             developer docs (Markdown), samples/ (runnable, CI-tested), legal/ (drafts)
 infra/            Cloudflare setup, secrets manifest, zone notes
+e2e/              Playwright tests: the console against the relay under wrangler dev
 scripts/          file-size check, load test, D1 restore from nightly backups
 .github/workflows ci.yml, mobile.yml, pages.yml, deploy.yml, nightly.yml, file-size-check.yml
 ```
@@ -82,6 +83,8 @@ pnpm -r test                 # spec, pricing, TS SDK, relay (Miniflare), docs sa
 cargo test --workspace       # Rust core (+ builds the Rust docs sample)
 pip install -e "sdk/python[test]" -e "gateways/reticulum[test]"
 pytest sdk/python gateways/reticulum
+pnpm --filter @subetha/e2e exec playwright install chromium   # once
+pnpm --filter @subetha/e2e e2e   # console E2E: builds, starts wrangler dev on :8788, drives Chromium
 ```
 
 `pnpm vectors` and `pnpm pricing` regenerate the conformance vectors and the price table; CI
@@ -113,7 +116,7 @@ in this repository; nothing is deployed to staging or production yet.
 | Phase / track | Status | Done | Remaining |
 |---|---|---|---|
 | **Phase 0** Foundations | Mostly done | Monorepo, CI, spec v0 + vectors, pricing generator + invariants, Pages workflow with build info | Provision the Cloudflare zone and staging; long-lead accounts (10DLC, Apple/Google, Slack, Stripe, Clerk prod) |
-| **Phase 1** Core relay MVP | Done (code) | ntfy publish/subscribe (HTTP, JSON, SSE, WS), TopicDO, D1, Clerk, tokens, ledger + leases, Stripe top-ups, 402s, console, TS SDK + CLI, ledger property tests | Staging verification of the exit criteria |
+| **Phase 1** Core relay MVP | Done (code) | ntfy publish/subscribe (HTTP, JSON, SSE, WS), TopicDO, D1, Clerk, tokens, ledger + leases, Stripe top-ups, 402s, console, TS SDK + CLI, ledger property tests; the exit criterion (curl publish → the console receives it → the balance is debited) runs in CI as a Playwright test against `wrangler dev` | Staging verification of the exit criteria |
 | **A** Control plane | Mostly done | Device enrollment (device-code) + request signatures, policies, traces, dry runs, escalation, Web Push / APNs (via the HTTP/2 relay) / FCM, webhooks, audit log | devicebasedauth.org (open question 1); escalation E2E in staging |
 | **B** Email + Slack + MCP | Mostly done | Email in/out, Slack app both ways, MCP server with API tokens or OAuth access tokens (Clerk as authorization server; JWT or introspected) | Clerk OAuth app + dynamic client registration setup; staging round trip from a real MCP client |
 | **C** Twilio SMS/voice | Code done, blocked | SMS in/out, voice + DTMF ack, verified US numbers, STOP/HELP, new-funds hold, Twilio price check + circuit breaker | A2P 10DLC approval; live per-destination repricing; staging escalation test |

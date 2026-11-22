@@ -8,5 +8,6 @@ packages:
   - apps/*
   - samples/*
   - docs/samples
+  - e2e
   # The Expo sample installs its own React Native toolchain (see samples/react-native/README.md).
   - "!samples/react-native"

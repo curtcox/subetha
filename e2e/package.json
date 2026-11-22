@@ -1,0 +1,16 @@
+{
+  "name": "@subetha/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser end-to-end tests: the web console against the relay under wrangler dev (PLAN §12, §14 Phase 1 exit).",
+  "scripts": {
+    "e2e": "playwright test",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.3"
+  }
+}
