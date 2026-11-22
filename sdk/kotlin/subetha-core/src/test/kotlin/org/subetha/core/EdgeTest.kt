@@ -71,7 +71,8 @@ class EdgeTest {
         val pcm = FloatArray(shorts.remaining()) { shorts.get(it) / 32767f }
         assertEquals(a["pcm_payload"]!!.jsonPrimitive.content, audioDemodulate(pcm.toList())!!.toString(Charsets.UTF_8))
         val rx = EdgeAudioReceiver(48000u, 3f)
-        val got = pcm.toList().chunked(4096).mapNotNull { rx.push(it) }
+        // A live microphone keeps delivering samples; the receiver scans every 0.5 s.
+        val got = (pcm.toList() + List(48000) { 0f }).chunked(4096).mapNotNull { rx.push(it) }
         assertEquals(listOf(a["pcm_payload"]!!.jsonPrimitive.content), got.map { it.toString(Charsets.UTF_8) })
     }
 
