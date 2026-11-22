@@ -26,10 +26,11 @@
     "build": "node scripts/build.mjs"
   },
   "devDependencies": {
+    "@types/node": "^22.10.0",
     "esbuild": "^0.25.0",
+    "jsqr": "1.4.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.0",
-    "@types/node": "^22.10.0"
+    "vitest": "^4.1.0"
   },
   "publishConfig": {
     "exports": {

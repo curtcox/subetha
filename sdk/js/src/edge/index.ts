@@ -6,4 +6,6 @@ export * from "./ble.ts";
 export * from "./crc.ts";
 export * from "./fountain.ts";
 export * from "./gossip.ts";
+export * from "./qrcode.ts";
 export { SplitMix64 } from "./splitmix.ts";
+export * from "./links.ts";

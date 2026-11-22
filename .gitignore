@@ -14,6 +14,7 @@ site-build/
 .DS_Store
 .claude/worktrees/
 apps/site/public/sdk.js
+apps/site/public/edge.js
 
 # Generated docs site (pnpm --filter @subetha/site build)
 apps/site/public/docs/
