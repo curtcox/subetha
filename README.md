@@ -33,7 +33,8 @@ curl -H "Authorization: Bearer $SUBETHA_TOKEN" https://subetha.org/@me/backups/j
   Reticulum/LXMF through the gateway.
 - **SDKs**: TypeScript SDK + CLI + web components (`sdk/js`), Python SDK (`sdk/python`), Rust core
   with edge-transport protocol logic and UniFFI bindings (`sdk/core`), Swift (`sdk/swift`), Kotlin
-  (`sdk/kotlin`), Dart/Flutter (`sdk/flutter`), and React Native (`sdk/react-native`). All pass the
+  (`sdk/kotlin`), Dart/Flutter (`sdk/flutter`, plus the `subetha_core` plugin in
+  `sdk/flutter_core`), and React Native (`sdk/react-native`). All pass the
   shared conformance vectors in `spec/vectors`. Doorbell sample apps for web, CLI, agents, Python,
   iOS, Android, Flutter, and React Native (`samples/`).
 - **Gateways**: Reticulum/LXMF bridge (`gateways/reticulum`) and an HTTP/1.1 → HTTP/2 APNs relay
@@ -59,6 +60,7 @@ sdk/js/           TypeScript SDK, CLI (`subetha`), web components (sdk.js), Web 
 sdk/python/       Python SDK
 sdk/core/         Rust core (protocol, store-and-forward, routing, edge transports, FFI)
 sdk/swift/ sdk/kotlin/ sdk/flutter/ sdk/react-native/   mobile SDKs (see sdk/core/BINDINGS.md)
+sdk/flutter_core/ Flutter plugin: the Rust core through flutter_rust_bridge
 gateways/reticulum/  Python Reticulum/LXMF gateway
 gateways/apns-relay/ HTTP/1.1 → HTTP/2 relay for APNs (Node, no dependencies)
 apps/site/        landing page, web console, tools (src/ → tools.js), docs builder (build.mjs)
@@ -113,7 +115,7 @@ in this repository; nothing is deployed to staging or production yet.
 | **B** Email + Slack + MCP | Mostly done | Email in/out, Slack app both ways, MCP server with API tokens or OAuth access tokens (Clerk as authorization server; JWT or introspected) | Clerk OAuth app + dynamic client registration setup; staging round trip from a real MCP client |
 | **C** Twilio SMS/voice | Code done, blocked | SMS in/out, voice + DTMF ack, verified US numbers, STOP/HELP, new-funds hold, Twilio price check + circuit breaker | A2P 10DLC approval; live per-destination repricing; staging escalation test |
 | **D** Reticulum gateway | Mostly done | Gateway (both directions, `/deliver` for LXMF endpoints), Docker, Python SDK, BYO-gateway docs | Hosted deployment (Containers or VPS); Sideband round trip |
-| **E** Rust core + mobile SDKs | Mostly done | Rust core passing all vectors; UniFFI bindings; Swift, Kotlin, Dart, and React Native SDKs; doorbell sample apps on all four platforms; mobile CI | flutter_rust_bridge plugin for the core in Flutter; running the scripted flow on devices |
+| **E** Rust core + mobile SDKs | Mostly done | Rust core passing all vectors; UniFFI bindings; Swift, Kotlin, Dart, and React Native SDKs; the `subetha_core` Flutter plugin (flutter_rust_bridge, with the core signer, E2EE, and edge drivers); doorbell sample apps on all four platforms; mobile CI, including simulator/APK builds of the iOS and Android samples | Running the scripted flow on devices; uniffi-bindgen-react-native for the core in React Native |
 | **F** Edge transports | Mostly done | Protocol logic in the core and the TS SDK (audio modem, fountain-coded QR, BLE chunking, gossip; spec §11 + shared vectors); browser shims (Web Audio, animated QR with a built-in QR encoder, Web Bluetooth central) and the Edge lab at `/tools/edge.html`; LAN discovery + gossip over UDP (`subetha lan`); edge ↔ relay gateway bridge (`bridgeEdge`); edge objects exported through UniFFI for Swift/Kotlin; platform-neutral link drivers (`GossipSession`, `BleLink`, `AudioLink`, `QrSender`/`QrReceiver`, `EdgeBridge`) in the Kotlin and Swift SDKs; native shims in the Android and iOS samples (BLE peripheral + central, AudioTrack/AudioRecord and AVAudioEngine, camera QR scanning and animated QR display) with a relay bridge for the offline BLE-hop demo; CI builds both apps | Running the BLE-hop, sound, and QR demos on physical phones; Flutter and React Native edge shims |
 | **G** Docs + dev tools | Mostly done | Docs with CI-run samples, OpenAPI + drift test, llms.txt, static docs build; pricing calculator, route simulator, token builder, API explorer, copy-as for six languages, trace viewer, usage by category (`/v1/usage` + chart), nightly samples-against-staging workflow | Set `SAMPLES_TOKEN` in the staging environment once staging exists |
 | **Phase 3** Launch hardening | Started | Rate limits, load-test script, legal drafts, `/v1/status` and a status page (`/status/`, also on Pages so it works when the Worker is down), nightly D1 backups to R2 with a verified restore script, relay security review with fixes ([infra/security-review.md](infra/security-review.md)) | Load tests, abuse tuning, legal review, the security items to confirm on staging, restore drill in staging |
