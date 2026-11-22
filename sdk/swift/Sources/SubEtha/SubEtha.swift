@@ -152,6 +152,16 @@ public final class SubEtha: @unchecked Sendable {
         return Message(json: try await requestObject("POST", "/", body: .object(env), headers: headers))
     }
 
+    /// Publishes an envelope exactly as given: one built elsewhere, or one that arrived over an
+    /// edge link (signatures and E2EE stay intact; the relay drops it as a duplicate by id).
+    @discardableResult
+    public func publishEnvelope(_ envelope: [String: JSONValue], idempotencyKey: String? = nil) async throws -> Message {
+        var env = envelope
+        env["event"] = nil
+        let headers = idempotencyKey.map { ["Idempotency-Key": $0] } ?? [:]
+        return Message(json: try await requestObject("POST", "/", body: .object(env), headers: headers))
+    }
+
     /// Dry run: who would get it, how, and the worst-case cost. Nothing is delivered.
     public func estimate(_ topic: String, _ message: String, _ options: PublishOptions = PublishOptions()) async throws -> Estimate {
         let env = try buildEnvelope(topic, message, options)
@@ -238,7 +248,7 @@ public final class SubEtha: @unchecked Sendable {
                     if !(crypto?.verify(JSONValue.object(raw).jsonString()) ?? false) { return }
                 } else if options.requireSignature { return }
             }
-            let m = receive(raw)
+            let m = options.raw ? Message(json: raw) : receive(raw)
             try await handler(m)
             if options.autoAck, let id = m.id {
                 do { try await ack(topic: m.topic, id: id, via: via) } catch { options.onError?(error) }

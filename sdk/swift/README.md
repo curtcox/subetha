@@ -43,6 +43,32 @@ Store `signer.seed` in the Keychain. CryptoKit's Ed25519 signatures are randomiz
 `CoreDeviceSigner` is deterministic and also signs envelopes. E2EE needs
 `crypto: CoreEnvelopeCrypto()` plus `topicKeys`.
 
+### Edge transports
+
+`SubEthaCore` has drivers for the edge transports (spec §11). Your CoreBluetooth or
+AVAudioEngine code moves bytes and samples; the drivers do the protocol:
+
+```swift
+let node = EdgeGossipNode(requireSignatures: true)
+node.subscribe(topic: "@me/doorbell")
+
+// BLE: one link per connection, central or peripheral.
+let link = BleLink(node: node, write: { peripheral.writeValue($0, for: inbox, type: .withoutResponse) },
+                   onMessage: { show($0) }, attMtu: peripheral.maximumWriteValueLength(for: .withoutResponse) + 3)
+link.resync()                    // on connect and after publishing
+// peripheral(_:didUpdateValueFor:error:) -> link.receive(characteristic.value!)
+
+// Sound: play through AVAudioPlayerNode, feed input-tap buffers back in.
+let audio = AudioLink(sampleRate: 48_000, play: { schedule($0) }, onPayload: { Edge.acceptPayload(node, $0).forEach(show) })
+try audio.send(Edge.deliverPayload([envelopeJSON]))
+
+// Gateway: relay messages go out over edge links, edge messages go up to the relay.
+let bridge = EdgeBridge(client: client, node: node, topics: ["@me/doorbell"], onDownlink: { _ in DispatchQueue.main.async { link.resync() } })
+// in onMessage: Task { await bridge.uplink(env) }
+```
+
+Drive each link from one queue. `GossipSession` is the transport-neutral core of `BleLink`.
+
 ## The core XCFramework
 
 ```bash

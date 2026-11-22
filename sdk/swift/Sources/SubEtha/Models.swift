@@ -112,6 +112,8 @@ public struct SubscribeOptions: Sendable {
     public var verify: Bool
     /// Also drop unsigned messages.
     public var requireSignature: Bool
+    /// Pass envelopes through as received (no E2EE decryption), e.g. to forward them.
+    public var raw: Bool = false
     public var initialBackoff: TimeInterval
     public var maxBackoff: TimeInterval
     /// Called on each (re)connect.

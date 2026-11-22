@@ -197,6 +197,16 @@ final class SubEthaTests: XCTestCase {
         XCTAssertTrue(pathAndQuery(t.requests[1]).contains("since=01P1"))
     }
 
+    func testPublishEnvelopeForwardsItUnchanged() async throws {
+        let t = MockTransport { r, _ in .init(body: String(decoding: r.httpBody!, as: UTF8.self)) }
+        let c = SubEtha(baseURL: base, token: "se_t", transport: t)
+        let env: [String: JSONValue] = ["id": "01JD5A2Z3K8Q9V6X7W4T1R0S2M", "topic": "@a/b", "message": "hi", "event": "message", "hops": 1, "sig": "ed25519:x"]
+        try await c.publishEnvelope(env, idempotencyKey: "k")
+        let r = t.requests[0]
+        XCTAssertEqual(r.value(forHTTPHeaderField: "Idempotency-Key"), "k")
+        XCTAssertEqual(bodyJSON(r), ["id": "01JD5A2Z3K8Q9V6X7W4T1R0S2M", "topic": "@a/b", "message": "hi", "hops": 1, "sig": "ed25519:x"])
+    }
+
     func testRequestSigningInput() {
         let nonce = "nonce_0123456789abcdef"
         let signed = RequestSigning.headersToSign(deviceId: deviceID, time: 1763750000, nonce: nonce,
