@@ -116,7 +116,7 @@ registerSender("webpush", async (job, env) => {
   // RFC 8030 Topic (≤32 base64url chars) replaces an undelivered push with the same topic. Keying it
   // on the message id makes retries idempotent without collapsing distinct messages.
   if (job.message.id && /^[A-Za-z0-9_-]{1,32}$/.test(job.message.id)) headers.topic = job.message.id;
-  const r = await fetch(sub.endpoint, { method: "POST", headers, body: body as BodyInit, signal: AbortSignal.timeout(10_000) });
+  const r = await fetch(sub.endpoint, { method: "POST", headers, body: body as BodyInit, redirect: "manual", signal: AbortSignal.timeout(10_000) });
   if (r.status === 404 || r.status === 410) {
     await unverifyEndpoint(env, ep.id);
     throw new PermanentError(`push subscription expired (HTTP ${r.status})`);

@@ -92,13 +92,19 @@ async function sendCode(env: Env, e: EndpointRecord, code: string) {
 export async function syncTopicSubscriptions(env: Env, topic: string) {
   const { results } = await env.DB.prepare(
     `SELECT s.id, s.filter, s.after_s, s.min_priority, e.id AS endpoint_id, e.kind, e.address
-     FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id
-     WHERE s.topic = ? AND e.verified_at IS NOT NULL`).bind(topic).all<{ id: string; filter: string; after_s: number; min_priority: number | null; endpoint_id: string; kind: Transport; address: string }>();
+     FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id JOIN accounts a ON a.id = e.account_id
+     WHERE s.topic = ? AND e.verified_at IS NOT NULL AND a.frozen_since IS NULL`).bind(topic).all<{ id: string; filter: string; after_s: number; min_priority: number | null; endpoint_id: string; kind: Transport; address: string }>();
   const subs: QueuedSubscription[] = results.map((r) => ({
     id: r.id, transport: r.kind, endpoint: r.endpoint_id, address: r.kind === "webpush" ? undefined : r.address,
     filter: JSON.parse(r.filter) as SubscriptionFilter, after_s: r.after_s || undefined, min_priority: r.min_priority ?? undefined,
   }));
   await topicStub(env, topic).setSubscriptions(subs);
+}
+
+/** Re-plans every topic that delivers to one of `accountId`'s endpoints (after a freeze/unfreeze). */
+export async function syncAccountEndpoints(env: Env, accountId: string) {
+  const { results } = await env.DB.prepare("SELECT DISTINCT s.topic FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id WHERE e.account_id = ?").bind(accountId).all<{ topic: string }>();
+  for (const r of results) await syncTopicSubscriptions(env, r.topic);
 }
 
 async function topicsForEndpoint(env: Env, endpointId: string): Promise<string[]> {
@@ -123,6 +129,8 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     if (!CREATABLE.includes(kind)) throw new ApiError("bad_request", kind === "slack" ? "Slack endpoints are created by installing the Slack app (GET /v1/slack/install)" : `kind must be one of ${CREATABLE.join(", ")}`);
     const address = validateAddress(kind, body.address);
     if (kind === "webhook") assertPublicWebhook(address, c.env.BASE_URL);
+    // Web Push endpoints are URLs we POST to as well (the browser's push service).
+    if (kind === "webpush") assertPublicWebhook(JSON.parse(address).endpoint, c.env.BASE_URL);
     const now = Date.now();
     const id = `ep_${ulid()}`;
     const config: Record<string, unknown> = { name: body.name ?? "" };
@@ -150,8 +158,11 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     if (!e) throw new ApiError("not_found");
     if (e.verified_at) return c.json(publicEndpoint(e));
     const { code } = (await c.req.json()) as { code?: string };
-    if (e.verify_attempts >= 5 || Date.now() - e.created_at > VERIFY_TTL_MS) throw new ApiError("forbidden", "verification expired; delete the endpoint and add it again");
-    await c.env.DB.prepare("UPDATE endpoints SET verify_attempts = verify_attempts + 1 WHERE id = ?").bind(e.id).run();
+    const expired = () => new ApiError("forbidden", "verification expired; delete the endpoint and add it again");
+    if (Date.now() - e.created_at > VERIFY_TTL_MS) throw expired();
+    // Count the attempt atomically, so parallel guesses can't get past the limit of 5.
+    const counted = await c.env.DB.prepare("UPDATE endpoints SET verify_attempts = verify_attempts + 1 WHERE id = ? AND verify_attempts < 5").bind(e.id).run();
+    if (!counted.meta.changes) throw expired();
     if (!code || !e.verify_code_hash || !timingSafeEqual(await sha256Hex(`${e.id}:${code}`), e.verify_code_hash)) throw new ApiError("forbidden", "wrong code");
     await c.env.DB.prepare("UPDATE endpoints SET verified_at = ?, verify_code_hash = NULL WHERE id = ?").bind(Date.now(), e.id).run();
     for (const t of await topicsForEndpoint(c.env, e.id)) await syncTopicSubscriptions(c.env, t);

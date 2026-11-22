@@ -3,6 +3,7 @@ import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { enrollmentProof } from "@subetha/sdk";
 import { deviceKeyFromSeed, hexDecode, signEnvelope, ulid } from "@subetha/sdk/protocol";
 import { describe, expect, it } from "vitest";
+import { accountStub } from "../src/durable/account.ts";
 import type { Env } from "../src/types.ts";
 import { auth, BASE, bootstrap, publish } from "./helpers.ts";
 
@@ -110,5 +111,34 @@ describe("security review: devices", () => {
     await post("/v1/device/code", await enrollmentProof(key));
     const n = await E.DB.prepare("SELECT COUNT(*) AS n FROM device_codes WHERE device_id = ?").bind(key.deviceId).first<{ n: number }>();
     expect(n?.n).toBe(1);
+  });
+});
+
+describe("security review: rent freeze", () => {
+  it("stops delivering to a frozen account's endpoints and resumes after it pays", async () => {
+    const { meterRent } = await import("../src/cron.ts");
+    const a = await bootstrap("frozen", 0.00001); // 10 µ$: one day of endpoint rent, not two
+    await SELF.fetch(`${BASE}/v1/topics/@frozen/x`, { method: "PUT", headers: auth(a.token), body: JSON.stringify({ policy: {} }) });
+    await webhookSub(a.token, "@frozen/x");
+    const subs = async () => runInDurableObject(E.TOPIC.get(E.TOPIC.idFromName("@frozen/x")), async (_o, st) => st.storage.sql.exec("SELECT id FROM subs").toArray().length);
+    expect(await subs()).toBe(1);
+    for (let d = 1; d <= 20 && (await E.DB.prepare("SELECT frozen_since FROM accounts WHERE id = ?").bind(a.account_id).first<{ frozen_since: number | null }>())?.frozen_since == null; d++) {
+      await meterRent(E, Date.UTC(2026, 7, d));
+    }
+    expect(await subs()).toBe(0);
+    await accountStub(E, a.account_id).topup(5_000_000, "test-topup");
+    await meterRent(E, Date.UTC(2026, 8, 1));
+    expect(await subs()).toBe(1);
+  });
+});
+
+describe("security review: web push endpoints", () => {
+  it("rejects push subscriptions pointing at the relay, IPs or localhost", async () => {
+    const a = await bootstrap("wpssrf");
+    for (const endpoint of ["https://subetha.test/v1/x", "https://127.0.0.1/x", "https://localhost/x", "https://subetha.org/x"]) {
+      const address = JSON.stringify({ endpoint, keys: { p256dh: "x", auth: "y" } });
+      const r = await SELF.fetch(`${BASE}/v1/endpoints`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ kind: "webpush", address }) });
+      expect(r.status, endpoint).toBe(400);
+    }
   });
 });

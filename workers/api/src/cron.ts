@@ -4,6 +4,7 @@ import { rentNanos, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { audit, invalidateAccount } from "./accounts.ts";
 import { backupDatabase } from "./backup.ts";
+import { syncAccountEndpoints } from "./control.ts";
 import { accountStub } from "./durable/account.ts";
 import type { Env } from "./types.ts";
 
@@ -42,14 +43,17 @@ export async function meterRent(env: Env, now: number) {
       if (a.frozen_since) {
         await env.DB.prepare("UPDATE accounts SET frozen_since = NULL WHERE id = ?").bind(a.id).run();
         await invalidateAccount(env, a.id);
+        await syncAccountEndpoints(env, a.id); // endpoints deliver again
       }
       continue;
     }
     if (!a.frozen_since) {
-      // Freeze: paid endpoints stop receiving (unverify keeps the record so it can be re-verified).
+      // Freeze: the account's endpoints drop out of every topic's delivery plan until it pays
+      // again (records are kept for the grace period).
       await env.DB.prepare("UPDATE accounts SET frozen_since = ? WHERE id = ?").bind(now, a.id).run();
       await audit(env, a.id, "cron", "account.frozen", { micros });
       await invalidateAccount(env, a.id);
+      await syncAccountEndpoints(env, a.id);
     } else if (now - a.frozen_since > GRACE_DAYS * 86_400_000) {
       await env.DB.batch([
         env.DB.prepare("DELETE FROM subscriptions WHERE endpoint_id IN (SELECT id FROM endpoints WHERE account_id = ?)").bind(a.id),
