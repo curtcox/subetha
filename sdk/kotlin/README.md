@@ -75,13 +75,17 @@ val audio = AudioLink(sampleRate = 44_100, play = { samples -> track.write(sampl
 audio.send(deliverPayload(listOf(envelopeJson)))
 // recorder loop: audio.onSamples(buffer)
 
+// LAN: UDP multicast discovery + gossip on the local network (hold a WifiManager.MulticastLock).
+val lan = LanNode(node, onMessage = { env -> showMessage(env) })
+lan.resync()                        // after publishing; lan.close() when done
+
 // Gateway: relay messages go out over edge links, edge messages go up to the relay.
 val bridge = EdgeBridge(client, node, listOf("@me/doorbell"), scope, onDownlink = { link.resync() })
 // in onMessage: scope.launch { bridge.uplink(env) }
 ```
 
-`GossipSession` is the transport-neutral core of `BleLink`, for any other two-way link (LAN,
-a serial port).
+`GossipSession` is the transport-neutral core of `BleLink`, for any other two-way link (a
+serial port, a socket). `LanGossip` is the socket-free core of `LanNode`, for other UDP stacks.
 
 ## Building and testing
 

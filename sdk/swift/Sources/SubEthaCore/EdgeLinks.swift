@@ -11,7 +11,7 @@ import SubEthaCoreFFI
 func edgeNowSecs() -> UInt64 { UInt64(Date().timeIntervalSince1970) }
 
 /// The gossip message's `type` and, for `deliver`, how many envelopes it carries.
-private func gossipType(_ bytes: Data) -> (type: String, count: Int)? {
+func gossipType(_ bytes: Data) -> (type: String, count: Int)? {
     guard let o = try? JSONValue.parse(bytes), let type = o["type"]?.stringValue else { return nil }
     return (type, o["envelopes"]?.arrayValue?.count ?? 0)
 }

@@ -41,7 +41,7 @@ public fun acceptPayload(node: EdgeGossipNode, payload: ByteArray, now: ULong = 
 }
 
 /** The gossip message's `type` and, for `deliver`, how many envelopes it carries. */
-private fun gossipType(bytes: ByteArray): Pair<String, Int>? = try {
+internal fun gossipType(bytes: ByteArray): Pair<String, Int>? = try {
     val o = json.parseToJsonElement(bytes.decodeToString()) as? JsonObject
     val type = (o?.get("type") as? JsonPrimitive)?.content
     type?.let { it to ((o["envelopes"] as? JsonArray)?.size ?: 0) }

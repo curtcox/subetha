@@ -69,6 +69,12 @@ let bridge = EdgeBridge(client: client, node: node, topics: ["@me/doorbell"], on
 
 Drive each link from one queue. `GossipSession` is the transport-neutral core of `BleLink`.
 
+`LanGossip` is LAN discovery and gossip (spec §11.5) without sockets, and is thread-safe: feed
+it datagrams from your multicast socket (`onBeacon`, group `Edge.lanGroup`, port `Edge.lanPort`)
+and your unicast socket (`onDatagram`), multicast `beacon()` every few seconds, and send what it
+hands to `send`. On iOS, receiving multicast needs Apple's
+`com.apple.developer.networking.multicast` entitlement, which Apple grants on request.
+
 ## The core XCFramework
 
 ```bash
