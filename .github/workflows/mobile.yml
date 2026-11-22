@@ -12,6 +12,7 @@ on:
       - "sdk/flutter/**"
       - "sdk/flutter_core/**"
       - "sdk/react-native/**"
+      - "sdk/react-native-core/**"
       - "sdk/js/**"
       - "spec/vectors/**"
       - "samples/**"
@@ -27,6 +28,7 @@ on:
       - "sdk/flutter/**"
       - "sdk/flutter_core/**"
       - "sdk/react-native/**"
+      - "sdk/react-native-core/**"
       - "sdk/js/**"
       - "spec/vectors/**"
       - "samples/**"
@@ -159,6 +161,24 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @subetha/react-native typecheck
       - run: pnpm --filter @subetha/react-native test
+
+  react-native-core:
+    name: React Native core (ubrn bindings)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Committed Turbo Module matches the Rust code (uniffi-bindgen-react-native)
+        run: sdk/core/scripts/gen-rn-bindings.sh --check
+      - name: Generated TypeScript compiles and satisfies @subetha/react-native's SubEthaCore
+        working-directory: sdk/react-native-core
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npx tsc -p .
 
   react-native-sample:
     name: React Native sample (typecheck + Metro bundle)

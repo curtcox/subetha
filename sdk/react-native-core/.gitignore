@@ -1,0 +1,10 @@
+# Built by `ubrn build android|ios` (the Rust core per target) and by React Native codegen.
+android/src/main/jniLibs/
+android/generated/
+android/build/
+android/.cxx/
+ios/generated/
+build/
+node_modules/
+*.a
+package-lock.json

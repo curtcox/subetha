@@ -1,12 +1,16 @@
-// Seam for the Rust core (sdk/core) in React Native. uniffi-bindgen-react-native (ubrn)
-// generates a Turbo Module (JSI/C++) plus TypeScript from the same UniFFI surface as the
-// Swift/Kotlin bindings; see ../ubrn.config.yaml and README.md. Until that package is built and
-// installed, `loadCore()` returns null and apps use the pure-TS SDK.
+// Seam for the Rust core (sdk/core) in React Native. `@subetha/react-native-core`
+// (sdk/react-native-core) is the Turbo Module (JSI/C++) plus TypeScript that
+// uniffi-bindgen-react-native generates from the same UniFFI surface as the Swift/Kotlin
+// bindings. This package doesn't depend on it: without it, `loadCore()` returns null and apps
+// use the pure-TS SDK.
 //
 // Metro only bundles modules named by a literal require/import, so the app names the package:
 //   const core = await loadCore(() => require("@subetha/react-native-core"));
 
-/** The generated module's surface (camelCase names of sdk/core/src/ffi.rs). */
+/**
+ * The part of the generated module this package uses (camelCase names of sdk/core/src/ffi.rs).
+ * The module exports more (edge objects, the outbox, the deduper); import it directly for those.
+ */
 export interface SubEthaCore {
   newDeviceKey(): { seed: ArrayBuffer; publicKey: ArrayBuffer; deviceId: string };
   deviceKeyFromSeed(seed: ArrayBuffer): { seed: ArrayBuffer; publicKey: ArrayBuffer; deviceId: string };
@@ -36,10 +40,18 @@ export const CORE_PACKAGE = "@subetha/react-native-core";
 export async function loadCore(load?: (name: string) => unknown): Promise<SubEthaCore | null> {
   if (!load) return null;
   try {
-    const mod = (await load(CORE_PACKAGE)) as { default?: SubEthaCore } & Partial<SubEthaCore>;
-    const core = (mod.default ?? mod) as Partial<SubEthaCore>;
-    return typeof core.signEnvelopeJson === "function" && typeof core.verifyEnvelopeJson === "function" ? (core as SubEthaCore) : null;
+    // ubrn's index exports the functions by name and, as the default export, one namespace per
+    // crate ({ subetha_core }); accept either, or a module whose default is the core itself.
+    const mod = (await load(CORE_PACKAGE)) as Record<string, unknown> | null | undefined;
+    const dflt = mod?.default as Record<string, unknown> | undefined;
+    const found = [mod, dflt, dflt?.subetha_core, mod?.subetha_core].find(looksLikeCore);
+    return (found as SubEthaCore | undefined) ?? null;
   } catch {
     return null;
   }
+}
+
+function looksLikeCore(m: unknown): boolean {
+  const c = m as Partial<SubEthaCore> | null | undefined;
+  return typeof c?.signEnvelopeJson === "function" && typeof c?.verifyEnvelopeJson === "function";
 }

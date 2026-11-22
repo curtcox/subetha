@@ -83,5 +83,9 @@ describe("@subetha/react-native", () => {
     expect(await rn.loadCore(async () => ({ default: {} }))).toBeNull();
     const fake = { signEnvelopeJson: () => "{}", verifyEnvelopeJson: () => true };
     expect(await rn.loadCore(async () => ({ default: fake }))).toBe(fake);
+    // The shape ubrn generates: named exports plus a per-crate namespace as the default.
+    expect(await rn.loadCore(() => ({ default: { subetha_core: fake } }))).toBe(fake);
+    const generated = { ...fake, default: { subetha_core: fake } };
+    expect(await rn.loadCore(() => generated)).toBe(generated);
   });
 });

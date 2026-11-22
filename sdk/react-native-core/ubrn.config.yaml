@@ -1,0 +1,23 @@
+# uniffi-bindgen-react-native config for @subetha/react-native-core.
+# Generates the Turbo Module (TypeScript + JSI C++ + Android/iOS glue) from sdk/core's UniFFI
+# surface, the same one the Swift and Kotlin bindings come from. ubrn 0.28.x matches uniffi 0.28.
+#
+#   ../core/scripts/gen-rn-bindings.sh [--check]   # regenerate the committed sources (CI checks)
+#   npx ubrn build android --config ubrn.config.yaml   # cross-compile the core into jniLibs
+#   npx ubrn build ios --config ubrn.config.yaml       # build the XCFramework
+name: SubEthaCore
+rust:
+  directory: ../core
+  manifestPath: Cargo.toml
+android:
+  directory: ./android
+  cargoExtras: ["--features", "uniffi"]
+  targets: [arm64-v8a, armeabi-v7a, x86_64]
+ios:
+  directory: ./ios
+  cargoExtras: ["--features", "uniffi"]
+  targets: [aarch64-apple-ios, aarch64-apple-ios-sim]
+  frameworkName: build/SubEthaCoreFramework
+bindings:
+  cpp: cpp/generated
+  ts: src/generated

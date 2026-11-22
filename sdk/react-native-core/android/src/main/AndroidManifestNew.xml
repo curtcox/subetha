@@ -1,0 +1,3 @@
+<!-- AGP ≥ 7.3 takes the package name from build.gradle's namespace (hand-written; ubrn's build.gradle points here). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+</manifest>

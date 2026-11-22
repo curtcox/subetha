@@ -1,7 +1,7 @@
 {
   "name": "@subetha/react-native",
   "version": "0.0.1",
-  "description": "SubEtha for React Native: the TypeScript SDK plus RN transport defaults, and the seam for the Rust core via uniffi-bindgen-react-native.",
+  "description": "SubEtha for React Native: the TypeScript SDK plus RN transport defaults and edge glue; loads the Rust core from @subetha/react-native-core when installed.",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",
@@ -11,8 +11,7 @@
     "./edge": "./src/edge.ts"
   },
   "files": [
-    "src",
-    "ubrn.config.yaml"
+    "src"
   ],
   "scripts": {
     "test": "vitest run",
