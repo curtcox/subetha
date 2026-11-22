@@ -1,0 +1,73 @@
+{
+  "description": "Device-signed requests (spec §8.1, subetha-req-v2), signed with signatures.devices[0] and `nonce`. `body` is UTF-8. `headers` are the headers the client sends; with the SDK convention (x-device-id, x-device-time, x-device-nonce, then the other headers lowercased and sorted, Authorization skipped) they give `signed_headers` and `signing_input`, and Ed25519 over `signing_input` gives `signature`. `host` and `path_and_query` are WHATWG URL.host and pathname + search.",
+  "seed": "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+  "device_id": "dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena",
+  "nonce": "nonce_0123456789abcdef",
+  "cases": [
+    {
+      "name": "GET poll, no content headers",
+      "method": "GET",
+      "url": "https://subetha.org/@alice/doorbell/json?poll=1&since=all",
+      "body": "",
+      "headers": {},
+      "time": 1763750000,
+      "host": "subetha.org",
+      "path_and_query": "/@alice/doorbell/json?poll=1&since=all",
+      "signed_headers": "x-device-id,x-device-time,x-device-nonce",
+      "signing_input": "subetha-req-v2\nGET\nsubetha.org\n/@alice/doorbell/json?poll=1&since=all\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nx-device-id:dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena\nx-device-time:1763750000\nx-device-nonce:nonce_0123456789abcdef",
+      "signature": "dvOLsJjekSI8GnHdUZGLi4POnUYYjlwlau3LqoPTLMt-l748HbmZtNigndUaRaUvMehXOOkhqMaBq1Cf3TsUDA"
+    },
+    {
+      "name": "publish with ntfy headers",
+      "method": "post",
+      "url": "https://subetha.org/@alice/doorbell",
+      "body": "Opened",
+      "headers": {
+        "X-Title": "Front door",
+        "X-Priority": "4",
+        "X-Tags": "door,warning",
+        "Content-Type": "text/plain;charset=UTF-8",
+        "Authorization": "Bearer ignored"
+      },
+      "time": 1763750001,
+      "host": "subetha.org",
+      "path_and_query": "/@alice/doorbell",
+      "signed_headers": "x-device-id,x-device-time,x-device-nonce,content-type,x-priority,x-tags,x-title",
+      "signing_input": "subetha-req-v2\nPOST\nsubetha.org\n/@alice/doorbell\nb19fb8d1b395b333251f40be2909ca37a0b0a007b3c4c4b34b726be71f715daa\nx-device-id:dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena\nx-device-time:1763750001\nx-device-nonce:nonce_0123456789abcdef\ncontent-type:text/plain;charset=UTF-8\nx-priority:4\nx-tags:door,warning\nx-title:Front door",
+      "signature": "gkaViMI76QP9NBdat7Hy_tPXLkZ6qhpGomHhyUtr30U4osAfYtMS4Q7RihJqWYQN35oRFdLjx6tOT2n6re_mAA"
+    },
+    {
+      "name": "JSON publish, port and routing",
+      "method": "POST",
+      "url": "http://localhost:8787/",
+      "body": "{\"topic\":\"@a/b\",\"message\":\"héllo 🚪\"}",
+      "headers": {
+        "content-type": "application/json",
+        "idempotency-key": "k-1",
+        "x-route-mode": "cheap",
+        "x-max-cost": "  0.002\t"
+      },
+      "time": 1763750002,
+      "host": "localhost:8787",
+      "path_and_query": "/",
+      "signed_headers": "x-device-id,x-device-time,x-device-nonce,content-type,idempotency-key,x-max-cost,x-route-mode",
+      "signing_input": "subetha-req-v2\nPOST\nlocalhost:8787\n/\n3b109d1ee37a92c90c4202a42e60e12a24adb1fe751b306f0d7b0f3354708099\nx-device-id:dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena\nx-device-time:1763750002\nx-device-nonce:nonce_0123456789abcdef\ncontent-type:application/json\nidempotency-key:k-1\nx-max-cost:0.002\nx-route-mode:cheap",
+      "signature": "jV7nhg0q73iJAzeYUMbcBxFZOsaFDK-cmI5_u1z9tlHzR6qbMgvkJ3HR-MKcokaU8_ABNB0X_9yKAOU64MSyBQ"
+    },
+    {
+      "name": "percent-encoded path",
+      "method": "PUT",
+      "url": "https://staging.subetha.org:443/@a/b%20c?x=%2F",
+      "body": "",
+      "headers": {
+        "X-Dry-Run": "1"
+      },
+      "time": 1763750003,
+      "host": "staging.subetha.org",
+      "path_and_query": "/@a/b%20c?x=%2F",
+      "signed_headers": "x-device-id,x-device-time,x-device-nonce,x-dry-run",
+      "signing_input": "subetha-req-v2\nPUT\nstaging.subetha.org\n/@a/b%20c?x=%2F\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nx-device-id:dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena\nx-device-time:1763750003\nx-device-nonce:nonce_0123456789abcdef\nx-dry-run:1",
+      "signature": "12kFYKn-0j6AzgaLIbqZ3tSMha9a6wXo8Clm1_DleXO_8gZ9TIvV7TG1q7ckiba-vZSPppBS91rM75k0verNAA"
+    }
+  ]
+}

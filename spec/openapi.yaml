@@ -1415,8 +1415,11 @@ components:
       description: |
         Enrolled devices sign each request instead of sending a token. Headers:
         `X-Device-Id: dev_…`, `X-Device-Time: <unix seconds, ±300 s>`,
-        `X-Device-Nonce: <16–64 random base64url chars, single use>`, and
-        `X-Device-Signature: base64url(Ed25519(key, "subetha-req-v1\n" + METHOD + "\n" + host + "\n" + path?query + "\n" + time + "\n" + nonce + "\n" + hex(sha256(body))))`.
+        `X-Device-Nonce: <16–64 random base64url chars, single use>`,
+        `X-Device-Signed-Headers: x-device-id,x-device-time,x-device-nonce,<content and routing headers>`, and
+        `X-Device-Signature: base64url(Ed25519(key, "subetha-req-v2\n" + METHOD + "\n" + host + "\n" + path?query + "\n" + hex(sha256(body)) + ("\n" + name + ":" + value) per signed header))`.
+        Content and routing headers (X-Title, X-Priority, X-Route-Mode, X-Max-Cost, Content-Type,
+        Idempotency-Key, … ; spec §8.1) must be signed or the request is rejected.
         A replayed signature is rejected, and the host binds it to one deployment.
         Devices can publish and subscribe but not manage the account. The SDK does this with
         `new SubEtha({ deviceKey, signRequests: true })`.

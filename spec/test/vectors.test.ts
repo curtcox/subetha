@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import {
   canonicalEnvelope, canonicalize, decryptEnvelope, deviceKeyFromSeed, encryptEnvelope, hexDecode, hexEncode, isTopic,
-  signEnvelope, validateEnvelope, verifyEnvelope,
+  signEnvelope, signRequestV2, utf8, validateEnvelope, verifyEnvelope,
 } from "@subetha/sdk/protocol";
 
 const load = (n: string) => JSON.parse(readFileSync(new URL(`../vectors/${n}`, import.meta.url), "utf8"));
@@ -52,6 +52,20 @@ describe("signature vectors", () => {
   it("relay-added event keeps validity", async () => expect(await verifyEnvelope(v.event_added.envelope)).toBe(true));
   it("negative cases fail", async () => {
     for (const n of v.negative) expect(await verifyEnvelope(n.envelope), n.name).toBe(false);
+  });
+});
+
+describe("request signing vectors", () => {
+  const v = load("requests.json");
+  it("signs each case exactly", async () => {
+    const k = await deviceKeyFromSeed(hexDecode(v.seed));
+    expect(k.deviceId).toBe(v.device_id);
+    for (const c of v.cases) {
+      const h = await signRequestV2(k, c.method, c.url, utf8.encode(c.body), c.headers, c.time, v.nonce);
+      expect(h["x-device-signed-headers"], c.name).toBe(c.signed_headers);
+      expect(h["x-device-signature"], c.name).toBe(c.signature);
+      expect(c.signing_input.split("\n").slice(0, 4)).toEqual(["subetha-req-v2", c.method.toUpperCase(), c.host, c.path_and_query]);
+    }
   });
 });
 

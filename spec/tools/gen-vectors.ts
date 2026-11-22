@@ -4,7 +4,7 @@ import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  base64urlEncode, canonicalEnvelope, canonicalize, decryptEnvelope, deviceKeyFromSeed, encryptEnvelope, hexDecode, hexEncode, signEnvelope, type Json,
+  base64urlEncode, canonicalEnvelope, canonicalize, decryptEnvelope, deviceKeyFromSeed, encryptEnvelope, headersToSign, hexDecode, hexEncode, requestSigningInputV2, signEnvelope, signRequestV2, utf8, type Json,
 } from "@subetha/sdk/protocol";
 import {
   audioFrameSamples, audioTones, base45Encode, chunk, encodeBeacon, FountainEncoder, frameBlocks, LAN_CHUNK_MTU, modulate, robustSolitonCdf, SplitMix64,
@@ -79,6 +79,40 @@ write("signatures.json", {
   event_added: { envelope: { ...good, event: "message" }, valid: true },
   negative: negative.map((n) => ({ name: n.name, envelope: JSON.parse(JSON.stringify(n.envelope)) })),
 });
+
+// ---- device-signed requests (spec §8.1) ----
+{
+  const NONCE = "nonce_0123456789abcdef";
+  const reqCases: { name: string; method: string; url: string; body: string; headers: Record<string, string>; time: number }[] = [
+    { name: "GET poll, no content headers", method: "GET", url: "https://subetha.org/@alice/doorbell/json?poll=1&since=all", body: "", headers: {}, time: 1763750000 },
+    { name: "publish with ntfy headers", method: "post", url: "https://subetha.org/@alice/doorbell", body: "Opened", headers: { "X-Title": "Front door", "X-Priority": "4", "X-Tags": "door,warning", "Content-Type": "text/plain;charset=UTF-8", Authorization: "Bearer ignored" }, time: 1763750001 },
+    { name: "JSON publish, port and routing", method: "POST", url: "http://localhost:8787/", body: "{\"topic\":\"@a/b\",\"message\":\"héllo 🚪\"}", headers: { "content-type": "application/json", "idempotency-key": "k-1", "x-route-mode": "cheap", "x-max-cost": "  0.002\t" }, time: 1763750002 },
+    { name: "percent-encoded path", method: "PUT", url: "https://staging.subetha.org:443/@a/b%20c?x=%2F", body: "", headers: { "X-Dry-Run": "1" }, time: 1763750003 },
+  ];
+  const key = await deviceKeyFromSeed(hexDecode(seeds[0]!));
+  const cases = [];
+  for (const c of reqCases) {
+    const body = utf8.encode(c.body);
+    const signed = headersToSign(key.deviceId, c.time, NONCE, c.headers);
+    const out = await signRequestV2(key, c.method, c.url, body, c.headers, c.time, NONCE);
+    const u = new URL(c.url);
+    cases.push({
+      ...c,
+      host: u.host,
+      path_and_query: u.pathname + u.search,
+      signed_headers: out["x-device-signed-headers"],
+      signing_input: await requestSigningInputV2(c.method, c.url, body, signed),
+      signature: out["x-device-signature"],
+    });
+  }
+  write("requests.json", {
+    description: "Device-signed requests (spec §8.1, subetha-req-v2), signed with signatures.devices[0] and `nonce`. `body` is UTF-8. `headers` are the headers the client sends; with the SDK convention (x-device-id, x-device-time, x-device-nonce, then the other headers lowercased and sorted, Authorization skipped) they give `signed_headers` and `signing_input`, and Ed25519 over `signing_input` gives `signature`. `host` and `path_and_query` are WHATWG URL.host and pathname + search.",
+    seed: seeds[0],
+    device_id: key.deviceId,
+    nonce: NONCE,
+    cases,
+  });
+}
 
 // ---- e2ee ----
 const key = hexDecode("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");

@@ -149,6 +149,57 @@ Auth: `Authorization: Bearer <token>` (API token or Clerk session JWT), or ntfy-
 `?auth=<base64("Bearer <token>")>`, or HTTP Basic with an empty username and the token as the
 password (for ntfy clients).
 
+### 8.1 Device-signed requests
+
+An enrolled device authenticates by signing each request with its Ed25519 key (no bearer
+token). It sends:
+
+| Header | Value |
+|---|---|
+| `X-Device-Id` | `dev_…` (§1.3) |
+| `X-Device-Time` | Unix seconds; must be within 300 s of the relay's clock |
+| `X-Device-Nonce` | 16–64 base64url characters, single use |
+| `X-Device-Signed-Headers` | The signed headers' names: lowercase, comma-separated, no spaces, unique, at most 32. Must include `x-device-id`, `x-device-time` and `x-device-nonce`; must not include `x-device-signature` or `x-device-signed-headers`. |
+| `X-Device-Signature` | base64url(Ed25519(signing input)) |
+
+The signing input (`subetha-req-v2`) is these lines joined by `\n`, with no trailing newline:
+
+```
+subetha-req-v2
+METHOD                  uppercase
+host                    WHATWG URL.host: lowercase, ":port" only if not the scheme's default
+path?query              URL.pathname + URL.search, percent-encoding as sent
+hex(sha256(body))       lowercase hex; the empty body hashes too
+name:value              one line per name in X-Device-Signed-Headers, in that order
+```
+
+`value` is the header's value with leading and trailing spaces and tabs removed. Every listed
+header must be present.
+
+**Covered headers.** The relay rejects (401) a signed request that carries a header from the
+covered set without listing it, so a captured request can't be altered in transit. The set:
+`Content-Type`, `Content-Encoding`, `Idempotency-Key`, every publish header above with all of
+its ntfy aliases (`X-Title`/`Title`/`t`, `X-Priority`/`Priority`/`prio`/`p`,
+`X-Tags`/`Tags`/`Tag`/`ta`, `X-Click`/`Click`, `X-Icon`/`Icon`, `X-Attach`/`Attach`/`a`,
+`X-Markdown`/`Markdown`/`md`, `X-Actions`/`Actions`/`Action`, `X-Filename`/`Filename`/`File`/`f`,
+`X-Message`/`Message`/`m`, `X-Delay`/`Delay`/`X-At`/`At`/`X-In`/`In`), the ntfy names
+`X-Email`/`Email`/`e`, `X-Call`/`Call`, `X-Cache`/`Cache`, `X-Firebase`/`Firebase`,
+`X-UnifiedPush`/`UnifiedPush`/`up`, `X-Poll-Id`/`Poll-Id`, and the SubEtha headers
+`X-Sender`, `X-Signature`, `X-Message-Id`, `X-Time`, `X-Expires`, `X-Route-Mode`, `X-Max-Cost`,
+`X-Deny`, `X-Allow`, `X-Deadline`, `X-Dry-Run`. Other headers (`User-Agent`, `Accept`,
+`X-Forwarded-For`, …) may be added in transit.
+
+**SDK convention.** SDKs sign `x-device-id`, `x-device-time`, `x-device-nonce`, then every other
+header they set, lowercased and sorted by name, skipping `Authorization`. The order doesn't
+matter to the relay; the convention makes signatures reproducible (`vectors/requests.json`).
+
+The relay accepts each signature once, and only from an enrolled, unrevoked device. The host is
+signed, so a staging signature isn't valid in production.
+
+*Deprecated:* `subetha-req-v1` (no `X-Device-Signed-Headers`) signs
+`subetha-req-v1\nMETHOD\nhost\npath?query\ntime\nnonce\nhex(sha256(body))`. The relay still
+accepts it for requests that carry no covered header.
+
 ## 9. Errors
 
 Every error is JSON:

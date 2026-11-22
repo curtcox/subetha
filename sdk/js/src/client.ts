@@ -1,7 +1,7 @@
 // SubEtha client: publish / subscribe over whatever works. Dependency-free; runs in browsers,
 // Node ≥ 18, Deno, Bun, and Workers.
 import {
-  base64urlEncode, decryptEnvelope, Deduper, hexEncode, utf8, encryptEnvelope, signEnvelope, ulid, verifyEnvelope,
+  base64urlEncode, decryptEnvelope, Deduper, utf8, encryptEnvelope, signEnvelope, signRequestV2, ulid, verifyEnvelope,
   type DeviceKey, type Envelope, type RouteMode, type Transport,
 } from "./protocol/index.ts";
 
@@ -58,14 +58,21 @@ export interface SubscribeOptions {
 
 export interface Subscription { close(): void; readonly closed: boolean }
 
-/** Headers for a device-signed request (X-Device-Id / -Time / -Nonce / -Signature). */
-export async function signRequest(key: DeviceKey, method: string, url: string, body: Uint8Array, nowSec = Math.floor(Date.now() / 1000)): Promise<Record<string, string>> {
-  const u = new URL(url);
-  const digest = hexEncode(new Uint8Array(await crypto.subtle.digest("SHA-256", body as BufferSource)));
-  const nonce = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
-  const input = `subetha-req-v1\n${method.toUpperCase()}\n${u.host}\n${u.pathname}${u.search}\n${nowSec}\n${nonce}\n${digest}`;
-  const sig = new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, key.privateKey, utf8.encode(input) as BufferSource));
-  return { "x-device-id": key.deviceId, "x-device-time": String(nowSec), "x-device-nonce": nonce, "x-device-signature": base64urlEncode(sig) };
+/**
+ * X-Device-* headers for a device-signed request (spec §8.1, `subetha-req-v2`). Pass the headers
+ * the request will carry: content and routing headers must be signed.
+ */
+export function signRequest(key: DeviceKey, method: string, url: string, body: Uint8Array, headers: Record<string, string> | Iterable<[string, string]> = {}, nowSec = Math.floor(Date.now() / 1000)): Promise<Record<string, string>> {
+  return signRequestV2(key, method, url, body, headers, nowSec);
+}
+
+function bodyBytes(body: RequestInit["body"]): Uint8Array {
+  if (body === undefined || body === null) return new Uint8Array();
+  if (typeof body === "string") return utf8.encode(body);
+  if (body instanceof Uint8Array) return body;
+  if (body instanceof ArrayBuffer) return new Uint8Array(body);
+  if (ArrayBuffer.isView(body)) return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+  throw new Error("signed requests need a string or byte body");
 }
 
 /** Proof of key possession for POST /v1/device/code. */
@@ -110,10 +117,12 @@ export class SubEtha {
       const inner = this.f;
       this.f = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
         const url = String(input instanceof Request ? input.url : input);
-        const body = typeof init.body === "string" ? utf8.encode(init.body) : new Uint8Array();
+        const body = bodyBytes(init.body);
         const headers = new Headers(init.headers);
-        for (const [k, v] of Object.entries(await signRequest(this.deviceKey!, init.method ?? "GET", url, body))) headers.set(k, v);
         headers.delete("authorization");
+        // fetch adds text/plain for string bodies; set it here so it's signed.
+        if (typeof init.body === "string" && !headers.has("content-type")) headers.set("content-type", "text/plain;charset=UTF-8");
+        for (const [k, v] of Object.entries(await signRequest(this.deviceKey!, init.method ?? "GET", url, body, headers))) headers.set(k, v);
         return inner(input, { ...init, headers });
       }) as typeof fetch;
     }

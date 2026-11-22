@@ -1,7 +1,9 @@
 // Regressions for the Phase 3 security review (spend caps, replay, idempotency, races).
 import { env, runInDurableObject, SELF } from "cloudflare:test";
-import { enrollmentProof } from "@subetha/sdk";
-import { deviceKeyFromSeed, hexDecode, signEnvelope, ulid } from "@subetha/sdk/protocol";
+import { enrollmentProof, signRequest } from "@subetha/sdk";
+import { base64urlEncode, COVERED_REQUEST_HEADERS, deviceKeyFromSeed, hexDecode, signEnvelope, ulid, utf8, type DeviceKey } from "@subetha/sdk/protocol";
+import { requestSigningInput } from "../src/devices.ts";
+import ntfySource from "../src/ntfy.ts?raw";
 import { describe, expect, it } from "vitest";
 import { accountStub } from "../src/durable/account.ts";
 import type { Env } from "../src/types.ts";
@@ -111,6 +113,80 @@ describe("security review: devices", () => {
     await post("/v1/device/code", await enrollmentProof(key));
     const n = await E.DB.prepare("SELECT COUNT(*) AS n FROM device_codes WHERE device_id = ?").bind(key.deviceId).first<{ n: number }>();
     expect(n?.n).toBe(1);
+  });
+});
+
+describe("security review: signed request headers (subetha-req-v2)", () => {
+  const now = () => Math.floor(Date.now() / 1000);
+  async function enrolled(handle: string, fill: number) {
+    const a = await bootstrap(handle, 1);
+    const key = await deviceKeyFromSeed(new Uint8Array(32).fill(fill));
+    expect((await SELF.fetch(`${BASE}/v1/devices`, { method: "POST", headers: auth(a.token), body: JSON.stringify(await enrollmentProof(key)) })).status).toBe(201);
+    return { a, key };
+  }
+  async function signV1(key: DeviceKey, method: string, url: string, body: Uint8Array) {
+    const nonce = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
+    const input = await requestSigningInput(method, url, String(now()), nonce, body);
+    const sig = new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, key.privateKey, utf8.encode(input)));
+    return { "x-device-id": key.deviceId, "x-device-time": String(now()), "x-device-nonce": nonce, "x-device-signature": base64urlEncode(sig) };
+  }
+  const send = (url: string, body: string, headers: Record<string, string>) => SELF.fetch(url, { method: "POST", body, headers });
+
+  it("accepts signed content headers and rejects added or changed ones", async () => {
+    const { key } = await enrolled("sigv2", 31);
+    const url = `${BASE}/@sigv2/x`;
+    const content = { "x-title": "Door", "x-priority": "4", "content-type": "text/plain" };
+    const ok = await send(url, "hi", { ...content, ...(await signRequest(key, "POST", url, utf8.encode("hi"), content)) });
+    expect(ok.status).toBe(200);
+    expect(await json(ok)).toMatchObject({ title: "Door", priority: 4 });
+
+    // A covered header the signature doesn't list: added routing, an ntfy alias, a dry run.
+    const extras: Record<string, string>[] = [{ "x-max-cost": "5" }, { "x-deny": "ws" }, { Title: "Other" }, { p: "5" }, { "idempotency-key": "k" }];
+    for (const extra of extras) {
+      const h = { ...content, ...(await signRequest(key, "POST", url, utf8.encode("hi"), content)), ...extra };
+      const r = await send(url, "hi", h);
+      expect(r.status, JSON.stringify(extra)).toBe(401);
+    }
+    // A signed header whose value changed.
+    const signed = await signRequest(key, "POST", url, utf8.encode("hi"), content);
+    expect((await send(url, "hi", { ...content, "x-priority": "5", ...signed })).status).toBe(401);
+    // A signed header that was removed.
+    const signed2 = await signRequest(key, "POST", url, utf8.encode("hi"), content);
+    expect((await send(url, "hi", { "x-title": "Door", "content-type": "text/plain", ...signed2 })).status).toBe(401);
+    // Uncovered headers added in transit (proxies) are fine.
+    const signed3 = await signRequest(key, "POST", url, utf8.encode("hi"), content);
+    expect((await send(url, "hi", { ...content, ...signed3, "x-forwarded-for": "10.0.0.1", "user-agent": "proxy" })).status).toBe(200);
+  });
+
+  it("checks X-Device-Signed-Headers", async () => {
+    const { key } = await enrolled("sigv2list", 32);
+    const url = `${BASE}/@sigv2list/x`;
+    for (const list of ["x-device-id,x-device-time", "x-device-id,x-device-time,x-device-nonce,x-device-nonce", "x-device-id,x-device-time,x-device-nonce,x-device-signature", "X-Device-Id,x-device-time,x-device-nonce"]) {
+      const h = { ...(await signRequest(key, "POST", url, utf8.encode("hi"))), "x-device-signed-headers": list };
+      const r = await send(url, "hi", h);
+      expect(r.status, list).toBe(401);
+      expect(String((await json(r)).message)).toMatch(/X-Device-Signed-Headers|signed header/);
+    }
+  });
+
+  it("accepts subetha-req-v1 only without covered headers", async () => {
+    const { key } = await enrolled("sigv1", 33);
+    const url = `${BASE}/@sigv1/x?title=Door`;
+    // Byte bodies, so fetch doesn't add a (covered) Content-Type.
+    expect((await SELF.fetch(url, { method: "POST", body: utf8.encode("hi"), headers: await signV1(key, "POST", url, utf8.encode("hi")) })).status).toBe(200);
+    const poll = `${BASE}/@sigv1/x/json?poll=1`;
+    expect((await SELF.fetch(poll, { headers: await signV1(key, "GET", poll, new Uint8Array()) })).status).toBe(200);
+    const r = await SELF.fetch(url, { method: "POST", body: utf8.encode("hi"), headers: { ...(await signV1(key, "POST", url, utf8.encode("hi"))), "x-priority": "5" } });
+    expect(r.status).toBe(401);
+    expect(String((await json(r)).message)).toMatch(/subetha-req-v2/);
+  });
+
+  it("covers every header the ntfy parser reads", () => {
+    const names = new Set<string>();
+    for (const m of ntfySource.matchAll(/header\(req, url, ([^)]*)\)/g)) for (const n of m[1]!.matchAll(/"([^"]+)"/g)) names.add(n[1]!.toLowerCase());
+    for (const m of ntfySource.matchAll(/headers\.get\("([^"]+)"\)/g)) names.add(m[1]!.toLowerCase());
+    expect(names.size).toBeGreaterThan(30);
+    expect([...names].filter((n) => !COVERED_REQUEST_HEADERS.has(n))).toEqual([]);
   });
 });
 

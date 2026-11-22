@@ -43,15 +43,30 @@ Every request from an enrolled device carries:
 X-Device-Id: dev_kxisxbay4mtidk6z454fh3jcjhf3wfpggcprvnuu42wa2fvbeiwa
 X-Device-Time: 1763750000
 X-Device-Nonce: 9f2Kx_Lq0aZ7mW3vB8cR1g
+X-Device-Signed-Headers: x-device-id,x-device-time,x-device-nonce,content-type,x-priority,x-title
 X-Device-Signature: <base64url Ed25519 signature>
 ```
 
-The signature covers `"subetha-req-v1\n" + METHOD + "\n" + host + "\n" + path?query + "\n" +
-time + "\n" + nonce + "\n" + hex(sha256(body))`. `X-Device-Time` must be within 5 minutes of the
-relay's clock, the nonce is 16–64 random base64url characters, and each signature is accepted
-once (a replay is `401`). Including the host means a signature made for staging isn't valid in
-production. The TypeScript SDK does all of this with
-`new SubEtha({ deviceKey, signRequests: true })`.
+The signature covers `"subetha-req-v2\n" + METHOD + "\n" + host + "\n" + path?query + "\n" +
+hex(sha256(body))`, followed by `"\n" + name + ":" + value` for each header named in
+`X-Device-Signed-Headers`, in that order ([spec §8.1](https://github.com/curtcox/subetha/blob/main/spec/README.md#81-device-signed-requests)).
+
+- `X-Device-Time` must be within 5 minutes of the relay's clock, and the nonce is 16–64 random
+  base64url characters. Each signature is accepted once; a replay gets `401`.
+- Headers that change what a request does must be signed: `Content-Type`, `Idempotency-Key`,
+  every ntfy publish header and its aliases (`X-Title`, `Title`, `t`, …), and the routing and
+  cost headers (`X-Route-Mode`, `X-Max-Cost`, `X-Allow`, `X-Deny`, `X-Dry-Run`, …). If one is
+  present but not signed, the request gets `401`, so nobody relaying a captured request can
+  change its content, route, or cost. Other headers (`User-Agent`, proxy headers) can be added
+  in transit.
+- The host is signed, so a signature made for staging isn't valid in production.
+
+Every SDK does this for you: `new SubEtha({ deviceKey, signRequests: true })` in TypeScript,
+and the device signer in the Kotlin, Swift, and Dart SDKs. The shared test vectors are in
+`spec/vectors/requests.json`.
+
+The older `subetha-req-v1` form, without `X-Device-Signed-Headers`, is still accepted for
+requests that carry none of those headers. It's deprecated.
 
 ## Keys
 
