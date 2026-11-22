@@ -18,7 +18,9 @@ is optional: in Expo Go, or without the native build, the app runs without it.
 `npx expo start` runs it in Expo Go too, but Expo Go lacks Bluetooth, microphone streaming,
 and UDP, so on the Edge tab only QR and sound playback work there. CI type-checks the app,
 bundles it for both platforms with Metro (`npm run bundle`), and builds an x86_64 Android
-development build with the core (`expo prebuild` + `gradlew assembleDebug`).
+development build with the core (`expo prebuild` + `gradlew assembleDebug`). The Pages build
+publishes a web export (`npm run bundle:web`; `EXPO_BASE_URL` sets the sub-path, see
+`app.config.js`) and that APK on the [sample apps page](https://curtcox.github.io/subetha/samples/).
 
 - Subscribes over WebSocket via `subscribe()` from `@subetha/react-native`, because RN's fetch
   can't stream response bodies. It reconnects, resumes from the last id, dedupes and acks.

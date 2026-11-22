@@ -11,9 +11,11 @@
     "typecheck": "tsc --noEmit",
     "bundle": "expo export --platform android --platform ios --output-dir dist",
     "core:android": "cd ../../sdk/react-native-core && npm install --legacy-peer-deps --no-audit --no-fund && npx ubrn build android --config ubrn.config.yaml --release",
-    "core:ios": "cd ../../sdk/react-native-core && npm install --legacy-peer-deps --no-audit --no-fund && npx ubrn build ios --config ubrn.config.yaml --release"
+    "core:ios": "cd ../../sdk/react-native-core && npm install --legacy-peer-deps --no-audit --no-fund && npx ubrn build ios --config ubrn.config.yaml --release",
+    "bundle:web": "expo export --platform web --output-dir dist-web"
   },
   "dependencies": {
+    "@expo/metro-runtime": "~4.0.1",
     "@subetha/react-native-core": "file:../../sdk/react-native-core",
     "buffer": "^6.0.3",
     "expo": "~52.0.0",
@@ -23,12 +25,14 @@
     "expo-file-system": "~18.0.12",
     "expo-status-bar": "~2.0.0",
     "react": "18.3.1",
+    "react-dom": "18.3.1",
     "react-native": "0.76.5",
     "react-native-ble-plx": "3.4.0",
     "react-native-get-random-values": "~1.11.0",
     "react-native-live-audio-stream": "1.1.1",
     "react-native-svg": "15.8.0",
-    "react-native-udp": "4.1.7"
+    "react-native-udp": "4.1.7",
+    "react-native-web": "~0.19.13"
   },
   "devDependencies": {
     "@babel/core": "^7.25.0",

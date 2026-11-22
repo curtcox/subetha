@@ -1,7 +1,8 @@
 name: Pages
 
 # GitHub Pages (PLAN §13): docs, build info (commit, CI badges, test counts, SDK versions), the
-# pricing invariant report, and links to the live console and SDK packages.
+# pricing invariant report, sample apps (the web sample, the Expo web build, Android APKs), and
+# links to the live console and SDK packages.
 
 on:
   push:
@@ -10,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: read   # the Android sample APKs attached to Mobile SDKs runs
   pages: write
   id-token: write
 
@@ -61,12 +63,38 @@ jobs:
           pip install -e "sdk/python[test]" -e "gateways/reticulum[test]"
           pytest sdk/python gateways/reticulum --junitxml=test-results/python.xml
 
+      # Sample apps (PLAN §13). Neither step blocks publishing; the samples page falls back to
+      # build instructions for anything missing.
+      - name: Expo web build of the React Native sample
+        continue-on-error: true
+        working-directory: samples/react-native
+        env:
+          EXPO_BASE_URL: ${{ env.PAGES_BASE_PATH }}samples/expo
+        run: |
+          npm install --no-audit --no-fund
+          npx expo export --platform web --output-dir "$GITHUB_WORKSPACE/sample-builds/expo"
+      - name: Latest Android sample APKs (artifacts of Mobile SDKs runs on main)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p sample-builds/android
+          for name in doorbell-debug.apk doorbell-expo-debug-x86_64.apk; do
+            id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$name&per_page=20" \
+              --jq '[.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == "main")][0].id // empty')
+            if [ -z "$id" ]; then echo "no $name artifact"; continue; fi
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" > "$RUNNER_TEMP/$name.zip"
+            unzip -o -j "$RUNNER_TEMP/$name.zip" '*.apk' -d "$RUNNER_TEMP/$name.d"
+            mv "$RUNNER_TEMP/$name.d/"*.apk "sample-builds/android/$name"
+          done
+          ls -l sample-builds/android
+
       - run: pnpm --filter @subetha/sdk build
       - name: Build the site
         run: >
           node apps/site/build.mjs --pages --out site-build
           --base "$PAGES_BASE_PATH" --site-url "$PAGES_URL" --app-url "$APP_URL"
-          --test-results test-results
+          --test-results test-results --samples sample-builds
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

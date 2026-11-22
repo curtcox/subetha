@@ -106,7 +106,7 @@ function Doorbell({ fg, onClient }: { fg: string; onClient: (c: SubEtha | null) 
         </View>
       )}
       <Text style={[styles.small, text]}>{status}</Text>
-      <Text style={[styles.small, text]}>{core ? "Rust core loaded: signatures are checked" : "No Rust core (Expo Go): signatures aren't checked"}</Text>
+      <Text style={[styles.small, text]}>{core ? "Rust core loaded: signatures are checked" : "No Rust core (Expo Go or web): signatures aren't checked"}</Text>
       {estimate ? <ScrollView style={styles.estimate}><Text style={[styles.mono, text]}>{estimate}</Text></ScrollView> : null}
       <Text style={[styles.heading, text]}>Inbox</Text>
       <FlatList

@@ -42,7 +42,8 @@ curl -H "Authorization: Bearer $SUBETHA_TOKEN" https://subetha.org/@me/backups/j
   (`gateways/apns-relay`), each with a Docker image.
 - **Pricing**: generated price table with margin invariants enforced in CI (`pricing/`).
 - **Docs and tooling**: developer docs with CI-tested samples (`docs/`), OpenAPI 3.1 with a drift
-  test (`spec/openapi.yaml`), `llms.txt`, GitHub Pages and deploy workflows, infrastructure notes
+  test (`spec/openapi.yaml`), `llms.txt`, GitHub Pages (with a sample apps page: the live web
+  sample, the Expo sample's web build, and Android APKs) and deploy workflows, infrastructure notes
   (`infra/`), legal drafts (`docs/legal/`).
 - **Web console and tools** (`apps/site`): the console (send/receive, topics, endpoints and
   escalation subscriptions, Slack, devices, tokens, billing, usage chart and limits, traces, audit log, and an

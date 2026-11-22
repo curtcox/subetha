@@ -17,7 +17,7 @@
 //   <!-- embed: ../pricing/generated/report.md -->  inline another Markdown file (headings demoted)
 //   <!-- errors-table -->                     the error codes from spec/errors.json
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
@@ -41,6 +41,9 @@ const siteUrl = opt("site-url", "SITE_URL", "https://subetha.org").replace(/\/$/
 const appUrl = opt("app-url", "APP_URL", "https://subetha.org").replace(/\/$/, "");
 const pages = argv.includes("--pages");
 const testResults = opt("test-results", "TEST_RESULTS", "");
+// Built sample apps to publish on Pages (PLAN §13): expo/ (the React Native sample's web export)
+// and android/*.apk. Whatever is missing is described with build instructions instead.
+const sampleBuilds = opt("samples", "SAMPLE_BUILDS", "");
 const REPO_URL = `https://github.com/${process.env.GITHUB_REPOSITORY ?? "curtcox/subetha"}`;
 
 // ---------------------------------------------------------------- navigation
@@ -249,6 +252,48 @@ if (pages) {
   }
   write("pricing-report.html", page({ title: "Pricing invariant report", rel: "", sidebar: false, body: makeMarked().parse(readFileSync(join(repo, "pricing/generated/report.md"), "utf8")) }));
   write("build-info.html", page({ title: "Build info", rel: "", sidebar: false, body: buildInfo() }));
+  write("samples/index.html", page({ title: "Sample apps", rel: "../", sidebar: false, body: samplesPage() }));
+}
+
+/**
+ * samples/: the live web sample, the React Native sample's web export, Android APKs, and how to
+ * build the rest. Copies what --samples provides.
+ */
+function samplesPage() {
+  // The web sample, loading the Pages copy of sdk.js and defaulting to the live relay.
+  const web = readFileSync(join(repo, "samples/web/index.html"), "utf8")
+    .replace('src="https://subetha.org/sdk.js"', `src="${base}sdk.js"`)
+    .replaceAll("https://subetha.org", appUrl);
+  write("samples/web/index.html", web);
+
+  const builds = sampleBuilds && existsSync(sampleBuilds) ? sampleBuilds : null;
+  const expo = builds && existsSync(join(builds, "expo/index.html"));
+  if (expo) cpSync(join(builds, "expo"), join(out, "samples/expo"), { recursive: true });
+  const apks = {};
+  for (const name of ["doorbell-debug.apk", "doorbell-expo-debug-x86_64.apk"]) {
+    const src = builds && join(builds, "android", name);
+    if (src && existsSync(src)) {
+      copyFileSync(src, join(out, "samples", name));
+      apks[name] = `${(statSync(src).size / 1048576).toFixed(1)} MB`;
+    }
+  }
+  const src = (dir) => `<a href="${REPO_URL}/tree/main/samples/${dir}">source</a>`;
+  const apk = (name, what) => (apks[name] ? `<a href="${name}">${what}</a> <span class="muted">(${apks[name]}, debug build from the latest Mobile SDKs run on main)</span>` : `<span class="muted">No APK in this build: CI attaches it to the <a href="${REPO_URL}/actions/workflows/mobile.yml">Mobile SDKs</a> run.</span>`);
+  const rows = [
+    ["Web", `<a href="web/">Open the web sample</a>: the doorbell with <code>&lt;subetha-feed&gt;</code>, <code>&lt;subetha-send&gt;</code> and <code>sdk.js</code>. Paste a token for ${escapeHtml(appUrl)}.`, src("web")],
+    ["React Native (Expo)", `${expo ? `<a href="expo/">Open the web build</a> (the Doorbell tab, and the Edge tab's animated QR). ` : ""}${apk("doorbell-expo-debug-x86_64.apk", "Android development build with the Rust core")} (x86_64, for emulators). On a phone: <code>npm run core:android && npm install && npx expo run:android</code>.`, src("react-native")],
+    ["Android (Kotlin)", `${apk("doorbell-debug.apk", "Download the APK")}. Doorbell plus the Edge tab (Bluetooth LE, sound, animated QR, LAN, relay bridge).`, src("android")],
+    ["iOS (Swift)", `Build from source on a Mac: <code>sdk/swift/scripts/build-xcframework.sh</code>, then <code>cd samples/ios && xcodegen</code> and open <code>Doorbell.xcodeproj</code>. TestFlight is pending an Apple Developer account.`, src("ios")],
+    ["Flutter", `<code>cd samples/flutter && flutter run</code> on Android or iOS. No web build: the Edge tab needs the native Rust core (<code>subetha_core</code>).`, src("flutter")],
+    ["CLI", `<code>npx subetha pub|sub|tail|cost|lan</code>, and plain <code>curl</code>.`, src("cli")],
+    ["Python", `<code>pip install -e sdk/python</code>, then <code>publish.py</code> / <code>subscribe.py</code>.`, src("python")],
+    ["Agents (MCP)", `Point an MCP client at <code>${escapeHtml(appUrl)}/mcp</code> with a spend-capped token.`, src("agent-mcp")],
+  ];
+  return `<h1>Sample apps</h1>
+<p>The same doorbell flow on every platform: connect with a token, subscribe to a topic, ring it, and dry-run the cost. The mobile samples add an Edge tab that moves messages between nearby phones with no network. See <a href="${REPO_URL}/blob/main/samples/README.md">samples/README.md</a> for the scripted flow.</p>
+<table><tr><th>Platform</th><th>Try it</th><th></th></tr>
+${rows.map(([p, how, link]) => `<tr><td>${p}</td><td>${how}</td><td>${link}</td></tr>`).join("\n")}
+</table>`;
 }
 
 function git(...args) {
@@ -324,6 +369,7 @@ ${sdks.map(([what, name, v, registry, dir]) => `<tr><td>${what}</td><td><code>${
 <h2>Links</h2>
 <ul>
 <li><a href="docs/">Docs</a> (this build) · <a href="openapi.yaml">openapi.yaml</a> · <a href="llms.txt">llms.txt</a></li>
+<li><a href="samples/">Sample apps</a>: the live web sample, the Expo web build, Android APKs, and build instructions</li>
 <li><a href="pricing-report.html">Pricing invariant report</a>: every SKU's cost, price, and margin at every tier</li>
 <li><a href="status/">Relay status</a> (polls ${appUrl}/v1/status from this page)</li>
 <li><a href="${appUrl}/console/">Live web console</a> (runs against production) · <a href="${appUrl}/sdk.js">sdk.js</a> drop-in web components</li>
@@ -331,4 +377,4 @@ ${sdks.map(([what, name, v, registry, dir]) => `<tr><td>${what}</td><td><code>${
 </ul>`;
 }
 
-console.log(`built ${docs.length} docs pages, llms.txt, llms-full.txt, openapi.yaml, openapi.json, tools/tools.js${pages ? ", build-info.html, pricing-report.html" : ""} → ${relative(process.cwd(), out) || "."} (base ${base})`);
+console.log(`built ${docs.length} docs pages, llms.txt, llms-full.txt, openapi.yaml, openapi.json, tools/tools.js${pages ? ", build-info.html, pricing-report.html, samples/" : ""} → ${relative(process.cwd(), out) || "."} (base ${base})`);
