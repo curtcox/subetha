@@ -29,6 +29,7 @@ plus `request()` for any other route. Useful options:
 |---|---|
 | `token` | Bearer token. |
 | `deviceKey` | Sign every publish ([signed messages](publishing.md#signed-messages)). |
+| `signer`, `verifyEnvelope` | Sign and check signatures with something other than WebCrypto Ed25519, e.g. the Rust core in React Native (`createClient({ core, deviceSeed })` in `@subetha/react-native`). |
 | `signRequests: true` | Authenticate with device signatures instead of a token ([Devices](devices.md)). |
 | `topicKeys` | Per-topic E2EE keys: messages to those topics are encrypted, received ones decrypted. |
 | `fetch`, `WebSocket` | Bring your own (tests, older runtimes). |

@@ -74,15 +74,25 @@ doesn't look like the core:
 ```ts
 const core = await loadCore(() => require("@subetha/react-native-core"));
 const node = createEdgeNode({ core }); // verifies signatures on Hermes
+
+// Device-signed publishes and requests, and signature checks on subscribe, through the core.
+// deviceSeed is the device's 32-byte Ed25519 seed: core.newDeviceKey().seed, kept in the keystore.
+const client = createClient({ token, core, deviceSeed, signRequests: true });
+subscribe(client, "@me/doorbell", onMessage, { verify: true });
 ```
 
-The edge transports above don't need it.
+`createClient({ core })` checks signatures with the core; adding `deviceSeed` signs with it too,
+through `coreSigner(core, seed)` (a `DeviceSigner` from `@subetha/sdk`, which any client can take
+as `signer`). E2EE (`topicKeys`) is the JS SDK's own XChaCha20-Poly1305 and needs only
+`crypto.getRandomValues`. The edge transports above don't need the core.
 
 ## Tests
 
 `pnpm --filter @subetha/react-native test` runs in Node with a fake WebSocket and a mock fetch:
 re-exports, transport choice, publish, WebSocket subscribe with dedupe and socket acks, and
-`loadCore`. `test/edge.test.ts` drives the edge glue with fakes: a ble-plx manager connected to a
+`loadCore`. `test/core.test.ts` runs `coreSigner`/`coreVerifier` against a stand-in core on
+node:crypto and checks the signatures with WebCrypto, recomputing the request signature from the
+real URL. `test/edge.test.ts` drives the edge glue with fakes: a ble-plx manager connected to a
 peripheral running the SDK's `BleLink`, a live-audio-stream fed the modem's WAV, QR paths
 rasterized and read back with jsQR, and LAN over an in-memory react-native-udp.
 

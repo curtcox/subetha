@@ -29,6 +29,8 @@ export interface SubEthaCore {
   enrollmentProof(seed: ArrayBuffer, time: bigint): { deviceId: string; time: bigint; proof: string };
 }
 
+import type { DeviceSigner, Envelope } from "@subetha/sdk";
+
 /** The name the ubrn-generated package is published under. */
 export const CORE_PACKAGE = "@subetha/react-native-core";
 
@@ -54,4 +56,51 @@ export async function loadCore(load?: (name: string) => unknown): Promise<SubEth
 function looksLikeCore(m: unknown): boolean {
   const c = m as Partial<SubEthaCore> | null | undefined;
   return typeof c?.signEnvelopeJson === "function" && typeof c?.verifyEnvelopeJson === "function";
+}
+
+const toArrayBuffer = (b: Uint8Array | ArrayBuffer): ArrayBuffer => (b instanceof ArrayBuffer ? b : (b.slice().buffer as ArrayBuffer));
+
+/**
+ * `host` (WHATWG `URL.host`: lowercase, port only when not the scheme's default) and
+ * `path?query` of an absolute URL. Parsed by hand: React Native's `URL` doesn't implement `host`.
+ */
+export function urlParts(url: string): { host: string; pathAndQuery: string } {
+  const m = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]*)([^#]*)/i.exec(url);
+  if (!m) throw new Error(`not an absolute URL: ${url}`);
+  const scheme = m[1]!.toLowerCase();
+  let host = m[2]!.replace(/^.*@/, "").toLowerCase();
+  const defaultPort = { http: "80", ws: "80", https: "443", wss: "443" }[scheme];
+  if (defaultPort && host.endsWith(`:${defaultPort}`)) host = host.slice(0, -defaultPort.length - 1);
+  const rest = m[3]!;
+  return { host, pathAndQuery: rest.startsWith("/") ? rest : `/${rest}` };
+}
+
+/**
+ * A DeviceSigner (for `createClient({ signer })`) that signs envelopes and requests with the
+ * Rust core, from the device's 32-byte seed (keep it in the platform keystore).
+ */
+export function coreSigner(core: SubEthaCore, seed: Uint8Array | ArrayBuffer): DeviceSigner {
+  const seedBuf = toArrayBuffer(seed);
+  const { deviceId } = core.deviceKeyFromSeed(seedBuf);
+  return {
+    deviceId,
+    signEnvelope: (env) => JSON.parse(core.signEnvelopeJson(JSON.stringify(env), seedBuf)) as Envelope,
+    signRequest: (method, url, body, headers, nowSec) => {
+      const { host, pathAndQuery } = urlParts(url);
+      const list = [...headers].map(([name, value]) => ({ name, value }));
+      const r = core.signRequest(seedBuf, method.toUpperCase(), host, pathAndQuery, BigInt(nowSec), undefined, toArrayBuffer(body), list);
+      return {
+        "x-device-id": r.deviceId,
+        "x-device-time": String(r.time),
+        "x-device-nonce": r.nonce,
+        "x-device-signed-headers": r.signedHeaders,
+        "x-device-signature": r.signature,
+      };
+    },
+  };
+}
+
+/** An envelope signature check (for `createClient({ verifyEnvelope })`) by the Rust core. */
+export function coreVerifier(core: SubEthaCore): (env: Envelope) => boolean {
+  return (env) => core.verifyEnvelopeJson(JSON.stringify(env));
 }

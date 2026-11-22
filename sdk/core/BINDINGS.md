@@ -118,9 +118,9 @@ Only the native libraries come from cargo or CI. Regenerate whenever `ffi.rs` ch
    `jna@aar`.
 2. **Releases.** On tags, upload `subetha_coreFFI.xcframework.zip` and publish its checksum
    for `Package.swift`. Publish `org.subetha:subetha` / `subetha-core` to Maven Central.
-3. **React Native.** `@subetha/react-native-core` is generated; make `loadCore()`'s consumers
-   (`sdk/react-native`) use it for signing and E2EE on Hermes, and build it into the Expo
-   sample.
+3. **React Native.** `@subetha/react-native-core` is generated, and `sdk/react-native` signs
+   and verifies with it on Hermes (`createClient({ core, deviceSeed })`). Build it into the Expo
+   sample (a development build) and run that in CI.
 4. **Flutter.** Use `subetha_core` in `samples/flutter`: an Edge screen with platform plugins
    for audio, camera, and BLE.
 5. **Platform shims.** Done for the Android and iOS samples (BLE peripheral + central, sound,

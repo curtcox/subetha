@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SubEtha, SubEthaError } from "../src/client.ts";
+import { SubEtha, SubEthaError, webCryptoSigner, type DeviceSigner } from "../src/client.ts";
 import { deviceKeyFromSeed, hexDecode, verifyEnvelope } from "../src/protocol/index.ts";
 
 type Call = { url: string; init: RequestInit };
@@ -39,6 +39,43 @@ describe("SubEtha client", () => {
     expect(await verifyEnvelope(sent)).toBe(true);
     const [got] = await c.poll("@a/b");
     expect(got).toMatchObject({ message: "secret", title: "shh" });
+  });
+
+  it("signs envelopes and requests through a custom DeviceSigner, and verifies with verifyEnvelope", async () => {
+    const deviceKey = await deviceKeyFromSeed(hexDecode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"));
+    const inner = webCryptoSigner(deviceKey);
+    const seen: string[] = [];
+    const signer: DeviceSigner = {
+      deviceId: deviceKey.deviceId,
+      signEnvelope: (env) => (seen.push("env:" + env.topic), inner.signEnvelope(env)),
+      signRequest: (method, url, body, headers, now) => {
+        seen.push(`req:${method} ${url} ${[...headers].map(([k]) => k).sort().join(",")}`);
+        return inner.signRequest(method, url, body, headers, now);
+      },
+    };
+    const { f, calls } = mockFetch((u, init) => new Response(u.endsWith("/") ? (init.body as string) : "{}"));
+    const c = new SubEtha({ baseUrl: "https://x.test", fetch: f, signer, signRequests: true, token: "se_t" });
+    const sent = await c.publish("@a/b", "hi");
+    expect(sent.sender).toBe(deviceKey.deviceId);
+    expect(await verifyEnvelope(sent)).toBe(true);
+    // Authorization is dropped from signed requests; content-type is signed.
+    expect(seen).toEqual(["env:@a/b", "req:POST https://x.test/ content-type"]);
+    const h = calls[0]!.init.headers as Headers;
+    expect(h.get("x-device-id")).toBe(deviceKey.deviceId);
+    expect(h.get("x-device-signed-headers")).toBe("x-device-id,x-device-time,x-device-nonce,content-type");
+    expect(h.get("authorization")).toBeNull();
+
+    // subscribe's verify uses the client's verifyEnvelope.
+    const checked: string[] = [];
+    const lines = [{ ...sent, id: "01A", sig: "ed25519:bogus" }, { ...sent, id: "01B" }].map((e) => JSON.stringify(e)).join("\n") + "\n";
+    const { f: f2 } = mockFetch((u) => new Response(u.endsWith("/v1/ack") ? "{}" : lines));
+    const c2 = new SubEtha({ baseUrl: "https://x.test", fetch: f2, verifyEnvelope: (e) => (checked.push(e.id!), e.id === "01B") });
+    const got: string[] = [];
+    await new Promise<void>((resolve) => {
+      const sub = c2.subscribe("@a/b", (m) => { got.push(m.id!); sub.close(); resolve(); }, { transport: "poll", verify: true, autoAck: false });
+    });
+    expect(checked).toEqual(["01A", "01B"]);
+    expect(got).toEqual(["01B"]);
   });
 
   it("raises SubEthaError with the machine-readable code", async () => {

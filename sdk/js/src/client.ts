@@ -9,8 +9,15 @@ export interface ClientOptions {
   baseUrl?: string;
   token?: string;
   fetch?: typeof fetch;
-  /** Sign every publish with this device key (spec §4). */
+  /** Sign every publish with this device key (spec §4). Shorthand for `signer: webCryptoSigner(deviceKey)`. */
   deviceKey?: DeviceKey;
+  /**
+   * Signs publishes and (with signRequests) requests as a device, in place of `deviceKey`. For
+   * runtimes without WebCrypto Ed25519, e.g. React Native with the Rust core.
+   */
+  signer?: DeviceSigner;
+  /** Checks envelope signatures for subscribe's `verify`/`requireSignature`. Default: WebCrypto Ed25519. */
+  verifyEnvelope?: (env: Envelope) => boolean | Promise<boolean>;
   /** E2EE keys by topic (spec §5). Messages to these topics are encrypted, and received ones decrypted. */
   topicKeys?: Record<string, { kid: string; key: Uint8Array }>;
   WebSocket?: typeof WebSocket;
@@ -62,8 +69,35 @@ export interface Subscription { close(): void; readonly closed: boolean }
  * X-Device-* headers for a device-signed request (spec §8.1, `subetha-req-v2`). Pass the headers
  * the request will carry: content and routing headers must be signed.
  */
+/**
+ * Signs as a device: envelopes (spec §4) and requests (spec §8.1). `webCryptoSigner(key)` is
+ * what `deviceKey` uses; React Native passes one backed by the Rust core (`coreSigner`).
+ */
+export interface DeviceSigner {
+  readonly deviceId: string;
+  /** A copy of `env` (which carries id and time) with `sender` and `sig` set. */
+  signEnvelope(env: Envelope): Envelope | Promise<Envelope>;
+  /** The X-Device-* headers for a request that carries `headers` (see signRequest). */
+  signRequest(method: string, url: string, body: Uint8Array, headers: Iterable<[string, string]>, nowSec: number): Record<string, string> | Promise<Record<string, string>>;
+}
+
+/** A DeviceSigner over WebCrypto Ed25519. */
+export function webCryptoSigner(key: DeviceKey): DeviceSigner {
+  return {
+    deviceId: key.deviceId,
+    signEnvelope: (env) => signEnvelope(env, key),
+    signRequest: (method, url, body, headers, nowSec) => signRequestV2(key, method, url, body, headers, nowSec),
+  };
+}
+
 export function signRequest(key: DeviceKey, method: string, url: string, body: Uint8Array, headers: Record<string, string> | Iterable<[string, string]> = {}, nowSec = Math.floor(Date.now() / 1000)): Promise<Record<string, string>> {
   return signRequestV2(key, method, url, body, headers, nowSec);
+}
+
+function headersEntries(h: Headers): [string, string][] {
+  const out: [string, string][] = [];
+  h.forEach((v, k) => out.push([k, v]));
+  return out;
 }
 
 function bodyBytes(body: RequestInit["body"]): Uint8Array {
@@ -99,7 +133,8 @@ export class SubEtha {
   readonly baseUrl: string;
   private readonly token?: string;
   private f: typeof fetch;
-  private readonly deviceKey?: DeviceKey;
+  private readonly signer?: DeviceSigner;
+  private readonly verify: (env: Envelope) => boolean | Promise<boolean>;
   private readonly topicKeys: Record<string, { kid: string; key: Uint8Array }>;
   private readonly WS?: typeof WebSocket;
   private readonly signRequests: boolean;
@@ -108,11 +143,12 @@ export class SubEtha {
     this.baseUrl = (opts.baseUrl ?? "https://subetha.org").replace(/\/+$/, "");
     this.token = opts.token;
     this.f = opts.fetch ?? ((...a) => fetch(...a));
-    this.deviceKey = opts.deviceKey;
+    this.signer = opts.signer ?? (opts.deviceKey ? webCryptoSigner(opts.deviceKey) : undefined);
+    this.verify = opts.verifyEnvelope ?? ((env) => verifyEnvelope(env));
     this.topicKeys = opts.topicKeys ?? {};
     this.WS = opts.WebSocket ?? (globalThis as { WebSocket?: typeof WebSocket }).WebSocket;
     this.signRequests = !!opts.signRequests;
-    if (this.signRequests && !this.deviceKey) throw new Error("signRequests needs a deviceKey");
+    if (this.signRequests && !this.signer) throw new Error("signRequests needs a deviceKey or signer");
     if (this.signRequests) {
       const inner = this.f;
       this.f = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -122,7 +158,8 @@ export class SubEtha {
         headers.delete("authorization");
         // fetch adds text/plain for string bodies; set it here so it's signed.
         if (typeof init.body === "string" && !headers.has("content-type")) headers.set("content-type", "text/plain;charset=UTF-8");
-        for (const [k, v] of Object.entries(await signRequest(this.deviceKey!, init.method ?? "GET", url, body, headers))) headers.set(k, v);
+        const signed = await this.signer!.signRequest(init.method ?? "GET", url, body, [...headersEntries(headers)], Math.floor(Date.now() / 1000));
+        for (const [k, v] of Object.entries(signed)) headers.set(k, v);
         return inner(input, { ...init, headers });
       }) as typeof fetch;
     }
@@ -166,7 +203,7 @@ export class SubEtha {
       if (o.route.deadlineS) env.route.deadline_s = o.route.deadlineS;
     }
     const tk = this.topicKeys[topic];
-    const sign = o.sign ?? !!this.deviceKey;
+    const sign = o.sign ?? !!this.signer;
     const encrypt = o.encrypt ?? !!tk;
     if (sign || encrypt) {
       env.id = ulid();
@@ -177,8 +214,8 @@ export class SubEtha {
       env = await encryptEnvelope(env, tk.key, tk.kid);
     }
     if (sign) {
-      if (!this.deviceKey) throw new Error("sign requested but no deviceKey configured");
-      env = await signEnvelope(env, this.deviceKey);
+      if (!this.signer) throw new Error("sign requested but no deviceKey or signer configured");
+      env = await this.signer.signEnvelope(env);
     }
     return env;
   }
@@ -258,7 +295,7 @@ export class SubEtha {
       if (!dedupe.accept(raw)) return;
       if (raw.id) since = raw.id;
       if (o.verify || o.requireSignature) {
-        if (raw.sig ? !(await verifyEnvelope(raw)) : o.requireSignature) return;
+        if (raw.sig ? !(await this.verify(raw)) : o.requireSignature) return;
       }
       const m = o.raw ? raw : await this.receive(raw);
       await onMessage(m);

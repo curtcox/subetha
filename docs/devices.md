@@ -63,7 +63,7 @@ hex(sha256(body))`, followed by `"\n" + name + ":" + value` for each header name
 
 Every SDK does this for you: `new SubEtha({ deviceKey, signRequests: true })` in TypeScript,
 `Client(device_key=key, sign_requests=True)` in Python (or `httpx.Client(auth=DeviceAuth(key))`),
-and the device signer in the Kotlin, Swift, and Dart SDKs. The shared test vectors are in
+the device signer in the Kotlin, Swift, and Dart SDKs, and `createClient({ core, deviceSeed, signRequests: true })` in React Native (signing with the Rust core). The shared test vectors are in
 `spec/vectors/requests.json`.
 
 The older `subetha-req-v1` form, without `X-Device-Signed-Headers`, is still accepted for

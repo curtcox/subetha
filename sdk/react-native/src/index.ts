@@ -8,7 +8,19 @@
 import { SubEtha, type ClientOptions, type Envelope, type SubscribeOptions, type Subscription } from "@subetha/sdk";
 
 export * from "@subetha/sdk";
-export { loadCore, type SubEthaCore } from "./core.ts";
+export { coreSigner, coreVerifier, loadCore, urlParts, type SubEthaCore } from "./core.ts";
+import { coreSigner, coreVerifier, type SubEthaCore } from "./core.ts";
+
+/** Options for the React Native client: the JS SDK's, plus the Rust core when it's installed. */
+export interface RnClientOptions extends ClientOptions {
+  /**
+   * The Rust core (`loadCore()`). Signatures are checked with it, and with `deviceSeed` publishes
+   * and requests are signed with it: Hermes has no WebCrypto Ed25519.
+   */
+  core?: SubEthaCore | null;
+  /** The device's 32-byte Ed25519 seed, used with `core` (see `coreSigner`). */
+  deviceSeed?: Uint8Array;
+}
 
 /** The transport that works in React Native for these topics. */
 export function rnTransport(topics: string | string[], hasWebSocket = typeof (globalThis as { WebSocket?: unknown }).WebSocket === "function"): "ws" | "poll" {
@@ -16,10 +28,17 @@ export function rnTransport(topics: string | string[], hasWebSocket = typeof (gl
   return n === 1 && hasWebSocket ? "ws" : "poll";
 }
 
-/** A client with RN's global fetch and WebSocket. */
-export function createClient(opts: ClientOptions = {}): SubEtha {
+/** A client with RN's global fetch and WebSocket, signing and verifying with the core if given. */
+export function createClient(opts: RnClientOptions = {}): SubEtha {
   const g = globalThis as { WebSocket?: typeof WebSocket };
-  return new SubEtha({ WebSocket: g.WebSocket, ...opts });
+  const { core, deviceSeed, ...rest } = opts;
+  if (deviceSeed && !core && !rest.signer) throw new Error("deviceSeed needs the Rust core (loadCore()) or a signer");
+  return new SubEtha({
+    WebSocket: g.WebSocket,
+    ...(core ? { verifyEnvelope: coreVerifier(core) } : {}),
+    ...(core && deviceSeed && !rest.deviceKey ? { signer: coreSigner(core, deviceSeed) } : {}),
+    ...rest,
+  });
 }
 
 /**
