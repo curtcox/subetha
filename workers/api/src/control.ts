@@ -61,15 +61,35 @@ function publicEndpoint(e: EndpointRecord) {
   return { id: e.id, kind: e.kind, address: maskAddress(e.kind, e.address), verified: !!e.verified_at, created_at: e.created_at };
 }
 
+const VERIFY_SEND_INTERVAL_MS = 3_600_000;
+
+/**
+ * Claims this hour's verification send for a destination. One conditional upsert, so concurrent
+ * requests (from any account) can't both win. Returns the claim's timestamp, or null if a code
+ * went to the destination within the hour.
+ */
+export async function claimVerifySend(env: Env, dest: string, now = Date.now()): Promise<number | null> {
+  const r = await env.DB.prepare(
+    "INSERT INTO verify_sends (dest, sent_at) VALUES (?, ?) ON CONFLICT(dest) DO UPDATE SET sent_at = excluded.sent_at WHERE verify_sends.sent_at <= ?",
+  ).bind(dest, now, now - VERIFY_SEND_INTERVAL_MS).run();
+  return r.meta.changes === 1 ? now : null;
+}
+
+/** Gives a claim back when nothing was sent (the account couldn't pay). */
+async function releaseVerifySend(env: Env, dest: string, sentAt: number) {
+  await env.DB.prepare("DELETE FROM verify_sends WHERE dest = ? AND sent_at = ?").bind(dest, sentAt).run();
+}
+
 async function sendCode(env: Env, e: EndpointRecord, code: string) {
   const telephony = e.kind === "sms" || e.kind === "voice";
   // One code per destination per hour, and a few pending verifications per account per day:
   // verification sends go to unverified numbers/addresses, so they're the abuse surface.
-  const perDest = `verify:${e.kind}:${e.address.toLowerCase()}`;
-  if (await env.CACHE.get(perDest)) throw new ApiError("rate_limited", "a code was sent to this destination recently; try again in an hour");
   const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM endpoints WHERE account_id = ? AND verified_at IS NULL AND created_at > ?").bind(e.account_id, Date.now() - 86_400_000).first<{ n: number }>();
   if ((pending?.n ?? 0) > MAX_PENDING_VERIFICATIONS) throw new ApiError("rate_limited", "too many unverified endpoints in the last day");
   if (telephony && (await env.CACHE.get(CIRCUIT_KEY))) throw new ApiError("provider_unavailable", "SMS and voice are temporarily paused");
+  const dest = `${e.kind}:${e.address.toLowerCase()}`;
+  const sentAt = await claimVerifySend(env, dest);
+  if (sentAt === null) throw new ApiError("rate_limited", "a code was sent to this destination recently; try again in an hour");
   // The verification message costs the same as a delivery and is paid before it is sent; SMS and
   // calls count toward the new-funds telephony hold.
   const sku = skuForTransport(PRICES, e.kind)!;
@@ -77,11 +97,13 @@ async function sendCode(env: Env, e: EndpointRecord, code: string) {
   const ref = `verify:${e.id}:${ulid()}`;
   const account = accountStub(env, e.account_id);
   const r = await account.reserve(price, ref, null, {}, telephony ? "telephony" : null);
-  if (!r.ok) throw r.code === "insufficient_balance"
-    ? new ApiError("insufficient_balance", "balance can't cover the verification message", { shortfall_usd_micros: r.shortfall })
-    : new ApiError("spend_cap_exceeded", "SMS/voice spend is limited for new funds; try again later or use email");
+  if (!r.ok) {
+    await releaseVerifySend(env, dest, sentAt);
+    throw r.code === "insufficient_balance"
+      ? new ApiError("insufficient_balance", "balance can't cover the verification message", { shortfall_usd_micros: r.shortfall })
+      : new ApiError("spend_cap_exceeded", "SMS/voice spend is limited for new funds; try again later or use email");
+  }
   await account.settle(ref, price);
-  await env.CACHE.put(perDest, "1", { expirationTtl: 3600 });
   const text = `Your SubEtha verification code is ${code}. If you didn't request this, ignore it.`;
   if (e.kind === "email") await sendEmail(env, { to: e.address, subject: `SubEtha verification code ${code}`, text });
   else if (e.kind === "sms") await sendSms(env, e.address, text);

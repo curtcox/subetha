@@ -2,9 +2,10 @@
 import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { enrollmentProof, signRequest } from "@subetha/sdk";
 import { base64urlEncode, COVERED_REQUEST_HEADERS, deviceKeyFromSeed, hexDecode, signEnvelope, ulid, utf8, type DeviceKey } from "@subetha/sdk/protocol";
+import { claimVerifySend } from "../src/control.ts";
 import { requestSigningInput } from "../src/devices.ts";
 import ntfySource from "../src/ntfy.ts?raw";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { accountStub } from "../src/durable/account.ts";
 import type { Env } from "../src/types.ts";
 import { auth, BASE, bootstrap, publish } from "./helpers.ts";
@@ -187,6 +188,35 @@ describe("security review: signed request headers (subetha-req-v2)", () => {
     for (const m of ntfySource.matchAll(/headers\.get\("([^"]+)"\)/g)) names.add(m[1]!.toLowerCase());
     expect(names.size).toBeGreaterThan(30);
     expect([...names].filter((n) => !COVERED_REQUEST_HEADERS.has(n))).toEqual([]);
+  });
+});
+
+describe("security review: verification codes per destination", () => {
+  it("lets only one of many concurrent claims win, and frees the slot after an hour", async () => {
+    const now = Date.now();
+    const wins = (await Promise.all(Array.from({ length: 8 }, () => claimVerifySend(E, "sms:+14155550199", now)))).filter((x) => x !== null);
+    expect(wins).toHaveLength(1);
+    expect(await claimVerifySend(E, "sms:+14155550199", now + 59 * 60_000)).toBeNull();
+    expect(await claimVerifySend(E, "sms:+14155550199", now + 60 * 60_000)).not.toBeNull();
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("sends one code per destination across accounts, and gives the slot back when unpaid", async () => {
+    const realFetch = globalThis.fetch;
+    let sent = 0;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input instanceof Request ? input.url : input).startsWith(BASE)) return realFetch(input, init);
+      sent++;
+      return new Response(JSON.stringify({ MessageId: "m-1" }));
+    });
+    const broke = await bootstrap("vbroke", 0);
+    const create = (token: string) => SELF.fetch(`${BASE}/v1/endpoints`, { method: "POST", headers: auth(token), body: JSON.stringify({ kind: "email", address: "Target@example.com" }) });
+    expect((await create(broke.token)).status).toBe(402);
+    const [a, b] = await Promise.all([bootstrap("vdest1", 1), bootstrap("vdest2", 1)]);
+    const rs = await Promise.all([create(a.token), create(b.token)]);
+    expect(rs.map((r) => r.status).sort()).toEqual([201, 429]);
+    expect(sent).toBe(1);
   });
 });
 
