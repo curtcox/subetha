@@ -60,13 +60,21 @@ async function refresh() {
   $("create").hidden = true;
   $("app").hidden = false;
   $("who").textContent = me.handle ? `@${me.handle}` : me.id;
-  $("bal").textContent = usd(me.balance_usd_micros);
+  showBalance(me);
   const h = me.handle ? `@${me.handle}/` : "";
   $("pubTopic").value ||= `${h}test`;
   $("subTopic").value ||= `${h}test`;
   const hash = new URLSearchParams(location.hash.slice(1));
   if (hash.get("topic")) { $("subTopic").value = hash.get("topic"); subscribe(); }
   routeHash(hash);
+}
+
+// Available balance, plus what's held: open reservations and the credit leases topics draw on (PLAN §7).
+function showBalance(a) {
+  $("bal").textContent = usd(a.balance_usd_micros);
+  const held = a.reserved_usd_micros ?? 0;
+  $("held").hidden = !held;
+  $("held").textContent = held ? ` + ${usd(held)} held` : "";
 }
 
 $("tokenBtn").onclick = () => { store("subetha.token", $("tokenInput").value.trim()); refresh(); };
@@ -122,7 +130,7 @@ $("pubBtn").onclick = async () => {
     const m = await client.publish($("pubTopic").value.trim(), $("pubMsg").value || "triggered", pubOpts());
     out.textContent = JSON.stringify(m, null, 2);
     $("traceTopic").value = m.topic; $("traceId").value = m.id;
-    me = await client.account(); $("bal").textContent = usd(me.balance_usd_micros);
+    me = await client.account(); showBalance(me);
   } catch (e) { out.textContent = `${e.code}: ${e.message}`; }
 };
 
@@ -426,7 +434,7 @@ $("exSend").onclick = async () => {
       $("exOut").textContent += pretty;
     }
     $("exStatus").textContent = `${r.status} in ${Math.round(performance.now() - t0)} ms`;
-    if (r.ok && me) client.account().then((a) => { me = a; $("bal").textContent = usd(a.balance_usd_micros); }).catch(() => {});
+    if (r.ok && me) client.account().then((a) => { me = a; showBalance(a); }).catch(() => {});
   } catch (e) {
     $("exStatus").textContent = e.name === "AbortError" ? `Stopped after ${Math.round((performance.now() - t0) / 1000)} s` : `Failed: ${e.message}`;
   } finally { clearTimeout(timer); }
