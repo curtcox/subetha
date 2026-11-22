@@ -69,13 +69,30 @@ subetha lan @me/doorbell --send "Door opened" --hops 2 --for 10
 
 In Node, `startLan(node, onMessage)` from `@subetha/sdk/edge/lan-node` joins the LAN and
 returns `{ resync(), peers(), stop() }`. Call `resync()` after publishing so peers hear about the
-new message right away. `LanGossip` is the socket-free core, for other runtimes.
+new message right away. `startLanWith(dgram, node, onMessage)` does the same over any UDP module
+shaped like `node:dgram`, such as `react-native-udp`, and `LanGossip` is the socket-free core,
+for other runtimes.
 
 ## Mobile and Rust
 
 The Rust core (`subetha_core::edge`) has the same modem, fountain codec, BLE chunking, and gossip
-node. The Swift, Kotlin, Flutter, and React Native SDKs reach it through the core bindings, and
-the platform supplies the radio, speaker, microphone, or camera.
+node. The Swift, Kotlin, and Flutter SDKs reach it through the core bindings, and the platform
+supplies the radio, speaker, microphone, or camera. React Native uses the TypeScript
+implementation instead (next section).
+
+### React Native
+
+`@subetha/react-native/edge` re-exports `@subetha/sdk/edge`, which runs on Hermes, and adds glue
+for the usual libraries: `connectBlePlxPeer` (a central over `react-native-ble-plx`),
+`audioFrameWav` and `listenPcm16` (play a WAV with any player; hear PCM16 from
+`react-native-live-audio-stream`), `animateQr` and `qrSvgPath` (draw frames with
+`react-native-svg`; feed `expo-camera` scans to `QrFrameReceiver`), and `startLanWith` over
+`react-native-udp`. Hermes can't verify Ed25519, so `createEdgeNode({ core })` checks signatures
+with the Rust core when the app installs it, and otherwise drops signed messages. The Expo
+sample's Edge tab ([`samples/react-native`](https://github.com/curtcox/subetha/tree/main/samples/react-native))
+uses all of them. See the [package README](https://github.com/curtcox/subetha/tree/main/sdk/react-native#edge-transports-subethareact-nativeedge).
+
+### Kotlin, Swift, and Flutter
 
 The Kotlin (`org.subetha:subetha-core`), Swift (`SubEthaCore`), and Flutter (`subetha_core`) SDKs add drivers that do
 everything except move bytes, the same as the TypeScript ones:

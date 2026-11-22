@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   base32Decode, base32Encode, base64urlDecode, base64urlEncode, canonicalize, decryptEnvelope, Deduper,
   deviceKeyFromSeed, encryptEnvelope, hexDecode, hexEncode, isTopic, parsePriority, parseTopic, poly1305,
-  publicKeyFromDeviceId, secretTopic, signEnvelope, ulid, ulidTime, utf8, validateEnvelope, verifyEnvelope, xchachaOpen, xchachaSeal,
+  publicKeyFromDeviceId, secretTopic, signEnvelope, ulid, ulidTime, utf8, utf8DecodeFallback, utf8EncodeFallback, validateEnvelope, verifyEnvelope, xchachaOpen, xchachaSeal,
 } from "../src/protocol/index.ts";
 
 describe("encodings", () => {
@@ -18,6 +18,23 @@ describe("encodings", () => {
       const b = crypto.getRandomValues(new Uint8Array(n));
       expect(base64urlDecode(base64urlEncode(b))).toEqual(b);
       expect(base64urlEncode(b)).toBe(Buffer.from(b).toString("base64url"));
+    }
+  });
+  it("UTF-8 fallbacks (for Hermes) match TextEncoder and TextDecoder", () => {
+    const strings = ["", "plain ascii", "ñ €  😀 \u{10ffff}", "\ud800 lone \udc00 surrogates", '{"message":"Tür → 門"}'];
+    for (const s of strings) {
+      expect([...utf8EncodeFallback(s)]).toEqual([...new TextEncoder().encode(s)]);
+      expect(utf8DecodeFallback(new TextEncoder().encode(s))).toBe(new TextDecoder().decode(new TextEncoder().encode(s)));
+    }
+    const bad = [[0xff], [0xc0, 0x80], [0xe2, 0x82], [0xe2, 0x82, 0x41], [0xed, 0xa0, 0x80], [0xf4, 0x90, 0x80, 0x80], [0x80, 0x41], [0xf0, 0x9f, 0x98]];
+    for (const b of bad) {
+      const got = utf8DecodeFallback(Uint8Array.from(b));
+      expect(got.includes("\ufffd"), JSON.stringify(b)).toBe(true);
+      expect(got.replace(/\ufffd/g, "")).toBe(new TextDecoder().decode(Uint8Array.from(b)).replace(/\ufffd/g, ""));
+    }
+    for (let n = 0; n < 200; n++) {
+      const b = crypto.getRandomValues(new Uint8Array(n % 17));
+      expect(utf8DecodeFallback(b).replace(/\ufffd/g, "")).toBe(new TextDecoder().decode(b).replace(/\ufffd/g, ""));
     }
   });
 });

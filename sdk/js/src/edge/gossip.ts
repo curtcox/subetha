@@ -4,6 +4,7 @@
 
 import type { Envelope } from "../protocol/envelope.ts";
 import { verifyEnvelope } from "../protocol/sign.ts";
+import { utf8 } from "../protocol/encoding.ts";
 
 export const MAX_GOSSIP_HOPS = 16;
 
@@ -44,7 +45,7 @@ const expired = (e: Envelope, now: number) => e.expires !== undefined && e.expir
 /** Parses and shape-checks a gossip message from a peer (JSON bytes or text). */
 export function parseGossip(data: Uint8Array | string): GossipMessage | null {
   try {
-    const m = JSON.parse(typeof data === "string" ? data : new TextDecoder().decode(data)) as GossipMessage;
+    const m = JSON.parse(typeof data === "string" ? data : utf8.decode(data)) as GossipMessage;
     if (m?.type === "summary" && typeof m.topics === "object" && m.topics !== null &&
       Object.values(m.topics).every((ids) => Array.isArray(ids) && ids.every((i) => typeof i === "string"))) return m;
     if (m?.type === "request" && Array.isArray(m.ids) && m.ids.every((i) => typeof i === "string")) return m;
@@ -57,7 +58,7 @@ export function parseGossip(data: Uint8Array | string): GossipMessage | null {
 }
 
 export function encodeGossip(m: GossipMessage): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify(m));
+  return utf8.encode(JSON.stringify(m));
 }
 
 export class GossipNode {

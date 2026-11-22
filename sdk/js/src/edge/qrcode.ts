@@ -2,6 +2,8 @@
 // versions 1–40, all four error-correction levels, automatic mask selection. Used to show
 // animated-QR frames (spec §11.2); base45 text fits alphanumeric mode exactly.
 
+import { utf8 } from "../protocol/encoding.ts";
+
 export type QrEcl = "L" | "M" | "Q" | "H";
 export interface QrCode {
   version: number;
@@ -276,7 +278,7 @@ export function encodeQr(data: string | Uint8Array, opts: QrOptions = {}): QrCod
   const maxV = opts.maxVersion ?? 40;
   const isAlnum = typeof data === "string" && [...data].every((c) => QR_ALPHANUMERIC.includes(c));
   const mode: Mode = isAlnum ? "alphanumeric" : "byte";
-  const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
+  const bytes = typeof data === "string" ? utf8.encode(data) : data;
   const count = isAlnum ? (data as string).length : bytes.length;
 
   let ver = minV;

@@ -21,11 +21,59 @@ sub.close();
   XChaCha20. Hermes has no `crypto.subtle`, so use the Rust core there (below), or a
   WebCrypto polyfill.
 
+## Edge transports (`@subetha/react-native/edge`)
+
+Sound, animated QR, Bluetooth LE, and LAN between nearby devices, with no relay (spec §11,
+[docs/edge.md](../../docs/edge.md)). The protocol logic is the TypeScript SDK's
+(`@subetha/sdk/edge`, re-exported here), which runs on Hermes. This entry point adds the glue
+to the usual RN libraries. It types them structurally, so the package itself has no native
+dependencies:
+
+| Function | Pair it with | What it does |
+|---|---|---|
+| `createEdgeNode({ core })` | the Rust core (optional) | A gossip node that checks signatures with the core. Hermes has no WebCrypto Ed25519, so without the core (or a WebCrypto polyfill) signed messages are dropped and unsigned ones pass. |
+| `connectBlePlxPeer(manager, node, onMessage)` | `react-native-ble-plx` | Scans for the SubEtha service, connects as a central (asking for a 517-byte MTU), and gossips: outbox notifications in, inbox writes out, one write at a time. ble-plx can't be a peripheral, so the peer is a native sample app or a gateway. |
+| `audioFrameWav(payload)` | `expo-av`, `expo-audio`, … | One modem frame as a 48 kHz 16-bit WAV file to play. |
+| `listenPcm16(stream, onPayload)` | `react-native-live-audio-stream` | Microphone PCM16 chunks (base64) → modem frames. |
+| `animateQr(payload, onFrame)` / `qrSvgPath(qr)` | `react-native-svg` | SVG path data for each animated-QR frame. |
+| `new QrFrameReceiver(onPayload)` | `expo-camera` | Feed it `onBarcodeScanned`'s `data`. |
+| `startLanWith(dgram, node, onMessage)` | `react-native-udp` | LAN discovery and gossip (UDP multicast). Android needs `CHANGE_WIFI_MULTICAST_STATE`; iOS needs Apple's multicast networking entitlement. |
+| `bridgeEdge(client, node, { topics })` | a connected client | Relay ↔ edge gateway, as in the TS SDK. |
+
+```ts
+import { BleManager } from "react-native-ble-plx";
+import { ulid } from "@subetha/react-native";
+import { audioFrameWav, connectBlePlxPeer, createEdgeNode, deliverPayload } from "@subetha/react-native/edge";
+
+const node = createEdgeNode();
+node.subscribe("@me/doorbell");
+const peer = await connectBlePlxPeer(new BleManager(), node, (m) => console.log(m.message));
+
+const now = Math.floor(Date.now() / 1000);
+const env = { id: ulid(), time: now, topic: "@me/doorbell", message: "ding", hops: 2 };
+node.publish(env);
+await peer.resync();                              // offer it to the Bluetooth peer
+const wav = audioFrameWav(deliverPayload([env])); // or play it as sound
+```
+
+Hermes lacks `crypto.getRandomValues` (message ids) and, for `react-native-udp`, `Buffer`:
+import `react-native-get-random-values` and set `globalThis.Buffer` from `buffer` first. The
+SDK falls back to its own UTF-8 coder where `TextDecoder` is missing. The Expo sample's Edge
+tab ([`samples/react-native/Edge.tsx`](../../samples/react-native/Edge.tsx)) wires up all of it.
+
 ## Rust core via uniffi-bindgen-react-native (scaffold)
 
 `src/core.ts` declares the `SubEthaCore` surface (the camelCase names of
-`sdk/core/src/ffi.rs`). `loadCore()` returns the native module once the app has installed
-`@subetha/react-native-core`, and `null` until then. `ubrn.config.yaml` is the starting config
+`sdk/core/src/ffi.rs`). Metro only bundles modules named by a literal `require`, so the app
+passes the package to `loadCore`, which returns null if it's missing or doesn't look like the
+core:
+
+```ts
+const core = await loadCore(() => require("@subetha/react-native-core"));
+const node = createEdgeNode({ core }); // verifies signatures on Hermes
+```
+
+`ubrn.config.yaml` is the starting config
 for [uniffi-bindgen-react-native](https://jhugman.github.io/uniffi-bindgen-react-native/):
 
 ```bash
@@ -35,15 +83,15 @@ npx uniffi-bindgen-react-native build ios     --config ubrn.config.yaml --and-ge
 ```
 
 That generates a Turbo Module (JSI/C++) and TypeScript bindings over the same UniFFI surface
-as Swift/Kotlin (uniffi 0.28). Edge features (BLE gossip, the audio modem, animated QR) then
-follow the same path: stateful core objects exported as UniFFI objects, driven by RN modules
-for BLE (`react-native-ble-plx`), the camera and audio. This isn't built in CI yet; see
-`sdk/core/BINDINGS.md`. Check the config keys against the ubrn version you install.
+as Swift/Kotlin (uniffi 0.28). This isn't built in CI yet; see `sdk/core/BINDINGS.md`. Check
+the config keys against the ubrn version you install. The edge transports above don't need it.
 
 ## Tests
 
 `pnpm --filter @subetha/react-native test` runs in Node with a fake WebSocket and a mock fetch:
 re-exports, transport choice, publish, WebSocket subscribe with dedupe and socket acks, and
-`loadCore`.
+`loadCore`. `test/edge.test.ts` drives the edge glue with fakes: a ble-plx manager connected to a
+peripheral running the SDK's `BleLink`, a live-audio-stream fed the modem's WAV, QR paths
+rasterized and read back with jsQR, and LAN over an in-memory react-native-udp.
 
 `samples/react-native` is an Expo app that uses this package.

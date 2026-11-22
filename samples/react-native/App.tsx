@@ -1,11 +1,14 @@
-// The scripted doorbell flow: connect, subscribe, inbox, ring, dry-run cost, edge stub.
+// The scripted doorbell flow: connect, subscribe, inbox, ring, dry-run cost; and the Edge tab.
 import { useEffect, useRef, useState } from "react";
 import { Button, FlatList, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View, useColorScheme } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { createClient, subscribe, SubEthaError, type Envelope, type SubEtha, type Subscription } from "@subetha/react-native";
+import { Edge } from "./Edge";
 
 export default function App() {
   const [tab, setTab] = useState<"doorbell" | "edge">("doorbell");
+  // The Doorbell tab's connected client, for the Edge tab's relay bridge.
+  const [client, setClient] = useState<SubEtha | null>(null);
   const dark = useColorScheme() === "dark";
   const fg = dark ? "#f5f5f4" : "#1c1917";
   return (
@@ -15,7 +18,9 @@ export default function App() {
         <Button title="Doorbell" onPress={() => setTab("doorbell")} disabled={tab === "doorbell"} />
         <Button title="Edge" onPress={() => setTab("edge")} disabled={tab === "edge"} />
       </View>
-      {tab === "doorbell" ? <Doorbell fg={fg} /> : <Edge fg={fg} />}
+      {/* Both stay mounted so switching tabs keeps subscriptions and edge links alive. */}
+      <View style={[styles.root, tab !== "doorbell" && styles.hidden]}><Doorbell fg={fg} onClient={setClient} /></View>
+      <View style={[styles.root, tab !== "edge" && styles.hidden]}><Edge fg={fg} client={client} /></View>
     </SafeAreaView>
   );
 }
@@ -24,11 +29,15 @@ function describe(e: unknown): string {
   return e instanceof SubEthaError ? `${e.code} (HTTP ${e.status})` : String((e as Error)?.message ?? e);
 }
 
-function Doorbell({ fg }: { fg: string }) {
+function Doorbell({ fg, onClient }: { fg: string; onClient: (c: SubEtha | null) => void }) {
   const [token, setToken] = useState("");
   const [topic, setTopic] = useState("@me/doorbell");
   const [baseUrl, setBaseUrl] = useState("https://subetha.org");
-  const [client, setClient] = useState<SubEtha | null>(null);
+  const [client, setClientState] = useState<SubEtha | null>(null);
+  const setClient = (c: SubEtha | null) => {
+    setClientState(c);
+    onClient(c);
+  };
   const [status, setStatus] = useState("Not connected");
   const [inbox, setInbox] = useState<Envelope[]>([]);
   const [estimate, setEstimate] = useState<string | null>(null);
@@ -112,25 +121,9 @@ function Doorbell({ fg }: { fg: string }) {
   );
 }
 
-function Edge({ fg }: { fg: string }) {
-  return (
-    <ScrollView style={styles.screen}>
-      <Text style={[styles.heading, { color: fg }]}>Edge transports</Text>
-      <Text style={{ color: fg, marginBottom: 12 }}>
-        Offline delivery over BLE (store-and-forward gossip), data-over-sound (16-FSK audio modem) and animated QR
-        (fountain codes) come from the Rust core: sdk/core edge::ble, edge::gossip, edge::audio and edge::qr, through a
-        uniffi-bindgen-react-native Turbo Module (see sdk/react-native/README.md).
-      </Text>
-      <Text style={[styles.small, { color: fg }]}>
-        This screen is a stub (track F). The app supplies the radios: react-native-ble-plx with the core's GATT UUIDs and
-        MTU chunking, 48 kHz audio, and camera frames for QR.
-      </Text>
-    </ScrollView>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  hidden: { display: "none" },
   tabs: { flexDirection: "row", justifyContent: "center", gap: 12, paddingVertical: 8 },
   screen: { flex: 1, padding: 16 },
   form: { gap: 8 },

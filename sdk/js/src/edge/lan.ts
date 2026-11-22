@@ -5,6 +5,7 @@
 import type { Envelope } from "../protocol/envelope.ts";
 import { chunk, Reassembler } from "./ble.ts";
 import { encodeGossip, GossipNode, parseGossip } from "./gossip.ts";
+import { utf8 } from "../protocol/encoding.ts";
 
 export const LAN_GROUP = "239.255.83.69";
 export const LAN_PORT = 47353;
@@ -17,12 +18,12 @@ export const LAN_PEER_TIMEOUT_MS = 30_000;
 export interface LanBeacon { subetha: "lan/1"; node: string; port: number }
 
 export function encodeBeacon(b: Omit<LanBeacon, "subetha">): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify({ subetha: "lan/1", node: b.node, port: b.port }));
+  return utf8.encode(JSON.stringify({ subetha: "lan/1", node: b.node, port: b.port }));
 }
 
 export function parseBeacon(bytes: Uint8Array): LanBeacon | null {
   try {
-    const b = JSON.parse(new TextDecoder().decode(bytes)) as LanBeacon;
+    const b = JSON.parse(utf8.decode(bytes)) as LanBeacon;
     if (b?.subetha === "lan/1" && typeof b.node === "string" && /^[0-9a-f]{16}$/.test(b.node) &&
       Number.isInteger(b.port) && b.port > 0 && b.port < 65536) return b;
   } catch {

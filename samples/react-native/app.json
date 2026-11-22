@@ -5,7 +5,44 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "ios": { "bundleIdentifier": "org.subetha.sample.doorbell" },
-    "android": { "package": "org.subetha.sample.doorbell" }
+    "ios": {
+      "bundleIdentifier": "org.subetha.sample.doorbell",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Listens for SubEtha messages sent as sound.",
+        "NSLocalNetworkUsageDescription": "Finds other SubEtha devices on this network."
+      }
+    },
+    "android": {
+      "package": "org.subetha.sample.doorbell",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CHANGE_WIFI_MULTICAST_STATE",
+        "android.permission.ACCESS_WIFI_STATE"
+      ]
+    },
+    "plugins": [
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "modes": [],
+          "bluetoothAlwaysPermission": "Exchanges SubEtha messages with nearby phones over Bluetooth."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Scans animated QR codes that carry SubEtha messages.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Listens for SubEtha messages sent as sound."
+        }
+      ],
+      "expo-asset"
+    ]
   }
 }

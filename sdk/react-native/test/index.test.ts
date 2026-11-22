@@ -77,6 +77,8 @@ describe("@subetha/react-native", () => {
   });
 
   it("loadCore returns null without the native package and the module when present", async () => {
+    expect(await rn.loadCore()).toBeNull();
+    expect(await rn.loadCore(() => { throw new Error("not installed"); })).toBeNull();
     expect(await rn.loadCore(async () => { throw new Error("not installed"); })).toBeNull();
     expect(await rn.loadCore(async () => ({ default: {} }))).toBeNull();
     const fake = { signEnvelopeJson: () => "{}", verifyEnvelopeJson: () => true };

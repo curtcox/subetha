@@ -159,6 +159,25 @@ jobs:
       - run: pnpm --filter @subetha/react-native typecheck
       - run: pnpm --filter @subetha/react-native test
 
+  react-native-sample:
+    name: React Native sample (typecheck + Metro bundle)
+    runs-on: ubuntu-latest
+    # Expo releases move under the sample's ~ ranges: report failures without blocking SDK changes.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: samples/react-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npx tsc --noEmit
+      # Bundles the JS for both platforms with Metro (resolving the SDK sources through
+      # metro.config.js) and compiles it to Hermes bytecode; native builds need a dev client.
+      - run: npx expo export --platform android --platform ios --output-dir dist
+
   android-sample:
     name: Android sample (assembleDebug)
     runs-on: ubuntu-latest

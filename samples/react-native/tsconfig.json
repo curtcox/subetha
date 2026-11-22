@@ -4,8 +4,18 @@
     "strict": true,
     "allowImportingTsExtensions": true,
     "paths": {
-      "@subetha/sdk": ["../../sdk/js/src/index.ts"],
-      "@subetha/react-native": ["../../sdk/react-native/src/index.ts"]
+      "@subetha/sdk": [
+        "../../sdk/js/src/index.ts"
+      ],
+      "@subetha/react-native": [
+        "../../sdk/react-native/src/index.ts"
+      ],
+      "@subetha/sdk/edge": [
+        "../../sdk/js/src/edge/index.ts"
+      ],
+      "@subetha/react-native/edge": [
+        "../../sdk/react-native/src/edge.ts"
+      ]
     }
   }
 }
