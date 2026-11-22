@@ -20,11 +20,30 @@ from .protocol import (
     is_topic,
     parse_priority,
     sign_envelope,
+    sign_request,
     ulid,
     validate_envelope,
 )
 
 DEFAULT_BASE_URL = "https://subetha.org"
+
+
+class DeviceAuth(httpx.Auth):
+    """Signs every request with an enrolled device's key (spec §8.1, ``subetha-req-v2``) instead
+    of sending a bearer token. Usable on any ``httpx.Client``: ``httpx.Client(auth=DeviceAuth(key))``.
+    """
+
+    requires_request_body = True
+
+    def __init__(self, key: DeviceKey, clock: Any = None) -> None:
+        self.key = key
+        self.clock = clock or (lambda: int(time.time()))
+
+    def auth_flow(self, request: httpx.Request) -> Iterator[httpx.Request]:
+        request.headers.pop("authorization", None)
+        signed = sign_request(self.key, request.method, str(request.url), request.content, request.headers.multi_items(), self.clock())
+        request.headers.update(signed)
+        yield request
 
 #: Read timeout for streaming subscriptions. ntfy-style servers send a keepalive at least every
 #: 45-55 seconds, so a silent connection beyond this is treated as dead and reconnected.
@@ -101,18 +120,28 @@ class Client:
         transport: httpx.BaseTransport | None = None,
         http_client: httpx.Client | None = None,
         user_agent: str | None = None,
+        device_key: DeviceKey | None = None,
+        sign_requests: bool = False,
     ) -> None:
+        """``sign_requests=True`` authenticates every request with ``device_key`` (an enrolled
+        device, spec §8.1) instead of ``token``."""
+        if sign_requests and device_key is None:
+            raise ValueError("sign_requests needs a device_key")
         self.base_url = base_url.rstrip("/")
         self.token = token
+        self.device_key = device_key
         headers = {"User-Agent": user_agent or f"subetha-python/{__version__}"}
-        if token:
+        if token and not sign_requests:
             headers["Authorization"] = f"Bearer {token}"
+        auth = DeviceAuth(device_key) if sign_requests and device_key is not None else None
         if http_client is not None:
             self._http = http_client
             self._http.headers.update(headers)
+            if auth is not None:
+                self._http.auth = auth
             self._owns_http = False
         else:
-            self._http = httpx.Client(base_url=self.base_url, headers=headers, timeout=timeout, transport=transport)
+            self._http = httpx.Client(base_url=self.base_url, headers=headers, timeout=timeout, transport=transport, auth=auth)
             self._owns_http = True
         #: Used between reconnect attempts; replaceable in tests.
         self.sleep = time.sleep

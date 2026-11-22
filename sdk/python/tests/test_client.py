@@ -184,3 +184,28 @@ def test_subscribe_stop_event():
     assert next(gen)["message"] == "one"
     stop.set()
     assert list(gen) == []
+
+
+def test_device_signed_requests_replace_the_bearer_token():
+    from subetha.protocol import base64url_decode, request_signing_input
+
+    seen = {}
+
+    def handler(req: httpx.Request):
+        seen["req"] = req
+        return httpx.Response(200, json={"id": "01JD5A2Z3K8Q9V6X7W4T1R0S2M", "topic": TOPIC, "message": "Opened"})
+
+    key = device_key_from_seed(SEED)
+    c = Client("https://relay.test", token="tk_test", device_key=key, sign_requests=True, transport=httpx.MockTransport(handler))
+    c.publish(TOPIC, "Opened", title="Front door", priority="high", idempotency_key="abc")
+    req = seen["req"]
+    assert "authorization" not in req.headers
+    assert req.headers["x-device-id"] == key.device_id
+    listed = req.headers["x-device-signed-headers"].split(",")
+    assert listed[:3] == ["x-device-id", "x-device-time", "x-device-nonce"]
+    assert {"content-type", "idempotency-key", "x-priority", "x-title"} <= set(listed)
+    # Verify the way the relay does: each listed header with its value as received.
+    data = request_signing_input(req.method, str(req.url), req.content, [(n, req.headers[n]) for n in listed]).encode()
+    key.private_key.public_key().verify(base64url_decode(req.headers["x-device-signature"]), data)
+    with pytest.raises(ValueError):
+        Client(sign_requests=True)

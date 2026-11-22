@@ -18,14 +18,17 @@ from subetha.protocol import (
     encrypt_envelope,
     hex_decode,
     is_topic,
+    headers_to_sign,
+    request_signing_input,
     sign_envelope,
+    sign_request,
     signing_bytes,
     validate_envelope,
     verify_envelope,
 )
 
 VECTORS = Path(__file__).resolve().parents[3] / "spec" / "vectors"
-KNOWN = {"canonical.json", "e2ee.json", "signatures.json", "topics.json"}
+KNOWN = {"canonical.json", "e2ee.json", "requests.json", "signatures.json", "topics.json"}
 # Edge framings (spec §11) run on devices; the Python SDK talks to the relay only.
 NOT_APPLICABLE = {"edge.json"}
 
@@ -152,3 +155,20 @@ def test_e2ee_aad_excludes_sender_sig_hops():
     assert e2ee_aad(E2EE["encrypted"]) == expected
     assert e2ee_aad(E2EE["encrypted_signed"]) == expected
     assert e2ee_aad({**E2EE["encrypted_signed"], "hops": 3}) == expected
+
+
+# ---- device-signed requests (spec §8.1) ----
+
+REQS = load("requests.json")
+
+
+@pytest.mark.parametrize("case", REQS["cases"], ids=[c["name"] for c in REQS["cases"]])
+def test_request_signing(case):
+    key = device_key_from_seed(hex_decode(REQS["seed"]))
+    assert key.device_id == REQS["device_id"]
+    body = case["body"].encode("utf-8")
+    signed = headers_to_sign(key.device_id, case["time"], REQS["nonce"], case["headers"])
+    assert request_signing_input(case["method"], case["url"], body, signed) == case["signing_input"]
+    h = sign_request(key, case["method"], case["url"], body, case["headers"], time=case["time"], nonce=REQS["nonce"])
+    assert h["X-Device-Signed-Headers"] == case["signed_headers"]
+    assert h["X-Device-Signature"] == case["signature"]

@@ -36,9 +36,15 @@ key = generate_device_key()           # or device_key_from_seed(seed32)
 c.publish("@alice/doorbell", "Opened", sign_with=key)
 ```
 
+An enrolled device can authenticate with signed requests instead of a token (spec §8.1):
+
+```python
+device = Client(device_key=key, sign_requests=True)   # X-Device-* headers, no token
+```
+
 ## Protocol
 
 `subetha.protocol` has canonical JSON, base32/base64url, ULIDs, the topic grammar, envelope
-validation, device keys, Ed25519 sign/verify, XChaCha20-Poly1305 E2EE (`encrypt_envelope`,
+validation, device keys, Ed25519 sign/verify, device-signed requests (`sign_request`), XChaCha20-Poly1305 E2EE (`encrypt_envelope`,
 `decrypt_envelope`), and the `Deduper`. Names mirror the TypeScript reference in
 `sdk/js/src/protocol` in snake_case.

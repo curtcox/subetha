@@ -31,11 +31,21 @@ from .sign import (
     signing_bytes,
     verify_envelope,
 )
+from .request import (
+    COVERED_REQUEST_HEADERS,
+    UNSIGNED_BY_CONVENTION,
+    headers_to_sign,
+    new_request_nonce,
+    request_signing_input,
+    sign_request,
+)
 from .topic import HANDLE_RE, TOPIC_RE, ParsedTopic, is_topic, parse_topic, secret_topic
 from .ulid import ULID_RE, is_ulid, ulid, ulid_time
 from .xchacha import hchacha20, xchacha_open, xchacha_seal
 
 __all__ = [
+    "COVERED_REQUEST_HEADERS", "UNSIGNED_BY_CONVENTION", "headers_to_sign", "new_request_nonce",
+    "request_signing_input", "sign_request",
     "CONTENT_TYPES", "DEVICE_ID_RE", "EDGE_TRANSPORTS", "HANDLE_RE", "MAX_MESSAGE_BYTES", "MAX_SAFE_INTEGER",
     "PRIORITY_NAMES", "PROTECTED_FIELDS", "ROUTE_MODES", "SIG_DOMAIN", "TOPIC_RE", "TRANSPORTS", "ULID_RE",
     "CanonicalError", "Deduper", "DeviceKey", "Envelope", "ParsedTopic",
