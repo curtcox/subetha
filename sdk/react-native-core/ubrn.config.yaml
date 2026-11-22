@@ -9,12 +9,14 @@ name: SubEthaCore
 rust:
   directory: ../core
   manifestPath: Cargo.toml
+# Write directories without a leading "./": ubrn 0.28 builds wrong relative paths into
+# CMakeLists.txt and build.gradle from it.
 android:
-  directory: ./android
+  directory: android
   cargoExtras: ["--features", "uniffi"]
   targets: [arm64-v8a, armeabi-v7a, x86_64]
 ios:
-  directory: ./ios
+  directory: ios
   cargoExtras: ["--features", "uniffi"]
   targets: [aarch64-apple-ios, aarch64-apple-ios-sim]
   frameworkName: build/SubEthaCoreFramework

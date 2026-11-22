@@ -18,15 +18,15 @@ string(REGEX
 
 # Specifies a path to native header files.
 include_directories(
-    cpp/..
-    cpp/../generated
+    ../cpp
+    ../cpp/generated
 
     ${UNIFFI_BINDGEN_PATH}/cpp/includes
 )
 
 add_library(sub-etha-core            SHARED
-    cpp/../sub-etha-core.cpp
-    cpp/../generated/subetha_core.cpp
+    ../cpp/sub-etha-core.cpp
+    ../cpp/generated/subetha_core.cpp
     cpp-adapter.cpp
 )
 

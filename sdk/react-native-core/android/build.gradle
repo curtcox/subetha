@@ -111,8 +111,8 @@ android {
     main {
       if (isNewArchitectureEnabled()) {
           java.srcDirs += [
-            "android/../generated/java",
-            "android/../generated/jni"
+            "generated/java",
+            "generated/jni"
           ]
       }
     }
