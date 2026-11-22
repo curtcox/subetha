@@ -1,5 +1,5 @@
 //! Byte encodings used by the protocol: RFC 4648 base32 (lowercase, no padding),
-//! base64url (no padding), and hex. Mirrors `sdk/js/src/protocol/encoding.ts`.
+//! base64url (no padding), hex, and RFC 9285 base45 (animated QR frames, spec §11.2). Mirrors `sdk/js/src/protocol/encoding.ts`.
 
 use crate::Error;
 
@@ -119,9 +119,73 @@ pub fn hex_decode(hex: &str) -> Result<Vec<u8>, Error> {
         .collect()
 }
 
+const B45: &[u8; 45] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
+
+/// RFC 9285 base45 (QR alphanumeric-mode text).
+pub fn base45_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(2) * 3);
+    for pair in bytes.chunks(2) {
+        let (mut n, digits) = match pair {
+            [a, b] => (u32::from(*a) * 256 + u32::from(*b), 3),
+            [a] => (u32::from(*a), 2),
+            _ => unreachable!(),
+        };
+        for _ in 0..digits {
+            out.push(B45[(n % 45) as usize] as char);
+            n /= 45;
+        }
+    }
+    out
+}
+
+/// Decodes RFC 9285 base45 (upper case only, as the alphabet requires).
+pub fn base45_decode(s: &str) -> Result<Vec<u8>, Error> {
+    if s.len() % 3 == 1 {
+        return Err(Error::Encoding("invalid base45 length".into()));
+    }
+    let val = |c: u8| -> Result<u32, Error> {
+        B45.iter()
+            .position(|&x| x == c)
+            .map(|p| p as u32)
+            .ok_or_else(|| Error::Encoding(format!("invalid base45 character: {}", c as char)))
+    };
+    let mut out = Vec::with_capacity(s.len() / 3 * 2 + 1);
+    for group in s.as_bytes().chunks(3) {
+        match group {
+            [a, b, c] => {
+                let n = val(*a)? + val(*b)? * 45 + val(*c)? * 2025;
+                if n > 0xFFFF {
+                    return Err(Error::Encoding("invalid base45 triple".into()));
+                }
+                out.extend_from_slice(&(n as u16).to_be_bytes());
+            }
+            [a, b] => {
+                let n = val(*a)? + val(*b)? * 45;
+                if n > 0xFF {
+                    return Err(Error::Encoding("invalid base45 pair".into()));
+                }
+                out.push(n as u8);
+            }
+            _ => unreachable!(),
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base45_rfc9285() {
+        for (plain, enc) in [("AB", "BB8"), ("Hello!!", "%69 VD92EX0"), ("base-45", "UJCLQE7W581"), ("ietf!", "QED8WEX0"), ("", "")] {
+            assert_eq!(base45_encode(plain.as_bytes()), enc);
+            assert_eq!(base45_decode(enc).unwrap(), plain.as_bytes());
+        }
+        assert!(base45_decode("GGW").is_err());
+        assert!(base45_decode("a").is_err());
+        assert!(base45_decode("abc").is_err());
+    }
 
     #[test]
     fn base32_rfc4648_vectors() {

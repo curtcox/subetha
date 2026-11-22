@@ -66,3 +66,36 @@ describe("e2ee vectors", () => {
     expect(validateSchema(v.encrypted_signed)).toBe(true);
   });
 });
+
+describe("edge vectors", async () => {
+  const edge = await import("@subetha/sdk/edge");
+  const { base64urlDecode, utf8 } = await import("@subetha/sdk/protocol");
+  const v = load("edge.json");
+  it("audio tones and PCM", () => {
+    for (const c of v.audio.cases) {
+      expect(edge.audioTones(utf8.encode(c.payload))).toEqual(c.tones);
+      expect(edge.audioFrameSamples(utf8.encode(c.payload).length)).toBe(c.frame_samples);
+    }
+    const raw = base64urlDecode(v.audio.pcm_s16le);
+    const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+    const pcm = Float32Array.from({ length: raw.length / 2 }, (_, i) => dv.getInt16(i * 2, true) / 32767);
+    expect(utf8.decode(edge.demodulate(pcm)!)).toBe(v.audio.pcm_payload);
+  });
+  it("fountain frames decode", () => {
+    const dec = new edge.FountainDecoder();
+    for (const f of v.fountain.frames.slice().reverse()) dec.push(hexDecode(f.hex));
+    expect(utf8.decode(dec.result!)).toBe(v.fountain.payload);
+  });
+  it("ble chunks reassemble", () => {
+    const r = new edge.Reassembler();
+    const out = v.ble.chunks.map((c: string) => r.push(hexDecode(c), 0)).filter(Boolean);
+    expect(utf8.decode(out[0])).toBe(v.ble.payload);
+  });
+  it("base45 and gossip parse", () => {
+    for (const c of v.base45) {
+      const bytes = c.hex !== undefined ? hexDecode(c.hex) : utf8.encode(c.plain);
+      expect(edge.base45Encode(bytes)).toBe(c.encoded);
+    }
+    for (const m of v.gossip) expect(edge.parseGossip(JSON.stringify(m))).toEqual(m);
+  });
+});

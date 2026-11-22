@@ -26,6 +26,8 @@ from subetha.protocol import (
 
 VECTORS = Path(__file__).resolve().parents[3] / "spec" / "vectors"
 KNOWN = {"canonical.json", "e2ee.json", "signatures.json", "topics.json"}
+# Edge framings (spec §11) run on devices; the Python SDK talks to the relay only.
+NOT_APPLICABLE = {"edge.json"}
 
 
 def load(name: str):
@@ -33,7 +35,7 @@ def load(name: str):
 
 
 def test_every_vector_file_is_covered():
-    found = {p.name for p in VECTORS.glob("*.json")}
+    found = {p.name for p in VECTORS.glob("*.json")} - NOT_APPLICABLE
     assert found == KNOWN, f"new or missing vector files: {found ^ KNOWN}"
 
 

@@ -50,11 +50,11 @@ pub fn frame_samples(len: usize) -> usize {
     (PREAMBLE_SYMBOLS + 2 * (SYNC.len() + 2 + len + 2)) * SYMBOL_SAMPLES
 }
 
-/// Modulates `payload` into mono f32 PCM at [`SAMPLE_RATE`].
+/// The tone (Hz) of every symbol in the frame for `payload`, preamble first.
 ///
 /// # Panics
 /// If `payload` is longer than [`MAX_PAYLOAD`].
-pub fn modulate(payload: &[u8]) -> Vec<f32> {
+pub fn tones(payload: &[u8]) -> Vec<f32> {
     assert!(payload.len() <= MAX_PAYLOAD, "audio payload too large");
     let len = payload.len() as u16;
     let mut body = Vec::with_capacity(payload.len() + 6);
@@ -70,6 +70,15 @@ pub fn modulate(payload: &[u8]) -> Vec<f32> {
         tones.push(data_tone(b >> 4));
         tones.push(data_tone(b & 15));
     }
+    tones
+}
+
+/// Modulates `payload` into mono f32 PCM at [`SAMPLE_RATE`].
+///
+/// # Panics
+/// If `payload` is longer than [`MAX_PAYLOAD`].
+pub fn modulate(payload: &[u8]) -> Vec<f32> {
+    let tones = tones(payload);
     let mut out = Vec::with_capacity(tones.len() * SYMBOL_SAMPLES);
     let w = 2.0 * std::f32::consts::PI / SAMPLE_RATE as f32;
     for f in tones {

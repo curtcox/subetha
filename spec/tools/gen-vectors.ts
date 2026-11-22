@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 import {
   base64urlEncode, canonicalEnvelope, canonicalize, decryptEnvelope, deviceKeyFromSeed, encryptEnvelope, hexDecode, hexEncode, signEnvelope, type Json,
 } from "@subetha/sdk/protocol";
+import {
+  audioFrameSamples, audioTones, base45Encode, chunk, FountainEncoder, frameBlocks, modulate, robustSolitonCdf, SplitMix64,
+} from "@subetha/sdk/edge";
 
 const out = join(dirname(fileURLToPath(import.meta.url)), "..", "vectors");
 const write = (name: string, data: unknown) => writeFileSync(join(out, name), JSON.stringify(data, null, 2) + "\n");
@@ -96,4 +99,58 @@ write("e2ee.json", {
   encrypted_signed: encSigned,
   decrypted_signed: await decryptEnvelope(encSigned, key),
 });
+
+// ---- edge framings (spec §11) ----
+{
+  const ascii = (t: string) => new TextEncoder().encode(t);
+  const sm = (seed: bigint) => {
+    const r = new SplitMix64(seed);
+    const u64 = [0, 1, 2, 3].map(() => r.nextU64().toString(16).padStart(16, "0"));
+    const r2 = new SplitMix64(seed);
+    const f64 = [0, 1, 2].map(() => r2.nextF64());
+    const below = [10, 1000, 7, 65536].map((n) => r2.below(n));
+    return { seed: seed.toString(), next_u64_hex: u64, then_f64_from_fresh: f64, then_below: { n: [10, 1000, 7, 65536], values: below } };
+  };
+  const audioPayloads = ["", "hi", "01JD5A2Z3K8Q9V6X7W4T1R0S2M"];
+  // A short frame as signed 16-bit PCM (little-endian, base64url), after 1000 samples of silence.
+  const pcmPayload = ascii("hi");
+  const pcm = modulate(pcmPayload);
+  const s16 = new Uint8Array((pcm.length + 1000) * 2);
+  const view = new DataView(s16.buffer);
+  pcm.forEach((x, i) => view.setInt16((1000 + i) * 2, Math.round(x * 32767), true));
+  const fountainPayload = ascii("The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.");
+  const enc = new FountainEncoder(fountainPayload, 30);
+  const blePayload = ascii("{\"type\":\"request\",\"ids\":[\"01JD5A2Z3K8Q9V6X7W4T1R0S2M\"]}");
+  write("edge.json", {
+    description: "Edge framings (spec §11). crc: check values. splitmix64: first outputs per seed (u64 as hex; f64 and below() continue from a fresh generator). base45: RFC 9285. audio: the symbol tones (Hz) for each payload must match exactly; pcm_s16le is `pcm_payload` modulated after 1000 samples of silence, quantized round(x*32767): demodulating it must give the payload, and modulating must match within ±2 per sample. fountain: robust soliton CDFs (compare within 1e-12), frame_blocks for given (seq, k, crc), and the frames of `payload` at `frame_size` (hex). ble: chunks (hex) of `payload` with `seq` at `att_mtu`. gossip: wire messages each implementation must parse.",
+    crc: { input: "123456789", crc16_ccitt_false: 0x29b1, crc32: 0xcbf43926 },
+    splitmix64: [sm(0n), sm(7n), sm(0xdeadbeefcafef00dn)],
+    base45: [["", ""], ["AB", "BB8"], ["Hello!!", "%69 VD92EX0"], ["base-45", "UJCLQE7W581"], ["ietf!", "QED8WEX0"]].map(([p, e]) => ({ plain: p, encoded: e }))
+      .concat([{ hex: "00ff10a55a", encoded: base45Encode(hexDecode("00ff10a55a")) } as never]),
+    audio: {
+      sample_rate: 48000,
+      symbol_samples: 480,
+      cases: audioPayloads.map((p) => ({ payload: p, frame_samples: audioFrameSamples(ascii(p).length), tones: audioTones(ascii(p)) })),
+      pcm_payload: "hi",
+      pcm_lead_samples: 1000,
+      pcm_s16le: base64urlEncode(s16),
+    },
+    fountain: {
+      cdf: [1, 2, 3, 10, 40].map((k) => ({ k, cdf: robustSolitonCdf(k) })),
+      frame_blocks: [[40, 0x12345678], [10, 0xcbf43926], [100, 0xffffffff]].map(([k, crc]) => ({
+        k, crc, seqs: Array.from({ length: 12 }, (_, i) => k! - 2 + i * 7).map((seq) => ({ seq, blocks: frameBlocks(seq, k!, crc!, robustSolitonCdf(k!)) })),
+      })),
+      payload: new TextDecoder().decode(fountainPayload),
+      frame_size: 30,
+      source_blocks: enc.sourceBlocks,
+      frames: Array.from({ length: 12 }, (_, s) => ({ seq: s, hex: hexEncode(enc.frame(s)) })),
+    },
+    ble: { seq: 7, att_mtu: 23, payload: new TextDecoder().decode(blePayload), chunks: chunk(7, blePayload, 23).map(hexEncode) },
+    gossip: [
+      { type: "summary", topics: { "@alice/doorbell": ["01JD5A2Z3K8Q9V6X7W4T1R0S2M", "01JD5A2Z3K8Q9V6X7W4T1R0S2N"] } },
+      { type: "request", ids: ["01JD5A2Z3K8Q9V6X7W4T1R0S2M"] },
+      { type: "deliver", envelopes: [{ id: "01JD5A2Z3K8Q9V6X7W4T1R0S2M", time: 1763750000, topic: "@alice/doorbell", message: "Opened", hops: 1 }] },
+    ],
+  });
+}
 console.log("vectors written to", out);

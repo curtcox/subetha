@@ -163,3 +163,84 @@ Codes are stable and listed in `errors.json`.
 
 `ws`, `sse`, `poll`, `webpush`, `apns`, `fcm`, `webhook`, `email`, `slack`, `sms`, `voice`,
 `mcp`, `lxmf`, `ble`, `audio`, `qr`, `lan`. Edge transports are `ble`, `audio`, `qr`, `lan`.
+
+## 11. Edge framings
+
+Edge transports (§10) run between devices without the relay. Their framings are shared by the
+Rust core (`sdk/core/src/edge`) and the TypeScript SDK (`sdk/js/src/edge`) and pinned by
+`vectors/edge.json`. Checksums: CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF, check value
+0x29B1) and CRC-32/IEEE (check value 0xCBF43926). All multi-byte integers are big-endian.
+Every framing carries one opaque payload, normally a §11.4 gossip message or a JSON envelope.
+
+### 11.1 Audio (16-FSK)
+
+Mono PCM at 48 kHz. One symbol is 10 ms (480 samples) of one sine tone at amplitude 0.5,
+phase restarted at 0 each symbol. Every tone is a multiple of 100 Hz, so the waveform stays
+continuous. A frame is:
+
+| Part | Symbols | Tones |
+|---|---|---|
+| preamble | 8 | alternating 1500 Hz, 5600 Hz (starting with 1500) |
+| sync `0x2D 0xD4`, u16 length (≤ 1024), payload, CRC-16 over length‖payload | 2 per byte | high nibble then low nibble; nibble *k* is 2000 + 200·*k* Hz |
+
+The first and last 48 samples get a raised-cosine fade. Receivers search for the preamble,
+read the header, and accept a frame only if the sync word and CRC match. Throughput is 50 B/s,
+which suits ids, wake-ups, and short messages. Input at other sample rates is resampled to
+48 kHz before decoding.
+
+### 11.2 Animated QR (LT fountain code)
+
+The payload is cut into *K* = ⌈len / *B*⌉ blocks of *B* bytes (at least one; the last is
+zero-padded) and sent as an endless stream of fixed-size frames:
+
+```
+u8 version (1) · u32 payload length · u16 block size B · u32 CRC-32(payload) · u32 seq · B bytes
+```
+
+Frame `seq < K` carries block `seq`. A later frame carries the XOR of the blocks chosen like
+this: seed SplitMix64 with `seq ^ (crc << 32)` (as u64), draw `u = next_f64()`, take the smallest
+degree *d* with `u < CDF[d-1]` from the robust soliton distribution (*c* = 0.1, δ = 0.5, IEEE
+double arithmetic, last entry forced to 1), then pick *d* distinct blocks with a partial
+Fisher–Yates shuffle of `0..K`: for `i` in `0..d`, swap position `i` with `i + below(K - i)`.
+SplitMix64 is the reference generator. `next_f64` is `(x >> 11) / 2^53`, and `below(n)` is
+`(x · n) >> 64` on 128-bit integers.
+
+Receivers peel: a frame that reduces to one unknown block solves it, which may unlock others.
+The payload is complete when every block is known and the CRC matches. A receiver that joins
+late or drops frames just keeps scanning. It typically needs about 1.1–1.5·*K* frames.
+
+Each frame is shown as one QR code holding the frame as **base45** text (RFC 9285) in
+alphanumeric mode, which is about 97% efficient versus 75% for base64. Binary byte-mode QR
+codes are also allowed where the scanner returns raw bytes.
+
+### 11.3 Bluetooth LE
+
+One GATT service, `53554245-5448-4100-8000-5ebe7a000000`. The first 7 bytes spell `SUBETHA`.
+
+| Characteristic | UUID suffix | Properties | Carries |
+|---|---|---|---|
+| inbox | `…0001` | write, write without response | chunks from the central |
+| outbox | `…0002` | notify, indicate | chunks to the central |
+| summary | `…0003` | read | a §11.4 summary, for quick peeks |
+| version | `…0004` | read | `[1]` |
+
+Each message is `payload ‖ CRC-16(payload)`, split into chunks of at most `ATT_MTU − 9` bytes,
+each prefixed with `u16 seq · u16 index · u16 count`. Chunks may arrive out of order or more than once.
+Messages are keyed by `seq`, and a receiver drops partial messages after a timeout.
+
+### 11.4 Gossip (BLE, LAN)
+
+Peers exchange JSON messages tagged by `type`:
+
+```json
+{"type":"summary","topics":{"@alice/doorbell":["01JD…","01JD…"]}}
+{"type":"request","ids":["01JD…"]}
+{"type":"deliver","envelopes":[{ "id":"01JD…", "topic":"@alice/doorbell", "hops":1, … }]}
+```
+
+When peers meet, each sends a summary: for every topic, the most recent ids it can forward
+(hops > 0, not expired). The other side requests the ids it hasn't seen on topics it subscribes
+to or relays. The holder delivers them with `hops` decremented. Receivers drop envelopes with
+no id, on topics they don't want, with `hops` outside 0..16, expired, already seen (§6), or with a
+signature that doesn't verify (§4). Nodes may also require signatures. Signatures exclude
+`hops` and E2EE (§5) hides content, so relaying nodes can neither forge nor read messages.
