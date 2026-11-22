@@ -251,6 +251,203 @@ typedef void (*UniffiForeignFutureCompleteVoid)(uint64_t, UniffiForeignFutureStr
     );
 
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_EDGEAUDIORECEIVER
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_EDGEAUDIORECEIVER
+void*_Nonnull uniffi_subetha_core_fn_clone_edgeaudioreceiver(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FREE_EDGEAUDIORECEIVER
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FREE_EDGEAUDIORECEIVER
+void uniffi_subetha_core_fn_free_edgeaudioreceiver(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CONSTRUCTOR_EDGEAUDIORECEIVER_NEW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CONSTRUCTOR_EDGEAUDIORECEIVER_NEW
+void*_Nonnull uniffi_subetha_core_fn_constructor_edgeaudioreceiver_new(uint32_t sample_rate, float window_seconds, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEAUDIORECEIVER_PUSH
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEAUDIORECEIVER_PUSH
+RustBuffer uniffi_subetha_core_fn_method_edgeaudioreceiver_push(void*_Nonnull ptr, RustBuffer samples, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_EDGECHUNKREASSEMBLER
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_EDGECHUNKREASSEMBLER
+void*_Nonnull uniffi_subetha_core_fn_clone_edgechunkreassembler(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FREE_EDGECHUNKREASSEMBLER
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FREE_EDGECHUNKREASSEMBLER
+void uniffi_subetha_core_fn_free_edgechunkreassembler(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CONSTRUCTOR_EDGECHUNKREASSEMBLER_NEW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CONSTRUCTOR_EDGECHUNKREASSEMBLER_NEW
+void*_Nonnull uniffi_subetha_core_fn_constructor_edgechunkreassembler_new(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGECHUNKREASSEMBLER_PRUNE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGECHUNKREASSEMBLER_PRUNE
+uint32_t uniffi_subetha_core_fn_method_edgechunkreassembler_prune(void*_Nonnull ptr, uint64_t now_ms, uint64_t timeout_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGECHUNKREASSEMBLER_PUSH
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGECHUNKREASSEMBLER_PUSH
+RustBuffer uniffi_subetha_core_fn_method_edgechunkreassembler_push(void*_Nonnull ptr, RustBuffer chunk, uint64_t now_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_EDGEGOSSIPNODE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_EDGEGOSSIPNODE
+void*_Nonnull uniffi_subetha_core_fn_clone_edgegossipnode(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FREE_EDGEGOSSIPNODE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FREE_EDGEGOSSIPNODE
+void uniffi_subetha_core_fn_free_edgegossipnode(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CONSTRUCTOR_EDGEGOSSIPNODE_NEW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CONSTRUCTOR_EDGEGOSSIPNODE_NEW
+void*_Nonnull uniffi_subetha_core_fn_constructor_edgegossipnode_new(int8_t require_signatures, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_HANDLE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_HANDLE
+RustBuffer uniffi_subetha_core_fn_method_edgegossipnode_handle(void*_Nonnull ptr, RustBuffer message, uint64_t now_secs, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_HAS_SEEN
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_HAS_SEEN
+int8_t uniffi_subetha_core_fn_method_edgegossipnode_has_seen(void*_Nonnull ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_PRUNE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_PRUNE
+void uniffi_subetha_core_fn_method_edgegossipnode_prune(void*_Nonnull ptr, uint64_t now_secs, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_PUBLISH
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_PUBLISH
+int8_t uniffi_subetha_core_fn_method_edgegossipnode_publish(void*_Nonnull ptr, RustBuffer envelope_json, uint64_t now_secs, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_SET_RELAYABLE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_SET_RELAYABLE
+void uniffi_subetha_core_fn_method_edgegossipnode_set_relayable(void*_Nonnull ptr, RustBuffer topic, int8_t relay, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_STORED
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_STORED
+uint64_t uniffi_subetha_core_fn_method_edgegossipnode_stored(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_SUBSCRIBE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_SUBSCRIBE
+void uniffi_subetha_core_fn_method_edgegossipnode_subscribe(void*_Nonnull ptr, RustBuffer topic, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_SUMMARY
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_SUMMARY
+RustBuffer uniffi_subetha_core_fn_method_edgegossipnode_summary(void*_Nonnull ptr, uint64_t now_secs, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_UNSUBSCRIBE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEGOSSIPNODE_UNSUBSCRIBE
+void uniffi_subetha_core_fn_method_edgegossipnode_unsubscribe(void*_Nonnull ptr, RustBuffer topic, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_EDGEQRDECODER
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_EDGEQRDECODER
+void*_Nonnull uniffi_subetha_core_fn_clone_edgeqrdecoder(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FREE_EDGEQRDECODER
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FREE_EDGEQRDECODER
+void uniffi_subetha_core_fn_free_edgeqrdecoder(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CONSTRUCTOR_EDGEQRDECODER_NEW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CONSTRUCTOR_EDGEQRDECODER_NEW
+void*_Nonnull uniffi_subetha_core_fn_constructor_edgeqrdecoder_new(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEQRDECODER_PUSH_FRAME
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEQRDECODER_PUSH_FRAME
+RustBuffer uniffi_subetha_core_fn_method_edgeqrdecoder_push_frame(void*_Nonnull ptr, RustBuffer frame, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEQRDECODER_PUSH_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEQRDECODER_PUSH_TEXT
+RustBuffer uniffi_subetha_core_fn_method_edgeqrdecoder_push_text(void*_Nonnull ptr, RustBuffer text, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEQRDECODER_RESULT
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEQRDECODER_RESULT
+RustBuffer uniffi_subetha_core_fn_method_edgeqrdecoder_result(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_EDGEQRENCODER
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_EDGEQRENCODER
+void*_Nonnull uniffi_subetha_core_fn_clone_edgeqrencoder(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FREE_EDGEQRENCODER
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FREE_EDGEQRENCODER
+void uniffi_subetha_core_fn_free_edgeqrencoder(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CONSTRUCTOR_EDGEQRENCODER_NEW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CONSTRUCTOR_EDGEQRENCODER_NEW
+void*_Nonnull uniffi_subetha_core_fn_constructor_edgeqrencoder_new(RustBuffer payload, uint32_t frame_size, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEQRENCODER_FRAME
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEQRENCODER_FRAME
+RustBuffer uniffi_subetha_core_fn_method_edgeqrencoder_frame(void*_Nonnull ptr, uint32_t seq, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEQRENCODER_FRAME_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEQRENCODER_FRAME_TEXT
+RustBuffer uniffi_subetha_core_fn_method_edgeqrencoder_frame_text(void*_Nonnull ptr, uint32_t seq, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEQRENCODER_SOURCE_BLOCKS
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_EDGEQRENCODER_SOURCE_BLOCKS
+uint32_t uniffi_subetha_core_fn_method_edgeqrencoder_source_blocks(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_AUDIO_DEMODULATE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_AUDIO_DEMODULATE
+RustBuffer uniffi_subetha_core_fn_func_audio_demodulate(RustBuffer samples, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_AUDIO_MODULATE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_AUDIO_MODULATE
+RustBuffer uniffi_subetha_core_fn_func_audio_modulate(RustBuffer payload, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_AUDIO_RESAMPLE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_AUDIO_RESAMPLE
+RustBuffer uniffi_subetha_core_fn_func_audio_resample(RustBuffer samples, uint32_t from_rate, uint32_t to_rate, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_BASE45_DECODE_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_BASE45_DECODE_TEXT
+RustBuffer uniffi_subetha_core_fn_func_base45_decode_text(RustBuffer text, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_BASE45_ENCODE_BYTES
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_BASE45_ENCODE_BYTES
+RustBuffer uniffi_subetha_core_fn_func_base45_encode_bytes(RustBuffer bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_BLE_CHUNK
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_BLE_CHUNK
+RustBuffer uniffi_subetha_core_fn_func_ble_chunk(uint16_t seq, RustBuffer payload, uint32_t att_mtu, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_CANONICALIZE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_CANONICALIZE_JSON
 RustBuffer uniffi_subetha_core_fn_func_canonicalize_json(RustBuffer json, RustCallStatus *_Nonnull out_status
@@ -266,6 +463,11 @@ RustBuffer uniffi_subetha_core_fn_func_decrypt_envelope_json(RustBuffer envelope
 RustBuffer uniffi_subetha_core_fn_func_device_key_from_seed(RustBuffer seed, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_EDGE_DELIVER_PAYLOAD
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_EDGE_DELIVER_PAYLOAD
+RustBuffer uniffi_subetha_core_fn_func_edge_deliver_payload(RustBuffer envelopes_json, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_ENCRYPT_ENVELOPE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_ENCRYPT_ENVELOPE_JSON
 RustBuffer uniffi_subetha_core_fn_func_encrypt_envelope_json(RustBuffer envelope_json, RustBuffer key, RustBuffer kid, RustCallStatus *_Nonnull out_status
@@ -274,6 +476,27 @@ RustBuffer uniffi_subetha_core_fn_func_encrypt_envelope_json(RustBuffer envelope
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_ENROLLMENT_PROOF
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_ENROLLMENT_PROOF
 RustBuffer uniffi_subetha_core_fn_func_enrollment_proof(RustBuffer seed, uint64_t time, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_LAN_BEACON
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_LAN_BEACON
+RustBuffer uniffi_subetha_core_fn_func_lan_beacon(RustBuffer node, uint16_t port, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_LAN_DATAGRAMS
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_LAN_DATAGRAMS
+RustBuffer uniffi_subetha_core_fn_func_lan_datagrams(uint16_t seq, RustBuffer payload, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_LAN_NEW_NODE_ID
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_LAN_NEW_NODE_ID
+RustBuffer uniffi_subetha_core_fn_func_lan_new_node_id(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_LAN_PARSE_BEACON
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_LAN_PARSE_BEACON
+RustBuffer uniffi_subetha_core_fn_func_lan_parse_beacon(RustBuffer bytes, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_NEW_DEVICE_KEY
@@ -604,6 +827,42 @@ void ffi_subetha_core_rust_future_free_void(uint64_t handle
 void ffi_subetha_core_rust_future_complete_void(uint64_t handle, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_AUDIO_DEMODULATE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_AUDIO_DEMODULATE
+uint16_t uniffi_subetha_core_checksum_func_audio_demodulate(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_AUDIO_MODULATE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_AUDIO_MODULATE
+uint16_t uniffi_subetha_core_checksum_func_audio_modulate(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_AUDIO_RESAMPLE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_AUDIO_RESAMPLE
+uint16_t uniffi_subetha_core_checksum_func_audio_resample(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_BASE45_DECODE_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_BASE45_DECODE_TEXT
+uint16_t uniffi_subetha_core_checksum_func_base45_decode_text(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_BASE45_ENCODE_BYTES
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_BASE45_ENCODE_BYTES
+uint16_t uniffi_subetha_core_checksum_func_base45_encode_bytes(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_BLE_CHUNK
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_BLE_CHUNK
+uint16_t uniffi_subetha_core_checksum_func_ble_chunk(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_CANONICALIZE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_CANONICALIZE_JSON
 uint16_t uniffi_subetha_core_checksum_func_canonicalize_json(void
@@ -622,6 +881,12 @@ uint16_t uniffi_subetha_core_checksum_func_device_key_from_seed(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_EDGE_DELIVER_PAYLOAD
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_EDGE_DELIVER_PAYLOAD
+uint16_t uniffi_subetha_core_checksum_func_edge_deliver_payload(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_ENCRYPT_ENVELOPE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_ENCRYPT_ENVELOPE_JSON
 uint16_t uniffi_subetha_core_checksum_func_encrypt_envelope_json(void
@@ -631,6 +896,30 @@ uint16_t uniffi_subetha_core_checksum_func_encrypt_envelope_json(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_ENROLLMENT_PROOF
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_ENROLLMENT_PROOF
 uint16_t uniffi_subetha_core_checksum_func_enrollment_proof(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_LAN_BEACON
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_LAN_BEACON
+uint16_t uniffi_subetha_core_checksum_func_lan_beacon(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_LAN_DATAGRAMS
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_LAN_DATAGRAMS
+uint16_t uniffi_subetha_core_checksum_func_lan_datagrams(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_LAN_NEW_NODE_ID
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_LAN_NEW_NODE_ID
+uint16_t uniffi_subetha_core_checksum_func_lan_new_node_id(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_LAN_PARSE_BEACON
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_LAN_PARSE_BEACON
+uint16_t uniffi_subetha_core_checksum_func_lan_parse_beacon(void
     
 );
 #endif
@@ -685,6 +974,144 @@ uint16_t uniffi_subetha_core_checksum_func_validate_envelope_json(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_VERIFY_ENVELOPE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_VERIFY_ENVELOPE_JSON
 uint16_t uniffi_subetha_core_checksum_func_verify_envelope_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEAUDIORECEIVER_PUSH
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEAUDIORECEIVER_PUSH
+uint16_t uniffi_subetha_core_checksum_method_edgeaudioreceiver_push(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGECHUNKREASSEMBLER_PRUNE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGECHUNKREASSEMBLER_PRUNE
+uint16_t uniffi_subetha_core_checksum_method_edgechunkreassembler_prune(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGECHUNKREASSEMBLER_PUSH
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGECHUNKREASSEMBLER_PUSH
+uint16_t uniffi_subetha_core_checksum_method_edgechunkreassembler_push(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_HANDLE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_HANDLE
+uint16_t uniffi_subetha_core_checksum_method_edgegossipnode_handle(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_HAS_SEEN
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_HAS_SEEN
+uint16_t uniffi_subetha_core_checksum_method_edgegossipnode_has_seen(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_PRUNE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_PRUNE
+uint16_t uniffi_subetha_core_checksum_method_edgegossipnode_prune(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_PUBLISH
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_PUBLISH
+uint16_t uniffi_subetha_core_checksum_method_edgegossipnode_publish(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_SET_RELAYABLE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_SET_RELAYABLE
+uint16_t uniffi_subetha_core_checksum_method_edgegossipnode_set_relayable(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_STORED
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_STORED
+uint16_t uniffi_subetha_core_checksum_method_edgegossipnode_stored(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_SUBSCRIBE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_SUBSCRIBE
+uint16_t uniffi_subetha_core_checksum_method_edgegossipnode_subscribe(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_SUMMARY
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_SUMMARY
+uint16_t uniffi_subetha_core_checksum_method_edgegossipnode_summary(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_UNSUBSCRIBE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEGOSSIPNODE_UNSUBSCRIBE
+uint16_t uniffi_subetha_core_checksum_method_edgegossipnode_unsubscribe(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEQRDECODER_PUSH_FRAME
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEQRDECODER_PUSH_FRAME
+uint16_t uniffi_subetha_core_checksum_method_edgeqrdecoder_push_frame(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEQRDECODER_PUSH_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEQRDECODER_PUSH_TEXT
+uint16_t uniffi_subetha_core_checksum_method_edgeqrdecoder_push_text(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEQRDECODER_RESULT
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEQRDECODER_RESULT
+uint16_t uniffi_subetha_core_checksum_method_edgeqrdecoder_result(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEQRENCODER_FRAME
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEQRENCODER_FRAME
+uint16_t uniffi_subetha_core_checksum_method_edgeqrencoder_frame(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEQRENCODER_FRAME_TEXT
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEQRENCODER_FRAME_TEXT
+uint16_t uniffi_subetha_core_checksum_method_edgeqrencoder_frame_text(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEQRENCODER_SOURCE_BLOCKS
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEQRENCODER_SOURCE_BLOCKS
+uint16_t uniffi_subetha_core_checksum_method_edgeqrencoder_source_blocks(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_CONSTRUCTOR_EDGEAUDIORECEIVER_NEW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_CONSTRUCTOR_EDGEAUDIORECEIVER_NEW
+uint16_t uniffi_subetha_core_checksum_constructor_edgeaudioreceiver_new(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_CONSTRUCTOR_EDGECHUNKREASSEMBLER_NEW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_CONSTRUCTOR_EDGECHUNKREASSEMBLER_NEW
+uint16_t uniffi_subetha_core_checksum_constructor_edgechunkreassembler_new(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_CONSTRUCTOR_EDGEGOSSIPNODE_NEW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_CONSTRUCTOR_EDGEGOSSIPNODE_NEW
+uint16_t uniffi_subetha_core_checksum_constructor_edgegossipnode_new(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_CONSTRUCTOR_EDGEQRDECODER_NEW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_CONSTRUCTOR_EDGEQRDECODER_NEW
+uint16_t uniffi_subetha_core_checksum_constructor_edgeqrdecoder_new(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_CONSTRUCTOR_EDGEQRENCODER_NEW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_CONSTRUCTOR_EDGEQRENCODER_NEW
+uint16_t uniffi_subetha_core_checksum_constructor_edgeqrencoder_new(void
     
 );
 #endif

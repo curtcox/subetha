@@ -399,6 +399,38 @@ fileprivate class UniffiHandleMap<T> {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt16: FfiConverterPrimitive {
+    typealias FfiType = UInt16
+    typealias SwiftType = UInt16
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt16 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
+    typealias FfiType = UInt32
+    typealias SwiftType = UInt32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
     typealias FfiType = UInt64
     typealias SwiftType = UInt64
@@ -409,6 +441,22 @@ fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
 
     public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterFloat: FfiConverterPrimitive {
+    typealias FfiType = Float
+    typealias SwiftType = Float
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Float {
+        return try lift(readFloat(&buf))
+    }
+
+    public static func write(_ value: Float, into buf: inout [UInt8]) {
+        writeFloat(&buf, lower(value))
     }
 }
 
@@ -496,6 +544,873 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 }
 
 
+
+
+/**
+ * Buffers microphone samples at any rate and returns payloads as frames are heard.
+ */
+public protocol EdgeAudioReceiverProtocol : AnyObject {
+    
+    func push(samples: [Float])  -> Data?
+    
+}
+
+/**
+ * Buffers microphone samples at any rate and returns payloads as frames are heard.
+ */
+open class EdgeAudioReceiver:
+    EdgeAudioReceiverProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_subetha_core_fn_clone_edgeaudioreceiver(self.pointer, $0) }
+    }
+public convenience init(sampleRate: UInt32, windowSeconds: Float) {
+    let pointer =
+        try! rustCall() {
+    uniffi_subetha_core_fn_constructor_edgeaudioreceiver_new(
+        FfiConverterUInt32.lower(sampleRate),
+        FfiConverterFloat.lower(windowSeconds),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_subetha_core_fn_free_edgeaudioreceiver(pointer, $0) }
+    }
+
+    
+
+    
+open func push(samples: [Float]) -> Data? {
+    return try!  FfiConverterOptionData.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_edgeaudioreceiver_push(self.uniffiClonePointer(),
+        FfiConverterSequenceFloat.lower(samples),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeEdgeAudioReceiver: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = EdgeAudioReceiver
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> EdgeAudioReceiver {
+        return EdgeAudioReceiver(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: EdgeAudioReceiver) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EdgeAudioReceiver {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: EdgeAudioReceiver, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEdgeAudioReceiver_lift(_ pointer: UnsafeMutableRawPointer) throws -> EdgeAudioReceiver {
+    return try FfiConverterTypeEdgeAudioReceiver.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEdgeAudioReceiver_lower(_ value: EdgeAudioReceiver) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeEdgeAudioReceiver.lower(value)
+}
+
+
+
+
+/**
+ * Reassembles chunks from one peer connection (BLE notifications/writes or LAN datagrams).
+ */
+public protocol EdgeChunkReassemblerProtocol : AnyObject {
+    
+    /**
+     * Drops partial messages older than `timeout_ms`; returns how many.
+     */
+    func prune(nowMs: UInt64, timeoutMs: UInt64)  -> UInt32
+    
+    /**
+     * Adds a chunk; returns the message once all its chunks arrived. Throws on a bad chunk.
+     */
+    func push(chunk: Data, nowMs: UInt64) throws  -> Data?
+    
+}
+
+/**
+ * Reassembles chunks from one peer connection (BLE notifications/writes or LAN datagrams).
+ */
+open class EdgeChunkReassembler:
+    EdgeChunkReassemblerProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_subetha_core_fn_clone_edgechunkreassembler(self.pointer, $0) }
+    }
+public convenience init() {
+    let pointer =
+        try! rustCall() {
+    uniffi_subetha_core_fn_constructor_edgechunkreassembler_new($0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_subetha_core_fn_free_edgechunkreassembler(pointer, $0) }
+    }
+
+    
+
+    
+    /**
+     * Drops partial messages older than `timeout_ms`; returns how many.
+     */
+open func prune(nowMs: UInt64, timeoutMs: UInt64) -> UInt32 {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_edgechunkreassembler_prune(self.uniffiClonePointer(),
+        FfiConverterUInt64.lower(nowMs),
+        FfiConverterUInt64.lower(timeoutMs),$0
+    )
+})
+}
+    
+    /**
+     * Adds a chunk; returns the message once all its chunks arrived. Throws on a bad chunk.
+     */
+open func push(chunk: Data, nowMs: UInt64)throws  -> Data? {
+    return try  FfiConverterOptionData.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
+    uniffi_subetha_core_fn_method_edgechunkreassembler_push(self.uniffiClonePointer(),
+        FfiConverterData.lower(chunk),
+        FfiConverterUInt64.lower(nowMs),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeEdgeChunkReassembler: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = EdgeChunkReassembler
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> EdgeChunkReassembler {
+        return EdgeChunkReassembler(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: EdgeChunkReassembler) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EdgeChunkReassembler {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: EdgeChunkReassembler, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEdgeChunkReassembler_lift(_ pointer: UnsafeMutableRawPointer) throws -> EdgeChunkReassembler {
+    return try FfiConverterTypeEdgeChunkReassembler.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEdgeChunkReassembler_lower(_ value: EdgeChunkReassembler) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeEdgeChunkReassembler.lower(value)
+}
+
+
+
+
+/**
+ * A gossip node (spec §11.4). Feed it whatever peers send; send its replies back.
+ */
+public protocol EdgeGossipNodeProtocol : AnyObject {
+    
+    /**
+     * Handles one gossip message (JSON bytes) from a peer.
+     */
+    func handle(message: Data, nowSecs: UInt64) throws  -> EdgeHandledRecord
+    
+    func hasSeen(id: String)  -> Bool
+    
+    /**
+     * Drops expired messages; call every few minutes.
+     */
+    func prune(nowSecs: UInt64) 
+    
+    /**
+     * Originates a message (sign/encrypt it first; it needs an id). False if duplicate or expired.
+     */
+    func publish(envelopeJson: String, nowSecs: UInt64) throws  -> Bool
+    
+    /**
+     * Relay `topic` for others without delivering it locally.
+     */
+    func setRelayable(topic: String, relay: Bool) 
+    
+    func stored()  -> UInt64
+    
+    func subscribe(topic: String) 
+    
+    /**
+     * Our summary (JSON bytes), sent to a peer on meeting it and after publishing.
+     */
+    func summary(nowSecs: UInt64)  -> Data
+    
+    func unsubscribe(topic: String) 
+    
+}
+
+/**
+ * A gossip node (spec §11.4). Feed it whatever peers send; send its replies back.
+ */
+open class EdgeGossipNode:
+    EdgeGossipNodeProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_subetha_core_fn_clone_edgegossipnode(self.pointer, $0) }
+    }
+public convenience init(requireSignatures: Bool) {
+    let pointer =
+        try! rustCall() {
+    uniffi_subetha_core_fn_constructor_edgegossipnode_new(
+        FfiConverterBool.lower(requireSignatures),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_subetha_core_fn_free_edgegossipnode(pointer, $0) }
+    }
+
+    
+
+    
+    /**
+     * Handles one gossip message (JSON bytes) from a peer.
+     */
+open func handle(message: Data, nowSecs: UInt64)throws  -> EdgeHandledRecord {
+    return try  FfiConverterTypeEdgeHandledRecord.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
+    uniffi_subetha_core_fn_method_edgegossipnode_handle(self.uniffiClonePointer(),
+        FfiConverterData.lower(message),
+        FfiConverterUInt64.lower(nowSecs),$0
+    )
+})
+}
+    
+open func hasSeen(id: String) -> Bool {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_edgegossipnode_has_seen(self.uniffiClonePointer(),
+        FfiConverterString.lower(id),$0
+    )
+})
+}
+    
+    /**
+     * Drops expired messages; call every few minutes.
+     */
+open func prune(nowSecs: UInt64) {try! rustCall() {
+    uniffi_subetha_core_fn_method_edgegossipnode_prune(self.uniffiClonePointer(),
+        FfiConverterUInt64.lower(nowSecs),$0
+    )
+}
+}
+    
+    /**
+     * Originates a message (sign/encrypt it first; it needs an id). False if duplicate or expired.
+     */
+open func publish(envelopeJson: String, nowSecs: UInt64)throws  -> Bool {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
+    uniffi_subetha_core_fn_method_edgegossipnode_publish(self.uniffiClonePointer(),
+        FfiConverterString.lower(envelopeJson),
+        FfiConverterUInt64.lower(nowSecs),$0
+    )
+})
+}
+    
+    /**
+     * Relay `topic` for others without delivering it locally.
+     */
+open func setRelayable(topic: String, relay: Bool) {try! rustCall() {
+    uniffi_subetha_core_fn_method_edgegossipnode_set_relayable(self.uniffiClonePointer(),
+        FfiConverterString.lower(topic),
+        FfiConverterBool.lower(relay),$0
+    )
+}
+}
+    
+open func stored() -> UInt64 {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_edgegossipnode_stored(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+open func subscribe(topic: String) {try! rustCall() {
+    uniffi_subetha_core_fn_method_edgegossipnode_subscribe(self.uniffiClonePointer(),
+        FfiConverterString.lower(topic),$0
+    )
+}
+}
+    
+    /**
+     * Our summary (JSON bytes), sent to a peer on meeting it and after publishing.
+     */
+open func summary(nowSecs: UInt64) -> Data {
+    return try!  FfiConverterData.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_edgegossipnode_summary(self.uniffiClonePointer(),
+        FfiConverterUInt64.lower(nowSecs),$0
+    )
+})
+}
+    
+open func unsubscribe(topic: String) {try! rustCall() {
+    uniffi_subetha_core_fn_method_edgegossipnode_unsubscribe(self.uniffiClonePointer(),
+        FfiConverterString.lower(topic),$0
+    )
+}
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeEdgeGossipNode: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = EdgeGossipNode
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> EdgeGossipNode {
+        return EdgeGossipNode(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: EdgeGossipNode) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EdgeGossipNode {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: EdgeGossipNode, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEdgeGossipNode_lift(_ pointer: UnsafeMutableRawPointer) throws -> EdgeGossipNode {
+    return try FfiConverterTypeEdgeGossipNode.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEdgeGossipNode_lower(_ value: EdgeGossipNode) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeEdgeGossipNode.lower(value)
+}
+
+
+
+
+/**
+ * Collects scanned frames into a payload; switches to a new transfer automatically.
+ */
+public protocol EdgeQrDecoderProtocol : AnyObject {
+    
+    /**
+     * Feeds one frame (for scanners that return raw bytes).
+     */
+    func pushFrame(frame: Data)  -> EdgeQrProgress
+    
+    /**
+     * Feeds one scanned string (base45 text).
+     */
+    func pushText(text: String)  -> EdgeQrProgress
+    
+    func result()  -> Data?
+    
+}
+
+/**
+ * Collects scanned frames into a payload; switches to a new transfer automatically.
+ */
+open class EdgeQrDecoder:
+    EdgeQrDecoderProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_subetha_core_fn_clone_edgeqrdecoder(self.pointer, $0) }
+    }
+public convenience init() {
+    let pointer =
+        try! rustCall() {
+    uniffi_subetha_core_fn_constructor_edgeqrdecoder_new($0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_subetha_core_fn_free_edgeqrdecoder(pointer, $0) }
+    }
+
+    
+
+    
+    /**
+     * Feeds one frame (for scanners that return raw bytes).
+     */
+open func pushFrame(frame: Data) -> EdgeQrProgress {
+    return try!  FfiConverterTypeEdgeQrProgress.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_edgeqrdecoder_push_frame(self.uniffiClonePointer(),
+        FfiConverterData.lower(frame),$0
+    )
+})
+}
+    
+    /**
+     * Feeds one scanned string (base45 text).
+     */
+open func pushText(text: String) -> EdgeQrProgress {
+    return try!  FfiConverterTypeEdgeQrProgress.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_edgeqrdecoder_push_text(self.uniffiClonePointer(),
+        FfiConverterString.lower(text),$0
+    )
+})
+}
+    
+open func result() -> Data? {
+    return try!  FfiConverterOptionData.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_edgeqrdecoder_result(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeEdgeQrDecoder: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = EdgeQrDecoder
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> EdgeQrDecoder {
+        return EdgeQrDecoder(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: EdgeQrDecoder) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EdgeQrDecoder {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: EdgeQrDecoder, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEdgeQrDecoder_lift(_ pointer: UnsafeMutableRawPointer) throws -> EdgeQrDecoder {
+    return try FfiConverterTypeEdgeQrDecoder.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEdgeQrDecoder_lower(_ value: EdgeQrDecoder) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeEdgeQrDecoder.lower(value)
+}
+
+
+
+
+/**
+ * Endless fountain-coded frame stream (spec §11.2) for one payload.
+ */
+public protocol EdgeQrEncoderProtocol : AnyObject {
+    
+    func frame(seq: UInt32)  -> Data
+    
+    /**
+     * Frame `seq` as base45 text for an alphanumeric-mode QR code.
+     */
+    func frameText(seq: UInt32)  -> String
+    
+    func sourceBlocks()  -> UInt32
+    
+}
+
+/**
+ * Endless fountain-coded frame stream (spec §11.2) for one payload.
+ */
+open class EdgeQrEncoder:
+    EdgeQrEncoderProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_subetha_core_fn_clone_edgeqrencoder(self.pointer, $0) }
+    }
+    /**
+     * `frame_size` includes the 15-byte header. For a QR symbol holding C alphanumeric
+     * characters, use floor(C / 3) * 2 (base45 text).
+     */
+public convenience init(payload: Data, frameSize: UInt32)throws  {
+    let pointer =
+        try rustCallWithError(FfiConverterTypeFfiError.lift) {
+    uniffi_subetha_core_fn_constructor_edgeqrencoder_new(
+        FfiConverterData.lower(payload),
+        FfiConverterUInt32.lower(frameSize),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_subetha_core_fn_free_edgeqrencoder(pointer, $0) }
+    }
+
+    
+
+    
+open func frame(seq: UInt32) -> Data {
+    return try!  FfiConverterData.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_edgeqrencoder_frame(self.uniffiClonePointer(),
+        FfiConverterUInt32.lower(seq),$0
+    )
+})
+}
+    
+    /**
+     * Frame `seq` as base45 text for an alphanumeric-mode QR code.
+     */
+open func frameText(seq: UInt32) -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_edgeqrencoder_frame_text(self.uniffiClonePointer(),
+        FfiConverterUInt32.lower(seq),$0
+    )
+})
+}
+    
+open func sourceBlocks() -> UInt32 {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_edgeqrencoder_source_blocks(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeEdgeQrEncoder: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = EdgeQrEncoder
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> EdgeQrEncoder {
+        return EdgeQrEncoder(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: EdgeQrEncoder) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EdgeQrEncoder {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: EdgeQrEncoder, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEdgeQrEncoder_lift(_ pointer: UnsafeMutableRawPointer) throws -> EdgeQrEncoder {
+    return try FfiConverterTypeEdgeQrEncoder.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEdgeQrEncoder_lower(_ value: EdgeQrEncoder) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeEdgeQrEncoder.lower(value)
+}
+
+
 /**
  * A freshly generated device key. The seed is secret: store it in the platform keystore.
  */
@@ -573,6 +1488,186 @@ public func FfiConverterTypeDeviceKeyRecord_lower(_ value: DeviceKeyRecord) -> R
 }
 
 
+public struct EdgeHandledRecord {
+    /**
+     * Gossip messages (JSON bytes) to send back to the same peer.
+     */
+    public var replies: [Data]
+    /**
+     * New envelopes (JSON) on subscribed topics, for the app.
+     */
+    public var delivered: [String]
+    /**
+     * `"<id>:<reason>"` for each rejected envelope (reasons as in the TS SDK).
+     */
+    public var dropped: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Gossip messages (JSON bytes) to send back to the same peer.
+         */replies: [Data], 
+        /**
+         * New envelopes (JSON) on subscribed topics, for the app.
+         */delivered: [String], 
+        /**
+         * `"<id>:<reason>"` for each rejected envelope (reasons as in the TS SDK).
+         */dropped: [String]) {
+        self.replies = replies
+        self.delivered = delivered
+        self.dropped = dropped
+    }
+}
+
+
+
+extension EdgeHandledRecord: Equatable, Hashable {
+    public static func ==(lhs: EdgeHandledRecord, rhs: EdgeHandledRecord) -> Bool {
+        if lhs.replies != rhs.replies {
+            return false
+        }
+        if lhs.delivered != rhs.delivered {
+            return false
+        }
+        if lhs.dropped != rhs.dropped {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(replies)
+        hasher.combine(delivered)
+        hasher.combine(dropped)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeEdgeHandledRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EdgeHandledRecord {
+        return
+            try EdgeHandledRecord(
+                replies: FfiConverterSequenceData.read(from: &buf), 
+                delivered: FfiConverterSequenceString.read(from: &buf), 
+                dropped: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: EdgeHandledRecord, into buf: inout [UInt8]) {
+        FfiConverterSequenceData.write(value.replies, into: &buf)
+        FfiConverterSequenceString.write(value.delivered, into: &buf)
+        FfiConverterSequenceString.write(value.dropped, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEdgeHandledRecord_lift(_ buf: RustBuffer) throws -> EdgeHandledRecord {
+    return try FfiConverterTypeEdgeHandledRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEdgeHandledRecord_lower(_ value: EdgeHandledRecord) -> RustBuffer {
+    return FfiConverterTypeEdgeHandledRecord.lower(value)
+}
+
+
+public struct EdgeQrProgress {
+    /**
+     * False if the text wasn't a SubEtha frame (other QR codes in view).
+     */
+    public var accepted: Bool
+    public var complete: Bool
+    public var known: UInt32
+    public var total: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * False if the text wasn't a SubEtha frame (other QR codes in view).
+         */accepted: Bool, complete: Bool, known: UInt32, total: UInt32) {
+        self.accepted = accepted
+        self.complete = complete
+        self.known = known
+        self.total = total
+    }
+}
+
+
+
+extension EdgeQrProgress: Equatable, Hashable {
+    public static func ==(lhs: EdgeQrProgress, rhs: EdgeQrProgress) -> Bool {
+        if lhs.accepted != rhs.accepted {
+            return false
+        }
+        if lhs.complete != rhs.complete {
+            return false
+        }
+        if lhs.known != rhs.known {
+            return false
+        }
+        if lhs.total != rhs.total {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(accepted)
+        hasher.combine(complete)
+        hasher.combine(known)
+        hasher.combine(total)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeEdgeQrProgress: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EdgeQrProgress {
+        return
+            try EdgeQrProgress(
+                accepted: FfiConverterBool.read(from: &buf), 
+                complete: FfiConverterBool.read(from: &buf), 
+                known: FfiConverterUInt32.read(from: &buf), 
+                total: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: EdgeQrProgress, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.accepted, into: &buf)
+        FfiConverterBool.write(value.complete, into: &buf)
+        FfiConverterUInt32.write(value.known, into: &buf)
+        FfiConverterUInt32.write(value.total, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEdgeQrProgress_lift(_ buf: RustBuffer) throws -> EdgeQrProgress {
+    return try FfiConverterTypeEdgeQrProgress.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEdgeQrProgress_lower(_ value: EdgeQrProgress) -> RustBuffer {
+    return FfiConverterTypeEdgeQrProgress.lower(value)
+}
+
+
 /**
  * Proof of key possession for `POST /v1/device/code`.
  */
@@ -647,6 +1742,72 @@ public func FfiConverterTypeEnrollmentProofRecord_lift(_ buf: RustBuffer) throws
 #endif
 public func FfiConverterTypeEnrollmentProofRecord_lower(_ value: EnrollmentProofRecord) -> RustBuffer {
     return FfiConverterTypeEnrollmentProofRecord.lower(value)
+}
+
+
+public struct LanBeaconRecord {
+    public var node: String
+    public var port: UInt16
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(node: String, port: UInt16) {
+        self.node = node
+        self.port = port
+    }
+}
+
+
+
+extension LanBeaconRecord: Equatable, Hashable {
+    public static func ==(lhs: LanBeaconRecord, rhs: LanBeaconRecord) -> Bool {
+        if lhs.node != rhs.node {
+            return false
+        }
+        if lhs.port != rhs.port {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(node)
+        hasher.combine(port)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLanBeaconRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LanBeaconRecord {
+        return
+            try LanBeaconRecord(
+                node: FfiConverterString.read(from: &buf), 
+                port: FfiConverterUInt16.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LanBeaconRecord, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.node, into: &buf)
+        FfiConverterUInt16.write(value.port, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLanBeaconRecord_lift(_ buf: RustBuffer) throws -> LanBeaconRecord {
+    return try FfiConverterTypeLanBeaconRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLanBeaconRecord_lower(_ value: LanBeaconRecord) -> RustBuffer {
+    return FfiConverterTypeLanBeaconRecord.lower(value)
 }
 
 
@@ -820,6 +1981,79 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionData: FfiConverterRustBuffer {
+    typealias SwiftType = Data?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterData.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterData.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeLanBeaconRecord: FfiConverterRustBuffer {
+    typealias SwiftType = LanBeaconRecord?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeLanBeaconRecord.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeLanBeaconRecord.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceFloat: FfiConverterRustBuffer {
+    typealias SwiftType = [Float]
+
+    public static func write(_ value: [Float], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterFloat.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Float] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Float]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterFloat.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
     typealias SwiftType = [String]
 
@@ -840,6 +2074,86 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
         }
         return seq
     }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceData: FfiConverterRustBuffer {
+    typealias SwiftType = [Data]
+
+    public static func write(_ value: [Data], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterData.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Data] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Data]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterData.read(from: &buf))
+        }
+        return seq
+    }
+}
+/**
+ * The first valid frame in 48 kHz mono PCM, if any.
+ */
+public func audioDemodulate(samples: [Float]) -> Data? {
+    return try!  FfiConverterOptionData.lift(try! rustCall() {
+    uniffi_subetha_core_fn_func_audio_demodulate(
+        FfiConverterSequenceFloat.lower(samples),$0
+    )
+})
+}
+/**
+ * 48 kHz mono PCM for one modem frame (≤ 1024 bytes).
+ */
+public func audioModulate(payload: Data)throws  -> [Float] {
+    return try  FfiConverterSequenceFloat.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
+    uniffi_subetha_core_fn_func_audio_modulate(
+        FfiConverterData.lower(payload),$0
+    )
+})
+}
+public func audioResample(samples: [Float], fromRate: UInt32, toRate: UInt32) -> [Float] {
+    return try!  FfiConverterSequenceFloat.lift(try! rustCall() {
+    uniffi_subetha_core_fn_func_audio_resample(
+        FfiConverterSequenceFloat.lower(samples),
+        FfiConverterUInt32.lower(fromRate),
+        FfiConverterUInt32.lower(toRate),$0
+    )
+})
+}
+public func base45DecodeText(text: String)throws  -> Data {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
+    uniffi_subetha_core_fn_func_base45_decode_text(
+        FfiConverterString.lower(text),$0
+    )
+})
+}
+public func base45EncodeBytes(bytes: Data) -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_subetha_core_fn_func_base45_encode_bytes(
+        FfiConverterData.lower(bytes),$0
+    )
+})
+}
+/**
+ * Splits a message into BLE chunks for a negotiated ATT MTU (spec §11.3).
+ */
+public func bleChunk(seq: UInt16, payload: Data, attMtu: UInt32)throws  -> [Data] {
+    return try  FfiConverterSequenceData.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
+    uniffi_subetha_core_fn_func_ble_chunk(
+        FfiConverterUInt16.lower(seq),
+        FfiConverterData.lower(payload),
+        FfiConverterUInt32.lower(attMtu),$0
+    )
+})
 }
 /**
  * Canonical JSON (spec §3) of any JSON text.
@@ -874,6 +2188,16 @@ public func deviceKeyFromSeed(seed: Data)throws  -> DeviceKeyRecord {
 })
 }
 /**
+ * The payload one-way links (audio, QR) carry: a gossip `deliver` message (spec §11.4).
+ */
+public func edgeDeliverPayload(envelopesJson: [String])throws  -> Data {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
+    uniffi_subetha_core_fn_func_edge_deliver_payload(
+        FfiConverterSequenceString.lower(envelopesJson),$0
+    )
+})
+}
+/**
  * Encrypts an envelope with a 32-byte topic key (random nonce).
  */
 public func encryptEnvelopeJson(envelopeJson: String, key: Data, kid: String)throws  -> String {
@@ -893,6 +2217,41 @@ public func enrollmentProof(seed: Data, time: UInt64)throws  -> EnrollmentProofR
     uniffi_subetha_core_fn_func_enrollment_proof(
         FfiConverterData.lower(seed),
         FfiConverterUInt64.lower(time),$0
+    )
+})
+}
+/**
+ * LAN beacon bytes (spec §11.5) for this node and unicast port.
+ */
+public func lanBeacon(node: String, port: UInt16) -> Data {
+    return try!  FfiConverterData.lift(try! rustCall() {
+    uniffi_subetha_core_fn_func_lan_beacon(
+        FfiConverterString.lower(node),
+        FfiConverterUInt16.lower(port),$0
+    )
+})
+}
+/**
+ * Splits a gossip message into LAN datagrams (reassemble with `EdgeChunkReassembler`).
+ */
+public func lanDatagrams(seq: UInt16, payload: Data)throws  -> [Data] {
+    return try  FfiConverterSequenceData.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
+    uniffi_subetha_core_fn_func_lan_datagrams(
+        FfiConverterUInt16.lower(seq),
+        FfiConverterData.lower(payload),$0
+    )
+})
+}
+public func lanNewNodeId() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_subetha_core_fn_func_lan_new_node_id($0
+    )
+})
+}
+public func lanParseBeacon(bytes: Data) -> LanBeaconRecord? {
+    return try!  FfiConverterOptionTypeLanBeaconRecord.lift(try! rustCall() {
+    uniffi_subetha_core_fn_func_lan_parse_beacon(
+        FfiConverterData.lower(bytes),$0
     )
 })
 }
@@ -1016,6 +2375,24 @@ private var initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_subetha_core_checksum_func_audio_demodulate() != 62875) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_func_audio_modulate() != 31278) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_func_audio_resample() != 44103) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_func_base45_decode_text() != 33486) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_func_base45_encode_bytes() != 60116) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_func_ble_chunk() != 26096) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_subetha_core_checksum_func_canonicalize_json() != 56791) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1025,10 +2402,25 @@ private var initializationResult: InitializationResult = {
     if (uniffi_subetha_core_checksum_func_device_key_from_seed() != 50265) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_subetha_core_checksum_func_edge_deliver_payload() != 50659) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_subetha_core_checksum_func_encrypt_envelope_json() != 62789) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_subetha_core_checksum_func_enrollment_proof() != 16559) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_func_lan_beacon() != 1173) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_func_lan_datagrams() != 34190) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_func_lan_new_node_id() != 1126) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_func_lan_parse_beacon() != 16417) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_subetha_core_checksum_func_new_device_key() != 3118) {
@@ -1056,6 +2448,75 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_subetha_core_checksum_func_verify_envelope_json() != 59783) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgeaudioreceiver_push() != 63742) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgechunkreassembler_prune() != 65278) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgechunkreassembler_push() != 60639) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgegossipnode_handle() != 32402) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgegossipnode_has_seen() != 62748) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgegossipnode_prune() != 5246) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgegossipnode_publish() != 29910) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgegossipnode_set_relayable() != 28371) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgegossipnode_stored() != 5986) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgegossipnode_subscribe() != 62565) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgegossipnode_summary() != 15584) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgegossipnode_unsubscribe() != 25085) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgeqrdecoder_push_frame() != 12261) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgeqrdecoder_push_text() != 44691) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgeqrdecoder_result() != 3227) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgeqrencoder_frame() != 54036) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgeqrencoder_frame_text() != 15144) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_edgeqrencoder_source_blocks() != 25945) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_constructor_edgeaudioreceiver_new() != 57524) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_constructor_edgechunkreassembler_new() != 35959) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_constructor_edgegossipnode_new() != 33575) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_constructor_edgeqrdecoder_new() != 46119) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_constructor_edgeqrencoder_new() != 54051) {
         return InitializationResult.apiChecksumMismatch
     }
 

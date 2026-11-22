@@ -7,9 +7,10 @@
 //! intersection).
 //!
 //! Edge transports (pure protocol logic; platform shims supply the radios, speakers and
-//! cameras): [`edge::audio`], [`edge::qr`], [`edge::gossip`], [`edge::ble`].
+//! cameras): [`edge::audio`], [`edge::qr`], [`edge::gossip`], [`edge::ble`], [`edge::lan`].
 //!
-//! Bindings: [`ffi`] (string/bytes helpers shaped for UniFFI; see `BINDINGS.md`).
+//! Bindings: [`ffi`] (string/bytes helpers shaped for UniFFI; see `BINDINGS.md`) and
+//! [`ffi_edge`] (edge helpers and stateful objects for native platform shims).
 
 // UniFFI's generated scaffolding is the only unsafe code, and only with the feature on.
 #![cfg_attr(not(feature = "uniffi"), forbid(unsafe_code))]
@@ -25,6 +26,7 @@ pub mod edge;
 pub mod encoding;
 pub mod envelope;
 pub mod ffi;
+pub mod ffi_edge;
 pub mod random;
 pub mod routing;
 pub mod sign;

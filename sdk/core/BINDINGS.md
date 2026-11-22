@@ -33,6 +33,27 @@ without custom type mapping. Envelopes cross the boundary as JSON text.
 | `sign_request(seed, method, host, path_and_query, time, nonce?, body) -> SignedRequestRecord` | `device_id`, `time`, `nonce`, `signature` for the `X-Device-*` headers. `None` draws a nonce |
 | `enrollment_proof(seed, time) -> EnrollmentProofRecord` | Proof for `POST /v1/device/code` |
 
+### Edge transports (`src/ffi_edge.rs`)
+
+Stateless helpers: `audio_modulate`, `audio_demodulate`, `audio_resample`, `ble_chunk`,
+`edge_deliver_payload` (the payload one-way links carry), `base45_encode_bytes` /
+`base45_decode_text`, `lan_beacon`, `lan_parse_beacon`, `lan_new_node_id`, `lan_datagrams`.
+
+Stateful objects (`uniffi::Object`, each a `Mutex` around the core type, safe to share across
+threads):
+
+| Object | Drive it with | Gives back |
+|---|---|---|
+| `EdgeGossipNode(require_signatures)` | `subscribe`, `set_relayable`, `publish(json, now)`, `handle(bytes, now)`, `prune` | `summary(now)` bytes; `EdgeHandledRecord { replies, delivered, dropped }` |
+| `EdgeChunkReassembler()` | `push(chunk, now_ms)` per BLE notification/write or LAN datagram | whole gossip messages |
+| `EdgeQrEncoder(payload, frame_size)` | `frame(seq)` / `frame_text(seq)` on a display timer | base45 text for alphanumeric QR codes |
+| `EdgeQrDecoder()` | `push_text(text)` / `push_frame(bytes)` per camera detection | `EdgeQrProgress`, then `result()` |
+| `EdgeAudioReceiver(sample_rate, window_seconds)` | `push(samples)` per microphone buffer | payloads as frames are heard |
+
+Swift wraps them in `SubEthaCore/Edge.swift` (`Edge.modulate`, `Edge.bleChunks`, typealiases,
+GATT UUIDs). Kotlin uses `org.subetha.core.ffi` directly. Both test suites check them against
+`spec/vectors/edge.json` and run a gossip exchange over 23-byte BLE chunks.
+
 `host` is what WHATWG `URL.host` gives: lowercase, with `:port` only when the port is not
 the scheme's default. The Kotlin, Swift and Dart clients also implement request signing
 natively (JDK / CryptoKit / pure-Dart Ed25519) so it works without the native library. Their
@@ -85,7 +106,7 @@ Only the native libraries come from cargo or CI. Regenerate whenever `ffi.rs` ch
 | Maven Central / SwiftPM tag publishing | Manual |
 | React Native Turbo Module via ubrn | Manual / scaffold (`sdk/react-native/ubrn.config.yaml`) |
 | Flutter plugin via flutter_rust_bridge (`sdk/core-frb`) | Not started (plan in `sdk/flutter/README.md`) |
-| Stateful objects (gossip node, outbox, deduper, QR decoder, audio modem) as `uniffi::Object` | Not started |
+| Stateful edge objects (gossip node, chunk reassembler, QR encoder/decoder, audio receiver) as `uniffi::Object` | Done (`ffi_edge.rs`); the outbox and deduper are not exported yet |
 
 ## Next steps
 
@@ -99,9 +120,9 @@ Only the native libraries come from cargo or CI. Regenerate whenever `ffi.rs` ch
    for signing and E2EE on Hermes.
 4. **Flutter.** Add `sdk/core-frb` (re-exports `subetha_core::ffi`) and generate the FRB
    plugin. Implement `CoreDeviceSigner` / `CoreEnvelopeCrypto` on top of it.
-5. **Stateful objects.** Export the gossip node, outbox, deduper and QR decoder as
-   `#[derive(uniffi::Object)]` wrappers around `Mutex<T>`. Platform shims then drive them: BLE/LAN
-   I/O, the audio stream, camera frames, timers. The sample apps' Edge screens are where they
-   will show up.
+5. **Platform shims.** The edge objects are exported. Next, wire them into the sample apps'
+   Edge screens: CoreBluetooth / Android BLE peripheral advertising the GATT service,
+   AVAudioEngine / AudioRecord for sound, AVCapture / CameraX + a QR detector, and
+   Network.framework / `MulticastSocket` for LAN. Also export the outbox and deduper.
 6. **Conformance.** The Kotlin and Swift core tests already load `spec/vectors/signatures.json`
    and `e2ee.json`. Extend them to `canonical.json` and `topics.json`.

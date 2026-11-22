@@ -197,6 +197,63 @@ pub fn demodulate(samples: &[f32]) -> Option<Vec<u8>> {
     None
 }
 
+/// Linear-interpolation resampler for microphones that don't run at 48 kHz (matches the TS SDK).
+pub fn resample(x: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
+    if from_rate == to_rate || x.is_empty() {
+        return x.to_vec();
+    }
+    let n = (x.len() as u64 * u64::from(to_rate) / u64::from(from_rate)) as usize;
+    let step = f64::from(from_rate) / f64::from(to_rate);
+    (0..n)
+        .map(|i| {
+            let p = i as f64 * step;
+            let j = p.floor() as usize;
+            let f = (p - j as f64) as f32;
+            let a = x.get(j).copied().unwrap_or(0.0);
+            let b = x.get(j + 1).copied().unwrap_or(a);
+            a * (1.0 - f) + b * f
+        })
+        .collect()
+}
+
+/// Buffers microphone samples (any rate) and scans them for frames every `scan_seconds`.
+/// Mirrors `AudioFrameReceiver` in the TS SDK.
+#[derive(Debug, Clone)]
+pub struct Receiver {
+    rate: u32,
+    buf: Vec<f32>,
+    cap: usize,
+    since_scan: usize,
+    scan_every: usize,
+}
+
+impl Receiver {
+    /// `window_seconds` must cover the longest frame expected (50 bytes/s + 0.6 s).
+    pub fn new(sample_rate: u32, window_seconds: f32, scan_seconds: f32) -> Self {
+        let cap = (window_seconds.max(1.0) * SAMPLE_RATE as f32).ceil() as usize;
+        let scan_every = (scan_seconds.max(0.05) * SAMPLE_RATE as f32).ceil() as usize;
+        Receiver { rate: sample_rate, buf: Vec::with_capacity(cap), cap, since_scan: 0, scan_every }
+    }
+
+    /// Adds samples; returns a payload when a complete frame has been heard.
+    pub fn push(&mut self, samples: &[f32]) -> Option<Vec<u8>> {
+        let x = resample(samples, self.rate, SAMPLE_RATE);
+        self.buf.extend_from_slice(&x);
+        if self.buf.len() > self.cap {
+            let drop = self.buf.len() - self.cap;
+            self.buf.drain(..drop);
+        }
+        self.since_scan += x.len();
+        if self.since_scan < self.scan_every {
+            return None;
+        }
+        self.since_scan = 0;
+        let p = demodulate(&self.buf)?;
+        self.buf.clear(); // don't decode the same frame twice
+        Some(p)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,6 +320,18 @@ mod tests {
             pcm[at + n] = AMPLITUDE * (w * f * n as f32).sin();
         }
         assert_eq!(demodulate(&pcm), None);
+    }
+
+    #[test]
+    fn receiver_hears_a_44k_stream_in_blocks() {
+        let payload = b"door opened".to_vec();
+        let mic = resample(&modulate(&payload), SAMPLE_RATE, 44_100);
+        let mut stream = vec![0.0f32; 20_000];
+        stream.extend_from_slice(&mic);
+        stream.extend(std::iter::repeat_n(0.0, 44_100));
+        let mut rx = Receiver::new(44_100, 4.0, 0.5);
+        let got: Vec<Vec<u8>> = stream.chunks(4096).filter_map(|c| rx.push(c)).collect();
+        assert_eq!(got, vec![payload]);
     }
 
     #[test]
