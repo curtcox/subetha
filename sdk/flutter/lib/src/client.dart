@@ -137,6 +137,15 @@ class SubEtha {
     return Message(await _requestObject('POST', '/', body: env, headers: headers));
   }
 
+  /// Publishes a complete envelope as is: one that arrived over an edge link, or was signed or
+  /// encrypted elsewhere. The relay-set `event` is dropped; everything else is sent unchanged,
+  /// so signatures still verify.
+  Future<Message> publishEnvelope(Map<String, dynamic> envelope, {String? idempotencyKey}) async {
+    final env = Map<String, dynamic>.of(envelope)..remove('event');
+    final headers = {if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey};
+    return Message(await _requestObject('POST', '/', body: env, headers: headers));
+  }
+
   /// Dry run: who would get it, how, and the worst-case cost. Nothing is delivered.
   Future<Estimate> estimate(String topic, String message, [PublishOptions options = const PublishOptions()]) async {
     final env = await buildEnvelope(topic, message, options);
@@ -228,7 +237,7 @@ class SubEtha {
           return;
         }
       }
-      final m = _receive(raw);
+      final m = options.raw ? Message(raw) : _receive(raw);
       if (cancelled) return;
       controller.add(m);
       final id = m.id;

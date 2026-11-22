@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart' show ExternalLibrary;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:subetha/subetha.dart';
 import 'package:subetha_core/subetha_core.dart';
 
@@ -145,6 +148,42 @@ void main() {
       receiver.push(QrSender(deliverPayload([env('next')])).text(0));
       expect(message(got.last), 'next');
       expect(QrSender.frameSizeFor(535), 356);
+    });
+
+    test('EdgeBridge: relay messages enter the node, edge messages go up once', () async {
+      final relayEnv = env('from the relay', hops: 0);
+      final published = <Map<String, dynamic>>[];
+      final stream = StreamController<List<int>>();
+      final mock = MockClient.streaming((request, body) async {
+        final text = await body.bytesToString();
+        if (request.method == 'POST' && request.url.path == '/') {
+          published.add(jsonDecode(text) as Map<String, dynamic>);
+          return http.StreamedResponse(Stream.value(utf8.encode(text)), 200);
+        }
+        if (request.url.path.endsWith('/json')) {
+          stream.add(utf8.encode('{"event":"open"}\n${relayEnv.replaceFirst('{', '{"event":"message",')}\n'));
+          return http.StreamedResponse(stream.stream, 200);
+        }
+        return http.StreamedResponse(Stream.value(utf8.encode('{}')), 200); // acks
+      });
+      final client = SubEtha(baseUrl: 'https://relay.test', token: 'se_t', httpClient: mock);
+      final gateway = GossipNode(requireSignatures: false);
+      final downlinked = Completer<String>();
+      final bridge = EdgeBridge(client, gateway, [topic], onDownlink: downlinked.complete);
+      final text = await downlinked.future.timeout(const Duration(seconds: 5));
+      final got = jsonDecode(text) as Map;
+      expect(got['hops'], 1); // given hops so edge peers will forward it
+      expect(got.containsKey('event'), isFalse);
+      expect(gateway.hasSeen(id: got['id'] as String), isTrue);
+
+      final edgeEnv = env('from the edge');
+      expect(await bridge.uplink(edgeEnv), isTrue);
+      expect(await bridge.uplink(edgeEnv), isFalse); // once per id
+      expect(await bridge.uplink(env('x').replaceFirst(topic, '@other/t')), isFalse);
+      expect(published.map((p) => p['message']), ['from the edge']);
+      await bridge.close();
+      await stream.close();
+      client.close();
     });
   });
 }

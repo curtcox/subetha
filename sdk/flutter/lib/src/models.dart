@@ -134,6 +134,9 @@ class SubscribeOptions {
 
   /// Also drop unsigned messages.
   final bool requireSignature;
+
+  /// Pass envelopes through as received (no E2EE decryption), e.g. to forward them.
+  final bool raw;
   final Duration initialBackoff;
   final Duration maxBackoff;
 
@@ -152,6 +155,7 @@ class SubscribeOptions {
     this.autoAck = true,
     this.verify = false,
     this.requireSignature = false,
+    this.raw = false,
     this.initialBackoff = const Duration(milliseconds: 500),
     this.maxBackoff = const Duration(seconds: 30),
     this.onOpen,

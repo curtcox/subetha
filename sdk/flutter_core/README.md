@@ -9,7 +9,8 @@ pure-Dart [`subetha`](../flutter) package can't do on its own:
 - **Edge transports** (spec §11), as drivers that only need the platform to move bytes and
   samples, the same as the Kotlin, Swift, and TypeScript SDKs: `AudioLink` (sound),
   `QrSender`/`QrReceiver` (animated QR), `BleLink` and `GossipSession` (Bluetooth LE or any
-  two-way link), `deliverPayload`/`acceptPayload`, and the core objects underneath
+  two-way link), `EdgeBridge` (relay ↔ edge, for a phone that's the gateway for offline ones),
+  `deliverPayload`/`acceptPayload`, and the core objects underneath
   (`GossipNode`, `QrEncoder`, `QrDecoder`, `AudioReceiver`, `ChunkReassembler`).
 
 Call `await SubEthaCore.init()` once (for example in `main()`) before using any of it. Every
@@ -40,5 +41,4 @@ and the edge drivers back to back. CI runs them in `.github/workflows/mobile.yml
 
 Platform shims for BLE (for example `flutter_blue_plus`, plus a peripheral plugin), audio, and
 the camera aren't part of this package. The Android and iOS sample apps show what they do
-(`samples/android`, `samples/ios`; see `docs/edge.md`). `EdgeBridge` (relay ↔ edge) needs
-`publishEnvelope` and raw subscriptions in `package:subetha`, which it doesn't have yet.
+(`samples/android`, `samples/ios`; see `docs/edge.md`).

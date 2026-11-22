@@ -121,9 +121,8 @@ Only the native libraries come from cargo or CI. Regenerate whenever `ffi.rs` ch
 3. **React Native.** Run `uniffi-bindgen-react-native` against `sdk/core` to produce
    `@subetha/react-native-core`, and make `loadCore()`'s consumers (`sdk/react-native`) use it
    for signing and E2EE on Hermes.
-4. **Flutter.** Use `subetha_core` in `samples/flutter` (an Edge screen with platform plugins
-   for audio, camera, and BLE), and add `publishEnvelope` / raw subscriptions to
-   `package:subetha` so a Dart `EdgeBridge` can follow.
+4. **Flutter.** Use `subetha_core` in `samples/flutter`: an Edge screen with platform plugins
+   for audio, camera, and BLE.
 5. **Platform shims.** Done for the Android and iOS samples (BLE peripheral + central, sound,
    camera QR; see `docs/edge.md`). LAN (Network.framework / `MulticastSocket`) on phones is
    still to do.

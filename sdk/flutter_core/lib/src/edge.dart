@@ -1,8 +1,11 @@
 // Platform-independent drivers for edge transports (spec §11), mirroring sdk/js/src/edge/links.ts
 // and the Kotlin and Swift SDKs. Platform plugins (BLE, audio, camera) only move bytes and samples
 // in and out; these classes do the rest. Drive each from one isolate.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+
+import 'package:subetha/subetha.dart';
 
 import 'rust/api/edge.dart';
 
@@ -193,4 +196,77 @@ class QrReceiver {
     }
     return true;
   }
+}
+
+/// Edge ↔ relay bridge (PLAN §3: a phone with internet is a gateway for nearby offline devices).
+/// Relay messages on `topics` enter `node` (given `hops` if they carry none) so edge peers pick
+/// them up; call [uplink] from your links' `onMessage` to publish edge messages to the relay
+/// unchanged. Uplinked publishes are billed to the client's credentials like any other.
+class EdgeBridge {
+  final SubEtha _client;
+  final GossipNode _node;
+  final Set<String> _topics;
+  final bool _uplinkEnabled;
+  final void Function(Object error)? _onError;
+  final _uplinked = <String>{}; // insertion-ordered
+  StreamSubscription<Message>? _sub;
+
+  EdgeBridge(this._client, this._node, List<String> topics,
+      {int hops = 1,
+      bool downlink = true,
+      bool uplink = true,
+      String? since,
+      /// Called after a relay message enters the node; resync your links here.
+      void Function(String envelopeJson)? onDownlink,
+      void Function(Object error)? onError})
+      : _topics = topics.toSet(),
+        _uplinkEnabled = uplink,
+        _onError = onError {
+    // Subscribed, not just relayable, so edge messages on these topics reach onMessage.
+    for (final t in _topics) {
+      _node.subscribe(topic: t);
+    }
+    if (!downlink) return;
+    _sub = _client.subscribe(topics, SubscribeOptions(since: since, raw: true, onError: onError)).listen((m) {
+      final env = Map<String, dynamic>.of(m.json)..remove('event');
+      final h = env['hops'];
+      if (h is! int || h <= 0) env['hops'] = hops;
+      final text = jsonEncode(env);
+      bool fresh;
+      try {
+        fresh = env['id'] != null && _node.publish(envelopeJson: text, nowSecs: BigInt.from(_nowSecs()));
+      } catch (_) {
+        fresh = false;
+      }
+      if (fresh) onDownlink?.call(text);
+    }, onError: (Object e) => _onError?.call(e));
+  }
+
+  /// Publishes a message that arrived over an edge link. Returns true if it was published.
+  Future<bool> uplink(String envelopeJson) async {
+    if (!_uplinkEnabled) return false;
+    Map<String, dynamic> env;
+    try {
+      final o = jsonDecode(envelopeJson);
+      if (o is! Map<String, dynamic>) return false;
+      env = o;
+    } catch (_) {
+      return false;
+    }
+    final id = env['id'];
+    if (id is! String || !_topics.contains(env['topic'])) return false;
+    final key = id.toUpperCase();
+    if (!_uplinked.add(key)) return false;
+    if (_uplinked.length > 10000) _uplinked.remove(_uplinked.first);
+    try {
+      await _client.publishEnvelope(env);
+      return true;
+    } catch (e) {
+      _uplinked.remove(key);
+      _onError?.call(e);
+      return false;
+    }
+  }
+
+  Future<void> close() async => _sub?.cancel();
 }

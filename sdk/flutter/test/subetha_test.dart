@@ -78,6 +78,27 @@ void main() {
     expect(m.priority, 3);
   });
 
+  test('publishEnvelope sends the envelope unchanged except event', () async {
+    final relay = Relay((r, _) => Relay.json(r.body));
+    final env = {'id': '01JD0000000000000000000009', 'topic': '@a/b', 'message': 'from the edge', 'hops': 0, 'sig': 'ed25519:x', 'event': 'message'};
+    final m = await SubEtha(token: 'se_t', httpClient: relay.client).publishEnvelope(env, idempotencyKey: 'k2');
+    final r = relay.requests.single;
+    expect(r.request.headers['Idempotency-Key'], 'k2');
+    expect(r.json, Map.of(env)..remove('event'));
+    expect(env['event'], 'message'); // the caller's map isn't modified
+    expect(m.id, '01JD0000000000000000000009');
+  });
+
+  test('raw subscriptions pass encrypted envelopes through', () async {
+    final enc = '{"id":"01JD0000000000000000000003","topic":"@a/b","message":"ciphertext","enc":{"alg":"xchacha20poly1305","kid":"k"}}';
+    final relay = Relay((r, _) => r.request.url.path == '/v1/ack' ? Relay.json('{}') : Relay.lines([enc], hold: true));
+    final m = await SubEtha(httpClient: relay.client)
+        .subscribe(['@a/b'], const SubscribeOptions(raw: true))
+        .first
+        .timeout(const Duration(seconds: 5));
+    expect(m.json, jsonDecode(enc));
+  });
+
   test('estimate sends X-Dry-Run', () async {
     final relay = Relay((r, _) => Relay.json(
         '{"dry_run":true,"estimate_usd_micros":1500,"plan":[{"transport":"ws"},{"transport":"sms"}],"message":${r.body}}'));

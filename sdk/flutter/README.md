@@ -27,7 +27,9 @@ because Flutter's navigator `Route` clashes with SubEtha's message `Route`.
 backoff (or `Retry-After`) and resumes with `since=<last id>`. It drops duplicate ids and acks
 each message once it has been added to the stream. Errors that retrying can't fix (401, 402, 403,
 404, …) are emitted as `SubEthaException` and close the stream. Cancelling the subscription
-closes the connection.
+closes the connection. `SubscribeOptions(raw: true)` passes envelopes through exactly as
+received (no decryption), and `publishEnvelope` sends one on unchanged, so signatures still
+verify; together they let a gateway forward messages (`EdgeBridge` in `subetha_core`).
 
 ### Device keys
 
