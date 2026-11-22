@@ -107,7 +107,7 @@ Only the native libraries come from cargo or CI. Regenerate whenever `ffi.rs` ch
 | Publish the XCFramework zip + checksum (`SUBETHA_CORE_XCFRAMEWORK_URL/_CHECKSUM`) | Manual (release step not written) |
 | Android `.so` per ABI (cargo-ndk) and an AAR bundling them with `subetha-core` | Manual (commands in `sdk/kotlin/README.md`) |
 | Maven Central / SwiftPM tag publishing | Manual |
-| React Native Turbo Module via ubrn (`sdk/react-native-core`) | Generated sources automated (`gen-rn-bindings.sh`), drift- and type-checked in CI (`mobile.yml` → react-native-core); native builds per app |
+| React Native Turbo Module via ubrn (`sdk/react-native-core`) | Generated sources automated (`gen-rn-bindings.sh`), drift- and type-checked in CI (`mobile.yml` → react-native-core); Android build inside the Expo sample in CI (`mobile.yml` → react-native-sample-android) |
 | Flutter plugin via flutter_rust_bridge (`sdk/flutter_core`) | Automated: host build + `flutter test` in CI (`mobile.yml` → flutter-core); per-platform builds through cargokit in apps |
 | Stateful edge objects (gossip node, chunk reassembler, QR encoder/decoder, audio receiver) as `uniffi::Object` | Done (`ffi_edge.rs`), plus the outbox and deduper (`ffi_store.rs`) |
 
@@ -118,9 +118,10 @@ Only the native libraries come from cargo or CI. Regenerate whenever `ffi.rs` ch
    `jna@aar`.
 2. **Releases.** On tags, upload `subetha_coreFFI.xcframework.zip` and publish its checksum
    for `Package.swift`. Publish `org.subetha:subetha` / `subetha-core` to Maven Central.
-3. **React Native.** `@subetha/react-native-core` is generated, and `sdk/react-native` signs
-   and verifies with it on Hermes (`createClient({ core, deviceSeed })`). Build it into the Expo
-   sample (a development build) and run that in CI.
+3. **React Native.** Done: `@subetha/react-native-core` is generated, `sdk/react-native` signs
+   and verifies with it on Hermes (`createClient({ core, deviceSeed })`), and CI builds it into
+   an x86_64 Android development build of the Expo sample. Still to do: an iOS build of that
+   sample in CI (`ubrn build ios` + `expo prebuild` + `xcodebuild`), and publishing the package.
 4. **Flutter.** Use `subetha_core` in `samples/flutter`: an Edge screen with platform plugins
    for audio, camera, and BLE.
 5. **Platform shims.** Done for the Android and iOS samples (BLE peripheral + central, sound,
