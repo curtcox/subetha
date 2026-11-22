@@ -49,6 +49,8 @@ export interface SubscribeOptions {
   /** Drop messages whose signatures fail; unsigned messages pass unless requireSignature. */
   verify?: boolean;
   requireSignature?: boolean;
+  /** Deliver envelopes exactly as the relay sent them (no decryption), e.g. to forward them. */
+  raw?: boolean;
   onOpen?: () => void;
   onError?: (e: Error) => void;
   signal?: AbortSignal;
@@ -178,6 +180,15 @@ export class SubEtha {
     return this.request<Envelope>("POST", "/", env, o.idempotencyKey ? { "idempotency-key": o.idempotencyKey } : {});
   }
 
+  /**
+   * Publish an envelope exactly as given: one built elsewhere, or received over an edge link and
+   * forwarded (signatures and E2EE stay intact; the relay drops it as a duplicate by id).
+   */
+  async publishEnvelope(env: Envelope, o: { idempotencyKey?: string } = {}): Promise<Envelope> {
+    const { event: _event, ...rest } = env;
+    return this.request<Envelope>("POST", "/", rest, o.idempotencyKey ? { "idempotency-key": o.idempotencyKey } : {});
+  }
+
   /** Dry run: route plan and cost estimate, nothing delivered (charged as one API request). */
   async estimate(topic: string, message: string, o: PublishOptions = {}): Promise<Estimate> {
     const env = await this.buildEnvelope(topic, message, o);
@@ -240,7 +251,7 @@ export class SubEtha {
       if (o.verify || o.requireSignature) {
         if (raw.sig ? !(await verifyEnvelope(raw)) : o.requireSignature) return;
       }
-      const m = await this.receive(raw);
+      const m = o.raw ? raw : await this.receive(raw);
       await onMessage(m);
       if (o.autoAck !== false && m.id) {
         if (ws && ws.readyState === 1) ws.send(JSON.stringify({ event: "ack", id: m.id }));

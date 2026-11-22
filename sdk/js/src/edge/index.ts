@@ -3,6 +3,7 @@
 export * from "./audio.ts";
 export * from "./base45.ts";
 export * from "./ble.ts";
+export * from "./bridge.ts";
 export * from "./crc.ts";
 export * from "./fountain.ts";
 export * from "./gossip.ts";

@@ -110,6 +110,13 @@ describe("docs samples (TypeScript)", () => {
     expect(sourceBlocks).toBeGreaterThanOrEqual(1);
   });
 
+  it("edge-bridge.ts", async () => {
+    const { offline, onRelay } = await run("edge-bridge");
+    expect(onRelay.map((m: { message: string }) => m.message)).toEqual(expect.arrayContaining(["Battery low", "Firmware update available"]));
+    expect(offline.map((m: { message: string }) => m.message)).toEqual(["Firmware update available"]);
+    expect(offline[0].hops).toBe(0);
+  });
+
   it("tokens.ts", async () => {
     expect((await run("tokens")).denied).toBe("forbidden");
   });

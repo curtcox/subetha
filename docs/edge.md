@@ -81,7 +81,11 @@ which is what browsers connect to.
 
 ## Bridging to the relay
 
-A device that has internet access and receives a message over an edge link can publish it to the
-relay unchanged. The signature still verifies because `hops` isn't signed, and the relay and
-other receivers drop it as a duplicate if it already got there another way. That publish is
-billed like any other.
+A device with internet access can act as a gateway for nearby offline devices. `bridgeEdge`
+subscribes to the relay and feeds new messages into the gateway's gossip node, giving them
+`hops` if they have none, so edge peers pick them up. In the other direction, messages that
+arrive over edge links are published to the relay unchanged (`client.publishEnvelope`). The
+signature still verifies because `hops` isn't signed, and the relay drops a message it has
+already seen by id. Uplinked publishes are billed to the gateway's token like any other.
+
+<!-- include: samples/ts/edge-bridge.ts#snippet -->
