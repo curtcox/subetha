@@ -11,7 +11,7 @@
 //   go up to the relay (PLAN §3).
 // Bluetooth, the microphone and UDP need a development build (`npx expo run:android`); in Expo
 // Go those buttons report that the native module is missing, and QR still works.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, PermissionsAndroid, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Audio } from "expo-av";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -23,6 +23,7 @@ import {
   listenPcm16, QrFrameReceiver, startLanWith, type BlePeer, type DgramLike, type EdgeBridge, type GossipNode, type LanHandle,
   type Pcm16Stream, type PlxManager,
 } from "@subetha/react-native/edge";
+import { useCore } from "./core";
 
 /** Native modules that Expo Go lacks: null when missing. */
 function optional<T>(load: () => T): T | null {
@@ -83,9 +84,11 @@ export function Edge({ fg, client }: { fg: string; client: SubEtha | null }) {
   const lan = useRef<LanHandle | null>(null);
   const bridge = useRef<EdgeBridge | null>(null);
 
-  // Hermes can't check Ed25519 signatures, so signed edge messages are dropped and unsigned ones
-  // (like this tab's) pass. With the Rust core installed, verify them instead:
-  //   createEdgeNode({ core: await loadCore(() => require("@subetha/react-native-core")) })
+  // Hermes can't check Ed25519 signatures on its own. Without the Rust core, signed edge messages
+  // are dropped and unsigned ones (like this tab's) pass. With it, the node verifies signatures
+  // and this tab signs what it sends with a per-session device key.
+  const core = useCore();
+  const seed = useMemo(() => (core ? core.newDeviceKey() : null), [core]);
   useEffect(() => () => {
     qrAnim.current?.stop();
     mic.current?.stop();
@@ -96,7 +99,7 @@ export function Edge({ fg, client }: { fg: string; client: SubEtha | null }) {
   }, []);
 
   const node = (): GossipNode => {
-    const n = (nodeRef.current ??= createEdgeNode());
+    const n = (nodeRef.current ??= createEdgeNode({ core }));
     n.subscribe(topic.trim());
     return n;
   };
@@ -117,7 +120,8 @@ export function Edge({ fg, client }: { fg: string; client: SubEtha | null }) {
   /** A new envelope for the text box, held by the node so links pass it on. */
   const publishLocally = (): Envelope => {
     const now = Math.floor(Date.now() / 1000);
-    const env: Envelope = { id: ulid(), time: now, expires: now + 3600, topic: topic.trim(), message: text, hops: 2 };
+    const unsigned: Envelope = { id: ulid(), time: now, expires: now + 3600, topic: topic.trim(), message: text, hops: 2 };
+    const env: Envelope = core && seed ? JSON.parse(core.signEnvelopeJson(JSON.stringify(unsigned), seed.seed)) : unsigned;
     node().publish(env);
     resyncAll();
     void bridge.current?.uplink(env);
@@ -288,6 +292,7 @@ export function Edge({ fg, client }: { fg: string; client: SubEtha | null }) {
       </View>
 
       <Text style={[styles.small, c]}>{status}</Text>
+      <Text style={[styles.small, c]}>{seed ? `Signing as ${seed.deviceId.slice(0, 12)}…` : "Unsigned (no Rust core)"}</Text>
       <Text style={[styles.sub, c]}>Heard</Text>
       {heard.length ? heard.map((h, i) => <Text key={i} style={c}>{h}</Text>) : <Text style={[styles.small, c]}>Nothing yet</Text>}
     </ScrollView>

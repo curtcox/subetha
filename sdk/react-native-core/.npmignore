@@ -1,0 +1,8 @@
+# npm uses this instead of .gitignore, so the per-target native builds (android/src/main/jniLibs,
+# build/*.xcframework) go into the package; package.json's "files" picks what's included.
+android/build/
+android/.cxx/
+android/generated/
+ios/generated/
+node_modules/
+test/

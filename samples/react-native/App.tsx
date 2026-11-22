@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button, FlatList, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View, useColorScheme } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { createClient, subscribe, SubEthaError, type Envelope, type SubEtha, type Subscription } from "@subetha/react-native";
+import { useCore } from "./core";
 import { Edge } from "./Edge";
 
 export default function App() {
@@ -30,6 +31,7 @@ function describe(e: unknown): string {
 }
 
 function Doorbell({ fg, onClient }: { fg: string; onClient: (c: SubEtha | null) => void }) {
+  const core = useCore();
   const [token, setToken] = useState("");
   const [topic, setTopic] = useState("@me/doorbell");
   const [baseUrl, setBaseUrl] = useState("https://subetha.org");
@@ -48,7 +50,7 @@ function Doorbell({ fg, onClient }: { fg: string; onClient: (c: SubEtha | null) 
 
   const connect = () => {
     sub.current?.close();
-    const c = createClient({ baseUrl, token: token.trim() });
+    const c = createClient({ baseUrl, token: token.trim(), core });
     setClient(c);
     setInbox([]);
     setEstimate(null);
@@ -56,6 +58,7 @@ function Doorbell({ fg, onClient }: { fg: string; onClient: (c: SubEtha | null) 
     // One topic → WebSocket (RN fetch can't stream); reconnect, resume, dedupe and acks built in.
     sub.current = subscribe(c, topic, (m) => setInbox((prev) => [m, ...prev].slice(0, 100)), {
       since: "1h",
+      verify: core !== null, // drop badly signed messages (needs the Rust core on Hermes)
       onOpen: () => setStatus(`Subscribed to ${topic}`),
       onError: (e) => setStatus(`Reconnecting: ${e.message}`),
     });
@@ -103,6 +106,7 @@ function Doorbell({ fg, onClient }: { fg: string; onClient: (c: SubEtha | null) 
         </View>
       )}
       <Text style={[styles.small, text]}>{status}</Text>
+      <Text style={[styles.small, text]}>{core ? "Rust core loaded: signatures are checked" : "No Rust core (Expo Go): signatures aren't checked"}</Text>
       {estimate ? <ScrollView style={styles.estimate}><Text style={[styles.mono, text]}>{estimate}</Text></ScrollView> : null}
       <Text style={[styles.heading, text]}>Inbox</Text>
       <FlatList

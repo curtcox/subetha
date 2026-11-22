@@ -96,7 +96,7 @@ export function signRequest(key: DeviceKey, method: string, url: string, body: U
 
 function headersEntries(h: Headers): [string, string][] {
   const out: [string, string][] = [];
-  h.forEach((v, k) => out.push([k, v]));
+  h.forEach((v: string, k: string) => out.push([k, v]));
   return out;
 }
 

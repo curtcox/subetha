@@ -5,13 +5,20 @@ resolves it, and `@subetha/sdk`, from this repo's TypeScript sources (`metro.con
 
 ```bash
 cd samples/react-native
+npm run core:android # build the Rust core for Android (cargo-ndk, ANDROID_NDK_HOME); core:ios on a Mac
 npm install          # its own install: excluded from the pnpm workspace
 npx expo run:android # or run:ios: a development build with the native modules
 ```
 
+The Rust core comes from [`@subetha/react-native-core`](../../sdk/react-native-core/README.md)
+(`file:../../sdk/react-native-core`, copied rather than symlinked: see `.npmrc`), so build it
+before `npm install`, and reinstall after rebuilding it. `core.ts` loads it with `loadCore`. It
+is optional: in Expo Go, or without the native build, the app runs without it.
+
 `npx expo start` runs it in Expo Go too, but Expo Go lacks Bluetooth, microphone streaming,
-and UDP, so on the Edge tab only QR and sound playback work there. CI type-checks the app and
-bundles it for both platforms with Metro (`npm run bundle`).
+and UDP, so on the Edge tab only QR and sound playback work there. CI type-checks the app,
+bundles it for both platforms with Metro (`npm run bundle`), and builds an x86_64 Android
+development build with the core (`expo prebuild` + `gradlew assembleDebug`).
 
 - Subscribes over WebSocket via `subscribe()` from `@subetha/react-native`, because RN's fetch
   can't stream response bodies. It reconnects, resumes from the last id, dedupes and acks.
@@ -29,7 +36,10 @@ bundles it for both platforms with Metro (`npm run bundle`).
   - **Bridge**: with the Doorbell tab connected, relay messages on the topic go to nearby
     phones, and messages heard nearby are published to the relay.
 
-  Signed messages are dropped unless the Rust core is installed (Hermes can't verify Ed25519
-  on its own). The tab's own messages are unsigned.
+  With the Rust core, the tab signs its messages with a per-session device key and verifies
+  signed messages it hears. Without it (Hermes can't do Ed25519 on its own), signed messages are
+  dropped and the tab's own messages are unsigned.
+- With the core, the Doorbell tab subscribes with `verify: true`, so badly signed messages are
+  dropped.
 
 A standalone app would `npm install @subetha/react-native` instead of using the Metro aliases.
