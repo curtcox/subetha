@@ -147,3 +147,23 @@ curl -X POST localhost:8787/v1/dev/bootstrap -d '{"secret":"local-dev-only","han
 ```
 
 Local secrets go in `workers/api/.dev.vars` (gitignored), one `NAME=value` per line.
+
+## Load testing
+
+`scripts/loadtest.mjs` opens S subscriber streams on one topic, then P publishers send N messages
+each, and reports publish and publish→receive latency. Every message is charged to the token's
+account. API tokens are limited to 600 requests a minute (`RL_AUTH`), and subscriber connections
+count toward that, so keep `S + P×N` under 600 per token per minute, or use several tokens.
+
+Local baseline (`wrangler dev` on one machine, November 2026), all deliveries received:
+
+| Subscribers | Publishers × messages | Publish p50 / p95 | Delivery p50 / p95 |
+|---|---|---|---|
+| 20 | 5 × 40 | 66 / 80 ms | 70 / 106 ms |
+| 100 | 10 × 30 | 119 / 182 ms | 195 / 289 ms |
+
+Run the same against staging before launch (PLAN §14 Phase 3):
+
+```bash
+SUBETHA_URL=https://staging.subetha.org SUBETHA_TOKEN=se_… node scripts/loadtest.mjs --topic @me/load --subscribers 100 --publishers 10 --messages 30
+```
