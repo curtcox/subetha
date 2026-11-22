@@ -7,7 +7,8 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./edge": "./src/edge.ts"
   },
   "files": [
     "src",
@@ -21,8 +22,9 @@
     "@subetha/sdk": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^22.10.0",
+    "jsqr": "1.4.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.0",
-    "@types/node": "^22.10.0"
+    "vitest": "^4.1.0"
   }
 }
