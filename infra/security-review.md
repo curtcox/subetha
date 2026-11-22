@@ -27,8 +27,9 @@ endpoints, and authenticated webhooks and devices. Regression tests are in
   `Content-Type`). An intermediary relaying a captured request could change cost and routing
   within its 5-minute, single-use window. Fixing this changes the signing input (`subetha-req-v2`)
   in the relay and every SDK (TS, Python, Rust core, Swift, Kotlin, Dart), with a transition
-  period that accepts both versions. Until then, sign the JSON body form (`POST /`), where every
-  field is in the hashed body.
+  period that accepts both versions. Signing the JSON body (`POST /`) doesn't avoid it, because
+  routing headers override the envelope's `route` (`ntfy.ts`). Query-string forms (`?title=…`)
+  are covered, since the path and query are signed.
 - **The verification-code throttle per destination uses KV**, which is eventually consistent, so
   a burst can send more than one code to the same number within the hour. The per-account
   pending limit and the prepaid charge still bound the cost. A Durable Object counter would make
