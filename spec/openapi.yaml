@@ -865,6 +865,70 @@ paths:
               schema: { $ref: "#/components/schemas/Endpoint" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/endpoints/{id}/test:
+    post:
+      tags: [endpoints]
+      operationId: testEndpoint
+      summary: Send a test message to an endpoint (endpoint inspector)
+      description: |
+        Delivers one sample message to a verified endpoint now and reports what happened. For
+        `webhook` endpoints the response includes the exact request the relay sent (headers,
+        `X-SubEtha-Signature`, body) and the receiver's response (status, headers, first 4 KB of
+        the body), so you can debug a signature check. Other transports report the provider's
+        outcome. Costs one delivery of the endpoint's transport, charged whether or not the
+        receiver accepts it (SMS/voice count toward the new-funds hold).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                topic: { type: string, description: "Topic named in the sample message (default `@subetha/inspector`)." }
+                title: { type: string, maxLength: 256 }
+                message: { type: string, maxLength: 1000 }
+                priority: { type: integer, minimum: 1, maximum: 5 }
+                tags: { type: array, maxItems: 10, items: { type: string } }
+      responses:
+        "200":
+          description: The attempt, delivered or not.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result, message, charged_usd_micros, latency_ms]
+                properties:
+                  result: { enum: [delivered, failed] }
+                  error: { type: string }
+                  endpoint: { type: object, properties: { id: { type: string }, kind: { $ref: "#/components/schemas/Transport" } } }
+                  message: { $ref: "#/components/schemas/Envelope" }
+                  charged_usd_micros: { type: integer }
+                  latency_ms: { type: integer }
+                  detail: { description: Provider outcome (HTTP status, message id, SMS segments). }
+                  request:
+                    type: object
+                    description: Webhooks only. The request as sent.
+                    properties:
+                      method: { const: POST }
+                      url: { type: string }
+                      headers: { type: object, additionalProperties: { type: string } }
+                      body: { type: string }
+                  response:
+                    type: object
+                    description: Webhooks only. What the receiver answered.
+                    properties:
+                      status: { type: integer }
+                      headers: { type: object, additionalProperties: { type: string } }
+                      body: { type: string }
+                      truncated: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
 
   # ------------------------------------------------------------------ subscriptions
   /v1/subscriptions:

@@ -15,6 +15,7 @@ import { verifySlackSignature } from "./delivery/slack.ts";
 import { ackToken, makeCall, sendSms, US_E164, verifyTwilioSignature, voiceMinutes, voiceTwiml } from "./delivery/twilio.ts";
 import type { Env, Principal, QueuedSubscription, SubscriptionFilter } from "./types.ts";
 import { registerDeviceRoutes } from "./devices.ts";
+import { registerInspectorRoutes } from "./inspector.ts";
 import { CIRCUIT_KEY } from "./cron.ts";
 
 const PRICES = prices as unknown as PriceTable;
@@ -136,6 +137,7 @@ async function topicsForEndpoint(env: Env, endpointId: string): Promise<string[]
 
 export function registerControlRoutes(app: App, principal: PrincipalFn) {
   registerDeviceRoutes(app, principal);
+  registerInspectorRoutes(app, principal);
   // ---------------- endpoints ----------------
   app.get("/v1/endpoints", async (c) => {
     const id = requireAdmin(await principal(c));
