@@ -5,8 +5,9 @@
   "type": "module",
   "description": "Runnable docs samples. TS samples run against the Worker in workers/api/test/samples.test.ts; this package checks the rest.",
   "scripts": {
-    "test": "vitest run",
-    "typecheck": "tsc -p ."
+    "test": "vitest run --exclude \"live/**\"",
+    "typecheck": "tsc -p .",
+    "test:live": "vitest run live"
   },
   "dependencies": {
     "@subetha/sdk": "workspace:*"

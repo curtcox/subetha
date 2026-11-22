@@ -14,7 +14,7 @@ const repo = join(docsDir, "..");
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((n) => {
-    if (n === "node_modules" || n === "test" || n === "__pycache__") return [];
+    if (n === "node_modules" || n === "test" || n === "live" || n === "__pycache__") return [];
     const p = join(dir, n);
     return statSync(p).isDirectory() ? walk(p) : [p];
   });

@@ -126,5 +126,6 @@ applications in the Clerk dashboard, so clients can register themselves.
 |---|---|---|
 | `CLOUDFLARE_API_TOKEN` | Environments `staging`, `production` | See `README.md` for the permissions. |
 | `CLOUDFLARE_ACCOUNT_ID` | Environments `staging`, `production` | Cloudflare dashboard → Account ID. |
+| `SAMPLES_TOKEN` | Environment `staging` | Admin API token for a dedicated account (e.g. handle `samples`, a few dollars of balance) used by `nightly.yml` to run the docs samples against staging. Optional variables: `STAGING_URL`, `SAMPLES_TOPIC`. |
 
 Repository variables (optional): `PAGES_BASE_PATH`, `PAGES_URL`, `APP_URL` for `pages.yml`.

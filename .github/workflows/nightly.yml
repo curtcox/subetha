@@ -1,0 +1,54 @@
+name: Nightly samples
+
+# Runs the TypeScript docs samples against staging every night (PLAN §10), so a docs sample that
+# works against `wrangler dev` but not a real deployment (TLS, custom domains, R2, real Durable
+# Objects) is caught. Also checks /v1/status.
+#
+# Needs, in the "staging" GitHub Environment: secret SAMPLES_TOKEN (an admin API token for a
+# dedicated account with a few dollars of balance, e.g. handle "samples") and optionally
+# variable SAMPLES_TOPIC (default @samples/nightly). Until SAMPLES_TOKEN is set, the job only
+# reports that it's skipped.
+
+on:
+  schedule:
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  samples:
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      SUBETHA_URL: ${{ vars.STAGING_URL || 'https://staging.subetha.org' }}
+      SUBETHA_TOKEN: ${{ secrets.SAMPLES_TOKEN }}
+      SUBETHA_TOPIC: ${{ vars.SAMPLES_TOPIC || '@samples/nightly' }}
+    steps:
+      - name: Preflight
+        id: preflight
+        run: |
+          if [ -z "$SUBETHA_TOKEN" ]; then
+            echo "::warning title=Nightly samples skipped::set the SAMPLES_TOKEN secret in the staging environment (see .github/workflows/nightly.yml)"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.preflight.outputs.ready == 'true'
+        name: Status
+        run: curl -fsS "$SUBETHA_URL/v1/status"
+      - if: steps.preflight.outputs.ready == 'true'
+        uses: actions/checkout@v4
+      - if: steps.preflight.outputs.ready == 'true'
+        uses: pnpm/action-setup@v4
+      - if: steps.preflight.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - if: steps.preflight.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.preflight.outputs.ready == 'true'
+        name: Docs samples against staging
+        run: pnpm --filter @subetha/samples test:live

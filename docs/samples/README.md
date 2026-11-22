@@ -36,3 +36,14 @@ cargo test -p subetha-core          # builds the Rust example
 # Shell samples against a local relay (see curl/local-dev.sh for the token):
 SUBETHA_URL=http://localhost:8787 SUBETHA_TOKEN=se_… bash docs/samples/curl/publish.sh
 ```
+
+## Against a real deployment
+
+`live/live.test.ts` runs the TypeScript samples (all but the ones that create billed resources)
+against any deployment over HTTP. The nightly workflow (`.github/workflows/nightly.yml`) runs it
+against staging.
+
+```bash
+SUBETHA_URL=https://staging.subetha.org SUBETHA_TOKEN=se_… SUBETHA_TOPIC=@samples/nightly \
+  pnpm --filter @subetha/samples test:live
+```
