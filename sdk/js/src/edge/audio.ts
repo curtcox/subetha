@@ -163,3 +163,41 @@ export function resample(x: Float32Array, fromRate: number, toRate = AUDIO_SAMPL
   }
   return out;
 }
+
+/**
+ * `resample` for a stream that arrives in blocks. It keeps its phase and the previous block's last
+ * sample, so block boundaries neither drop nor repeat time. (Resampling each block on its own loses
+ * a fraction of a sample per block: with 128-sample AudioWorklet blocks at 44.1 kHz that's 0.23%,
+ * more than a symbol over a long frame.)
+ */
+export class Resampler {
+  private pos = 0; // the next output's position, in input samples from the start of the next block
+  private prev = 0; // the previous block's last sample (input index -1)
+  private readonly step: number;
+  readonly fromRate: number;
+  readonly toRate: number;
+  constructor(fromRate: number, toRate = AUDIO_SAMPLE_RATE) {
+    this.fromRate = fromRate;
+    this.toRate = toRate;
+    this.step = fromRate / toRate;
+  }
+
+  /** Resamples the next block. Outputs that need the next block's first sample wait for it. */
+  push(x: Float32Array): Float32Array {
+    if (this.fromRate === this.toRate) return x;
+    const m = x.length;
+    if (m === 0) return new Float32Array(0);
+    const n = Math.max(0, Math.ceil((m - 1 - this.pos) / this.step)); // positions before m - 1
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const p = this.pos + i * this.step;
+      const j = Math.floor(p);
+      const f = p - j;
+      const a = j < 0 ? this.prev : x[j]!;
+      out[i] = a * (1 - f) + (x[j + 1] ?? a) * f; // x[m] only through rounding, where f ≈ 0
+    }
+    this.pos += n * this.step - m;
+    this.prev = x[m - 1]!;
+    return out;
+  }
+}

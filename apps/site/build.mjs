@@ -237,6 +237,9 @@ write("openapi.json", JSON.stringify(parseYaml(readFileSync(join(repo, "spec/ope
 // Built-in tools (PLAN §10): pricing calculator and route simulator. src/ → tools/tools.js, which
 // bundles the relay's own price table, planner, and telephony units.
 await esbuild({ entryPoints: [join(here, "src/web.ts")], outfile: join(out, "tools/tools.js"), bundle: true, format: "iife", globalName: "SubEthaTools", platform: "browser", target: "es2022", minify: true, legalComments: "none", logLevel: "warning" });
+// The Edge lab's QR decoder for browsers without BarcodeDetector (jsQR, Apache-2.0), served from our
+// own origin and loaded only when needed: tools/jsqr.js → window.jsQR.
+await esbuild({ stdin: { contents: 'import jsQR from "jsqr"; globalThis.jsQR = jsQR;', resolveDir: here }, outfile: join(out, "tools/jsqr.js"), bundle: true, format: "iife", platform: "browser", target: "es2022", minify: true, legalComments: "none", banner: { js: "/*! jsQR 1.4.0 | Apache-2.0 | https://github.com/cozmo/jsQR */" }, logLevel: "warning" });
 
 // ---------------------------------------------------------------- GitHub Pages extras
 if (pages) {
@@ -377,4 +380,4 @@ ${sdks.map(([what, name, v, registry, dir]) => `<tr><td>${what}</td><td><code>${
 </ul>`;
 }
 
-console.log(`built ${docs.length} docs pages, llms.txt, llms-full.txt, openapi.yaml, openapi.json, tools/tools.js${pages ? ", build-info.html, pricing-report.html, samples/" : ""} → ${relative(process.cwd(), out) || "."} (base ${base})`);
+console.log(`built ${docs.length} docs pages, llms.txt, llms-full.txt, openapi.yaml, openapi.json, tools/tools.js, tools/jsqr.js${pages ? ", build-info.html, pricing-report.html, samples/" : ""} → ${relative(process.cwd(), out) || "."} (base ${base})`);

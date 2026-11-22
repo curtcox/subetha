@@ -24,6 +24,7 @@ apps/site/public/openapi.yaml
 apps/site/public/openapi.json
 test-results/
 apps/site/public/tools/tools.js
+apps/site/public/tools/jsqr.js
 samples/android/app/src/main/jniLibs/
 
 # Browser e2e tests

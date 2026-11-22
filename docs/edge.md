@@ -11,7 +11,7 @@ Try it in the browser with the [Edge lab](/tools/edge.html). Open it on two devi
 | Link | Direction | Speed | Range | Browser support |
 |---|---|---|---|---|
 | Sound (16-FSK, 2–5 kHz) | one way, broadcast | ~50 bytes/s | a metre or two | all (Web Audio + microphone) |
-| Animated QR (fountain coded) | one way | ~1–3 KB/s at 6 fps | line of sight | display: all; scan: browsers with `BarcodeDetector` (Chrome), or pass a decoder such as jsQR |
+| Animated QR (fountain coded) | one way | ~1–3 KB/s at 6 fps | line of sight | display: all; scan: all with a camera (`BarcodeDetector` where present, else jsQR through `jsQrDetector`) |
 | Bluetooth LE (GATT + gossip) | both ways | ~1–10 KB/s | ~10 m | Chrome and Edge, central role only (the peer must be a native app or gateway) |
 | LAN (UDP multicast + gossip) | both ways | network speed | the local network | none (browsers have no UDP). Node, the CLI, and native apps |
 
@@ -51,7 +51,8 @@ In a page:
 | `playAudioFrame(payload, { volume })` | Plays one modem frame. Resolves when playback ends. |
 | `listenAudio(onPayload, { windowSeconds })` | Microphone → frames (echo cancellation and noise suppression off). Returns `{ stop() }`. `windowSeconds` must cover the longest frame you expect: 50 bytes per second, plus 0.6 s. |
 | `showAnimatedQr(canvas, payload, { version, ecl, fps })` | Draws an endless frame stream. Version 10–15 with level L scans well on phones. |
-| `scanAnimatedQr(video, onPayload, { detect, onProgress })` | Camera → frames → payload. `detect` is any `(video) => Promise<string[]>`. |
+| `scanAnimatedQr(video, onPayload, { detect, onProgress })` | Camera → frames → payload. `detect` is any `(video) => Promise<string[]>`. Defaults to `barcodeDetector()` (Chrome on Android, macOS, ChromeOS). |
+| `jsQrDetector(jsQR, { maxSide })` | A `detect` for every other browser, from the [jsQR](https://github.com/cozmo/jsQR) function you load (the SDK doesn't bundle it). The Edge lab loads `/tools/jsqr.js` the first time it needs it. |
 | `connectBlePeer(node, onMessage)` | Web Bluetooth central: connects to a peer advertising the SubEtha service and gossips. Must be called from a click. |
 
 Without the browser shims, `AudioFrameReceiver`, `QrFrameReceiver`, and `BleLink` take raw

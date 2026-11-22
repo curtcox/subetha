@@ -28,4 +28,10 @@ What's covered:
 - HTTP 402 with the shortfall, from curl and from the console;
 - a scoped token made in the console, which can publish only where its scope allows;
 - device enrollment: the device-code link opens the Devices tab with the code filled in, the
-  approved device publishes with signed requests, and revoking it in the console locks it out.
+  approved device publishes with signed requests, and revoking it in the console locks it out;
+- the Edge lab's sound transport: a signed envelope modulated into a WAV file is played into
+  Chromium as a fake microphone, and the page demodulates, verifies, and shows it (and the Play
+  button runs without errors);
+- the Edge lab's animated QR, both ways: its canvas decoded here with jsQR until the fountain code
+  completes and the signature verifies, and a QR video rendered by the SDK scanned through a fake
+  camera (headless Chromium has no BarcodeDetector, so this covers the jsQR fallback).

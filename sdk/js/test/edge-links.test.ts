@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   acceptPayload, AudioFrameReceiver, BleLink, deliverPayload, GossipNode, modulate, QrFrameReceiver, qrFrameSize,
-  qrFrameTexts, resample, encodeQr, qrCapacity, BLE_INBOX_UUID, BLE_OUTBOX_UUID, BLE_SERVICE_UUID,
+  qrFrameTexts, resample, Resampler, encodeQr, qrCapacity, BLE_INBOX_UUID, BLE_OUTBOX_UUID, BLE_SERVICE_UUID,
 } from "../src/edge/index.ts";
 import { connectBlePeer, type BluetoothLike } from "../src/edge/web.ts";
 import { deviceKeyFromSeed, signEnvelope, ulid, type Envelope } from "../src/protocol/index.ts";
@@ -34,10 +34,45 @@ describe("audio receiver", () => {
     const stream = new Float32Array(mic.length + 44_100);
     stream.set(mic, 20_000);
     for (let i = 0; i < stream.length; i++) stream[i]! += (Math.sin(i * 0.37) * 0.05); // hum
-    const got: Uint8Array[] = [];
-    const rx = new AudioFrameReceiver({ sampleRate: 44_100, windowSeconds: 4, onPayload: (p) => got.push(p) });
-    for (let o = 0; o < stream.length; o += 4096) rx.push(stream.subarray(o, o + 4096));
-    expect(got).toEqual([payload]);
+    // 128 is the AudioWorklet render quantum; 441 and 4096 are typical native and ScriptProcessor buffers.
+    for (const block of [128, 441, 4096]) {
+      const got: Uint8Array[] = [];
+      const rx = new AudioFrameReceiver({ sampleRate: 44_100, windowSeconds: 4, onPayload: (p) => got.push(p) });
+      for (let o = 0; o < stream.length; o += block) rx.push(stream.subarray(o, o + block));
+      expect(got, `${block}-sample blocks`).toEqual([payload]);
+    }
+  });
+
+  it("hears a long frame from 16 kHz audio in AudioWorklet-sized blocks", () => {
+    // ~7 s of tones: per-block resampling used to drift by more than a symbol over a frame this long.
+    const payload = deliverPayload([{ id: "01JD5A2Z3K8Q9V6X7W4T1R0S2M", topic: TOPIC, message: "x".repeat(300), hops: 1 }]);
+    for (const rate of [44_100, 16_000]) {
+      const mic = resample(modulate(payload), 48_000, rate);
+      const stream = new Float32Array(mic.length + rate);
+      stream.set(mic, rate / 4);
+      const got: Uint8Array[] = [];
+      const rx = new AudioFrameReceiver({ sampleRate: rate, windowSeconds: 10, onPayload: (p) => got.push(p) });
+      for (let o = 0; o < stream.length; o += 128) rx.push(stream.subarray(o, o + 128));
+      expect(got, `${rate} Hz`).toEqual([payload]);
+    }
+  });
+});
+
+describe("streaming resampler", () => {
+  it("matches resampling the whole stream at once, whatever the block sizes", () => {
+    const x = Float32Array.from({ length: 10_000 }, (_, i) => Math.sin(i * 0.05) + 0.3 * Math.sin(i * 0.71));
+    for (const [from, to] of [[44_100, 48_000], [16_000, 48_000], [96_000, 48_000], [48_000, 44_100]] as const) {
+      const whole = resample(x, from, to);
+      for (const block of [1, 7, 128, 1000]) {
+        const r = new Resampler(from, to);
+        const parts: number[] = [];
+        for (let o = 0; o < x.length; o += block) parts.push(...r.push(x.subarray(o, o + block)));
+        // The stream holds back the outputs past its last sample until the next block arrives.
+        expect(whole.length - parts.length, `${from}→${to} in ${block}s`).toBeLessThanOrEqual(Math.ceil(to / from));
+        expect(whole.length - parts.length).toBeGreaterThanOrEqual(0);
+        for (let i = 0; i < parts.length; i++) expect(parts[i]).toBeCloseTo(whole[i]!, 4);
+      }
+    }
   });
 });
 
