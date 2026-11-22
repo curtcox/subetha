@@ -2,6 +2,7 @@
 import { LANGUAGES, LANGUAGE_NAMES, snippet } from "./snippets.js";
 import { buildRequest, operations, toCurl } from "./explorer.js";
 import { renderUsageChart } from "./usage-chart.js";
+import { renderInspection, verifyWebhookSignature } from "./inspector.js";
 
 const $ = (id) => document.getElementById(id);
 const usd = (micros) => `$${(micros / 1e6).toFixed(micros < 10000 ? 6 : 2)}`;
@@ -259,7 +260,7 @@ async function loadEndpoints() {
     client.request("GET", "/v1/slack/teams").catch(() => ({ teams: [] })),
   ]);
   endpoints = eps.endpoints;
-  $("epRows").innerHTML = endpoints.map((e) => `<tr><td>${esc(e.kind)}</td><td><code>${esc(e.address)}</code>${e.name ? ` <span class="muted">${esc(e.name)}</span>` : ""}</td><td>${e.verified ? '<span class="ok">verified</span>' : `<span class="row"><input data-code="${esc(e.id)}" placeholder="6-digit code" inputmode="numeric" maxlength="6" aria-label="Verification code"><button class="secondary" data-verify="${esc(e.id)}">Verify</button></span>`}</td><td><button class="secondary" data-epdel="${esc(e.id)}">Delete</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">No endpoints yet. "Notify this browser" on Send / receive adds a Web Push one.</td></tr>`;
+  $("epRows").innerHTML = endpoints.map((e) => `<tr><td>${esc(e.kind)}</td><td><code>${esc(e.address)}</code>${e.name ? ` <span class="muted">${esc(e.name)}</span>` : ""}</td><td>${e.verified ? '<span class="ok">verified</span>' : `<span class="row"><input data-code="${esc(e.id)}" placeholder="6-digit code" inputmode="numeric" maxlength="6" aria-label="Verification code"><button class="secondary" data-verify="${esc(e.id)}">Verify</button></span>`}</td><td>${e.verified && e.kind !== "webpush" ? `<button class="secondary" data-eptest="${esc(e.id)}">Test</button> ` : ""}<button class="secondary" data-epdel="${esc(e.id)}">Delete</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">No endpoints yet. "Notify this browser" on Send / receive adds a Web Push one.</td></tr>`;
   const label = (id) => { const e = endpoints.find((x) => x.id === id); return e ? `${e.kind} ${e.address}` : id; };
   $("subEp").innerHTML = endpoints.filter((e) => e.verified).map((e) => `<option value="${esc(e.id)}">${esc(label(e.id))}</option>`).join("") || `<option value="">No verified endpoints</option>`;
   $("subRows").innerHTML = subs.subscriptions.map((s) => `<tr><td><code>${esc(s.topic)}</code></td><td>${esc(label(s.endpoint_id))}</td><td>${s.after_s ? `${s.after_s}s` : "now"}</td><td>${s.min_priority ?? ""}</td><td><code>${esc([s.filter?.tags?.length ? `tags ${s.filter.tags.join(",")}` : "", s.filter?.priority?.length ? `priority ${s.filter.priority.join(",")}` : ""].filter(Boolean).join("; "))}</code></td><td><button class="secondary" data-subdel="${esc(s.id)}">Remove</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">No endpoint subscriptions.</td></tr>`;
@@ -279,11 +280,27 @@ async function loadEndpoints() {
     await client.request("DELETE", `/v1/endpoints/${encodeURIComponent(b.dataset.epdel)}`).catch((e) => alert(e.message));
     loadEndpoints();
   });
+  document.querySelectorAll("[data-eptest]").forEach((b) => b.onclick = async () => {
+    const out = $("insOut");
+    b.disabled = true;
+    out.innerHTML = '<p class="muted">Sending…</p>';
+    try {
+      const r = await client.request("POST", `/v1/endpoints/${encodeURIComponent(b.dataset.eptest)}/test`, { title: $("insTitle").value, message: $("insMessage").value, priority: Number($("insPriority").value) });
+      out.innerHTML = renderInspection(r);
+      if (r.request) { $("sigHeader").value = r.request.headers["x-subetha-signature"] ?? ""; $("sigBody").value = r.request.body; }
+      client.account().then((a) => { me = a; showBalance(a); }).catch(() => {});
+    } catch (e) { out.innerHTML = `<p class="bad">${esc(e.code)}: ${esc(e.message)}</p>`; }
+    finally { b.disabled = false; $("inspector").scrollIntoView({ block: "nearest" }); }
+  });
   document.querySelectorAll("[data-subdel]").forEach((b) => b.onclick = async () => {
     await client.request("DELETE", `/v1/subscriptions/${encodeURIComponent(b.dataset.subdel)}`).catch((e) => alert(e.message));
     loadEndpoints();
   });
 }
+$("sigCheck").onclick = async () => {
+  const r = await verifyWebhookSignature($("sigSecret").value.trim(), $("sigHeader").value.trim(), $("sigBody").value, { toleranceS: null });
+  $("sigOut").innerHTML = `<span class="${r.valid ? "ok" : "bad"}">${esc(r.reason)}</span>${r.age_s !== undefined ? ` <span class="muted">(signed ${esc(r.age_s)}s ago)</span>` : ""}`;
+};
 $("epAdd").onclick = async () => {
   const out = $("epOut"); out.hidden = false;
   try {

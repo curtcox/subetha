@@ -84,6 +84,24 @@
         <p class="muted">Where paid deliveries go. Email and phone endpoints are verified with a code sent to them; each verified endpoint is billed per day.</p>
         <div class="scroll"><table><thead><tr><th>Kind</th><th>Address</th><th>Status</th><th></th></tr></thead><tbody id="epRows"></tbody></table></div>
       </div>
+      <div class="card" id="inspector">
+        <h3>Inspector</h3>
+        <p class="muted"><b>Test</b> on a verified endpoint sends it one sample message now (charged as one delivery). Webhooks show the exact request, signature, and your server's response.</p>
+        <div class="row">
+          <div><label for="insTitle">Title</label><input id="insTitle" value="SubEtha test"></div>
+          <div><label for="insMessage">Message</label><input id="insMessage" value="Test delivery from the SubEtha endpoint inspector."></div>
+          <div><label for="insPriority">Priority</label><select id="insPriority"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></div>
+        </div>
+        <div id="insOut" aria-live="polite"></div>
+        <details>
+          <summary>Check a webhook signature</summary>
+          <p class="muted">Paste what your server received. The check runs in this browser; the secret isn't sent anywhere.</p>
+          <label for="sigSecret">Signing secret</label><input id="sigSecret" placeholder="whsec_…" autocomplete="off">
+          <label for="sigHeader">X-SubEtha-Signature</label><input id="sigHeader" placeholder="t=1763750000,v1=…">
+          <label for="sigBody">Raw body</label><textarea id="sigBody" rows="4"></textarea>
+          <p><button id="sigCheck" class="secondary">Check</button> <span id="sigOut"></span></p>
+        </details>
+      </div>
       <div class="grid">
         <div class="card">
           <h3>Add an endpoint</h3>

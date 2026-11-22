@@ -107,6 +107,19 @@ Verify the signature before trusting the body:
 
 No operator secrets are needed: each endpoint gets its own signing secret.
 
+### Testing an endpoint
+
+`POST /v1/endpoints/{id}/test` sends one sample message to a verified endpoint right away. For a
+webhook, the response shows the exact request the relay sent (headers, `X-SubEtha-Signature`,
+raw body) and what your server answered (status, headers, the first 4 KB of the body), so you can
+debug a signature check without publishing. Other transports report the provider's outcome. A
+test costs one delivery of that transport, whether or not the receiver accepts it.
+
+<!-- include: samples/curl/endpoint-test.sh -->
+
+The console's **Endpoints** tab has a **Test** button on each verified endpoint and a signature
+checker that runs in the browser, so the secret never leaves the page.
+
 ## Email
 
 **Outbound** email goes only to verified addresses. The subject is the message title (or the
