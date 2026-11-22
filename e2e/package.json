@@ -12,6 +12,7 @@
     "@playwright/test": "1.63.0",
     "@subetha/sdk": "workspace:*",
     "@types/node": "^22.10.0",
+    "jsqr": "1.4.0",
     "typescript": "^5.9.3"
   }
 }
