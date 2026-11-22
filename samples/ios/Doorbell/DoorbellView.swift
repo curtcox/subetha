@@ -76,6 +76,16 @@ struct EdgeView: View {
                         .disabled(edge.sending || text.isEmpty)
                     Button(edge.listening ? "Stop listening" : "Listen", action: edge.toggleListening)
                 }
+                Section("QR") {
+                    Button(edge.qr != nil ? "Hide QR" : "Show as QR") { edge.toggleQr(text) }
+                        .disabled(edge.qr == nil && text.isEmpty)
+                    if let sender = edge.qr { AnimatedQrView(sender: sender) }
+                    Button(edge.scanning ? "Stop scanning" : "Scan QR", action: edge.toggleScanning)
+                    if edge.scanning {
+                        QrScannerView { text in Task { @MainActor in edge.onQrText(text) } }
+                            .frame(height: 280)
+                    }
+                }
                 Section("Bluetooth and relay") {
                     Button(edge.bluetooth ? "Bluetooth off (\(edge.peers) peers)" : "Bluetooth on", action: edge.toggleBluetooth)
                     Button(edge.bridging ? "Stop bridging" : "Bridge to relay") { edge.toggleBridge(client: doorbell.connectedClient) }

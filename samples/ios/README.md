@@ -25,4 +25,6 @@ CI builds it for the simulator (`.github/workflows/mobile.yml`, job `ios-sample`
     the topic into the node (Bluetooth peers then fetch them) and publishes what's heard over
     the edge. The offline BLE-hop demo in `samples/android/README.md` works with any mix of
     iPhones and Android phones.
-  - QR (camera) comes next.
+  - **QR**: "Show as QR" animates a message with `QrSender` (CoreImage renders each frame);
+    "Scan QR" feeds AVCaptureMetadataOutput strings to `QrReceiver`. Interoperates with the
+    Android sample and the Edge lab page.

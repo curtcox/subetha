@@ -6,6 +6,8 @@ import SubEthaCore
 /// Edge transports between phones, no network. One gossip node holds what this phone has seen:
 /// - Sound: "Send by sound" plays a message as a modem frame (a gossip `deliver`, spec
 ///   §11.1/§11.4); "Listen" decodes what the microphone hears.
+/// - QR: "Show as QR" animates a message as fountain-coded QR frames (spec §11.2); "Scan QR"
+///   decodes them from the camera.
 /// - Bluetooth: `AppleBle` connects to nearby phones (and Web Bluetooth pages) and gossips
 ///   (spec §11.3/§11.4), so messages hop between phones in range.
 /// - Bridge: with the Doorbell tab connected, relay messages on the topic enter the node (and
@@ -20,6 +22,9 @@ final class EdgeModel: ObservableObject {
     @Published private(set) var peers = 0
     @Published private(set) var bridging = false
     @Published private(set) var heard: [String] = []
+    /// The animated QR code being shown, if any.
+    @Published private(set) var qr: QrSender?
+    @Published private(set) var scanning = false
     @Published private(set) var status = ""
 
     private let node = EdgeGossipNode(requireSignatures: false)
@@ -27,22 +32,29 @@ final class EdgeModel: ObservableObject {
     private var ble: AppleBle?
     private var bridge: EdgeBridge?
     private lazy var listener = SoundListener { [weak self] payload in
-        Task { @MainActor in self?.accept(payload) }
+        Task { @MainActor in self?.accept(payload, via: "sound") }
     }
+    private lazy var qrReceiver = QrReceiver { [weak self] payload in self?.accept(payload, via: "QR") }
     private lazy var sender = AudioLink(sampleRate: Int(AppleAudio.playbackRate), play: { [weak self] samples in
         self?.audio.play(samples) { Task { @MainActor in self?.sending = false } }
     }, onPayload: { _ in })
 
     private var now: UInt64 { UInt64(Date().timeIntervalSince1970) }
 
-    func send(_ text: String) {
+    /// A new envelope for `text`, also held by the node (so Bluetooth peers get it) and uplinked.
+    private func publishLocally(_ text: String) -> String? {
         node.subscribe(topic: topic)
         let env: [String: Any] = ["id": Core.newMessageId(), "time": now, "topic": topic, "message": text, "hops": 1]
         guard let data = try? JSONSerialization.data(withJSONObject: env, options: [.withoutEscapingSlashes]),
-              let json = String(data: data, encoding: .utf8) else { return }
+              let json = String(data: data, encoding: .utf8) else { return nil }
         _ = try? node.publish(envelopeJson: json, nowSecs: now)
         ble?.resyncAll()
         if let bridge { Task { await bridge.uplink(json) } }
+        return json
+    }
+
+    func send(_ text: String) {
+        guard let json = publishLocally(text) else { return }
         do {
             sending = true
             try sender.send(try Edge.deliverPayload([json]))
@@ -51,6 +63,38 @@ final class EdgeModel: ObservableObject {
             sending = false
             status = "Couldn't send: \(error.localizedDescription)"
         }
+    }
+
+    /// Shows `text` as an animated QR code, or hides the one showing.
+    func toggleQr(_ text: String) {
+        if qr != nil { qr = nil; return }
+        guard !text.isEmpty, let json = publishLocally(text) else { return }
+        do {
+            let sender = try QrSender(payload: try Edge.deliverPayload([json]))
+            qr = sender
+            status = "Showing \(sender.sourceBlocks) block(s) as QR frames"
+        } catch {
+            status = "Couldn't make QR frames: \(error.localizedDescription)"
+        }
+    }
+
+    func toggleScanning() {
+        if scanning { scanning = false; status = "Stopped scanning"; return }
+        AVCaptureDevice.requestAccess(for: .video) { granted in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard granted else { self.status = "Camera permission denied (Settings → Doorbell)"; return }
+                self.node.subscribe(topic: self.topic)
+                self.scanning = true
+                self.status = "Point the camera at an animated QR code"
+            }
+        }
+    }
+
+    /// One scanned QR string.
+    func onQrText(_ text: String) {
+        guard let p = qrReceiver.push(text) else { return }
+        if !p.complete { status = "QR: \(p.known) of \(p.total) blocks" }
     }
 
     func toggleListening() {
@@ -113,8 +157,8 @@ final class EdgeModel: ObservableObject {
         status = "Bridging \(topic) to the relay"
     }
 
-    private func accept(_ payload: Data) {
-        Edge.acceptPayload(node, payload).forEach { received($0, via: "sound") }
+    private func accept(_ payload: Data, via: String) {
+        Edge.acceptPayload(node, payload).forEach { received($0, via: via) }
     }
 
     /// A new envelope from an edge link: show it, pass it on to Bluetooth peers, and uplink it.

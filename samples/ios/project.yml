@@ -28,4 +28,5 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Doorbell
         SWIFT_VERSION: "5.9"
         INFOPLIST_KEY_NSMicrophoneUsageDescription: The Edge tab listens for messages sent by sound.
+        INFOPLIST_KEY_NSCameraUsageDescription: The Edge tab scans animated QR codes.
         INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: The Edge tab exchanges messages with nearby phones over Bluetooth.
