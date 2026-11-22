@@ -77,7 +77,7 @@ The Rust core (`subetha_core::edge`) has the same modem, fountain codec, BLE chu
 node. The Swift, Kotlin, Flutter, and React Native SDKs reach it through the core bindings, and
 the platform supplies the radio, speaker, microphone, or camera.
 
-The Kotlin (`org.subetha:subetha-core`) and Swift (`SubEthaCore`) SDKs add drivers that do
+The Kotlin (`org.subetha:subetha-core`), Swift (`SubEthaCore`), and Flutter (`subetha_core`) SDKs add drivers that do
 everything except move bytes, the same as the TypeScript ones:
 
 | Driver | Feed it | It gives you |
@@ -98,6 +98,9 @@ The sample apps wire them to the platform APIs, and are the place to copy from:
   `AppleBle.swift` (CBPeripheralManager and CBCentralManager), `AppleAudio.swift`
   (AVAudioEngine in measurement mode), and `QrViews.swift` (CoreImage and
   AVCaptureMetadataOutput).
+- **Flutter** ([`samples/flutter`](https://github.com/curtcox/subetha/tree/main/samples/flutter)):
+  `lib/edge.dart` with `record`/`audioplayers`, `qr_flutter`/`mobile_scanner`, and
+  `flutter_reactive_ble` as a BLE central (it connects to the native samples).
 
 A phone running either sample is a BLE **peripheral** as well as a central, advertising the
 service in [spec §11.3](https://github.com/curtcox/subetha/blob/main/spec/README.md#113-bluetooth-le), so
