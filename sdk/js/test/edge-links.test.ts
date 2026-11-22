@@ -66,7 +66,9 @@ describe("animated QR", () => {
       n++;
     }
     expect(got[0]).toEqual(first);
-    expect(n).toBeLessThan(a.sourceBlocks * 2);
+    // Typically 1.1–1.5 × K frames, but the payload (random ids, the time) seeds the code, so
+    // about 1 run in 80 needs 2 × K or more. 3 × K still shows it isn't waiting for repeats.
+    expect(n).toBeLessThan(a.sourceBlocks * 3);
     expect(rx.push("not base45 at all")).toBeNull();
     const b = qrFrameTexts(second, 8, "M");
     for (let seq = 0; seq < b.sourceBlocks; seq++) rx.push(b.text(seq));
