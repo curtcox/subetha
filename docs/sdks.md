@@ -11,6 +11,13 @@ signed or encrypted by one verifies and decrypts in all the others.
 | TypeScript (+ CLI, web components) | `@subetha/sdk` | browsers, Node 18+, Deno, Bun, Workers | [`sdk/js`](https://github.com/curtcox/subetha/tree/main/sdk/js) |
 | Python | `subetha` | Python 3.11+ | [`sdk/python`](https://github.com/curtcox/subetha/tree/main/sdk/python) |
 | Rust core | `subetha-core` | anywhere; the base for Swift, Kotlin, Flutter, and React Native bindings | [`sdk/core`](https://github.com/curtcox/subetha/tree/main/sdk/core) |
+| Swift | `SubEtha` (+ `SubEthaCore`) | iOS, macOS | [`sdk/swift`](https://github.com/curtcox/subetha/tree/main/sdk/swift) |
+| Kotlin | `org.subetha:subetha` (+ `subetha-core`) | Android, JVM | [`sdk/kotlin`](https://github.com/curtcox/subetha/tree/main/sdk/kotlin) |
+| Dart / Flutter | `subetha` (+ the `subetha_core` plugin) | Flutter on Android and iOS; Dart VM | [`sdk/flutter`](https://github.com/curtcox/subetha/tree/main/sdk/flutter), [`sdk/flutter_core`](https://github.com/curtcox/subetha/tree/main/sdk/flutter_core) |
+| React Native | `@subetha/react-native` (+ `@subetha/react-native-core`) | React Native and Expo (Hermes) | [`sdk/react-native`](https://github.com/curtcox/subetha/tree/main/sdk/react-native), [`sdk/react-native-core`](https://github.com/curtcox/subetha/tree/main/sdk/react-native-core) |
+
+The packages in parentheses carry the Rust core for that platform: device keys, signatures, E2EE,
+and the edge transports. The mobile SDKs work without them for relay messaging.
 
 Package registry releases are pending; install from the repository until then. Build status and
 versions are on the [build info page](https://curtcox.github.io/subetha/build-info.html).
