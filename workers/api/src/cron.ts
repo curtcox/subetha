@@ -1,6 +1,6 @@
 // Scheduled jobs (PLAN §7, §8, §14): rent metering, freeze/cleanup, reconciliation, Twilio
 // repricing, and the nightly D1 backup.
-import { rentNanos, type PriceTable } from "@subetha/pricing";
+import { rentNanos, type PriceTable, type SkuPrice } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { audit, invalidateAccount } from "./accounts.ts";
 import { backupDatabase } from "./backup.ts";
@@ -10,8 +10,6 @@ import type { Env } from "./types.ts";
 
 const PRICES = prices as unknown as PriceTable;
 const GRACE_DAYS = 30;
-/** Twilio cost assumed by pricing/costs.yaml for one outbound US SMS segment (twilio + carrier fee). */
-export const SMS_COST_ASSUMED_USD = 0.0083 + 0.003;
 export const CIRCUIT_KEY = "circuit:telephony";
 
 export async function runCron(cron: string, env: Env, now: number) {
@@ -77,18 +75,48 @@ export async function reconcile(env: Env, now: number) {
   for (const r of results) if (r.topups === 0) await audit(env, r.account_id, "cron", "reconcile.missing_topup", { stripe_micros: r.stripe });
 }
 
-/** Trips the telephony circuit if Twilio's US SMS price exceeds what our prices assume. */
+/**
+ * The most one provider unit (`component` of `sku`, e.g. Twilio's share of an SMS segment) may
+ * cost before the SKU's cheapest tier falls below the minimum margin (PLAN §8, rules 2 and 5).
+ */
+export function providerCeilingUsd(sku: SkuPrice, component: string, minMargin = PRICES.min_margin): number {
+  const cheapest = Math.min(...Object.values(sku.price_nanos));
+  const others = sku.cost_nanos - (sku.components_nanos[component] ?? 0);
+  return (cheapest * (1 - minMargin) - others) / 1e9;
+}
+
+/**
+ * Pulls Twilio's live US prices for outbound SMS and voice and trips the telephony circuit (which
+ * pauses SMS and voice deliveries) if either is unknown or above what our prices can absorb
+ * without breaking the margin floor. Closes it again once both are back under.
+ */
 export async function checkTwilioPrices(env: Env) {
   if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN) return;
+  const headers = { authorization: `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`)}` };
+  const get = async <T>(path: string): Promise<T> => {
+    const r = await fetch(`https://pricing.twilio.com/v2/${path}`, { headers });
+    if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+    return (await r.json()) as T;
+  };
+  const prices = (xs: { current_price?: string }[] | undefined) => (xs ?? []).map((p) => Number(p.current_price ?? 0)).filter((n) => Number.isFinite(n));
   try {
-    const r = await fetch("https://pricing.twilio.com/v2/Messaging/Countries/US", { headers: { authorization: `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`)}` } });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const j = (await r.json()) as { outbound_sms_prices?: { prices?: { current_price?: string }[] }[] };
-    const max = Math.max(0, ...(j.outbound_sms_prices ?? []).flatMap((c) => (c.prices ?? []).map((p) => Number(p.current_price ?? 0))));
-    await env.CACHE.put("twilio:us:sms:max_usd", String(max));
-    if (max === 0 || max > 0.0083 * 1.1) await env.CACHE.put(CIRCUIT_KEY, `open: twilio US SMS ${max} > assumed`, { expirationTtl: 2 * 86_400 });
-    else await env.CACHE.delete(CIRCUIT_KEY);
+    const sms = await get<{ outbound_sms_prices?: { prices?: { current_price?: string }[] }[] }>("Messaging/Countries/US");
+    const voice = await get<{ outbound_prefix_prices?: { current_price?: string }[] }>("Voice/Countries/US");
+    const checks = [
+      { name: "SMS", max: Math.max(0, ...(sms.outbound_sms_prices ?? []).flatMap((c) => prices(c.prices))), ceiling: providerCeilingUsd(PRICES.skus.deliver_sms_us!, "twilio") },
+      { name: "voice", max: Math.max(0, ...prices(voice.outbound_prefix_prices)), ceiling: providerCeilingUsd(PRICES.skus.deliver_voice_us!, "twilio") },
+    ];
+    await env.CACHE.put("twilio:us:sms:max_usd", String(checks[0]!.max));
+    await env.CACHE.put("twilio:us:voice:max_usd", String(checks[1]!.max));
+    const bad = checks.filter((c) => c.max === 0 || c.max > c.ceiling);
+    if (bad.length) {
+      const why = bad.map((c) => (c.max === 0 ? `twilio US ${c.name} price unknown` : `twilio US ${c.name} ${c.max} > ${c.ceiling.toFixed(5)}`)).join("; ");
+      await env.CACHE.put(CIRCUIT_KEY, `open: ${why}`, { expirationTtl: 2 * 86_400 });
+    } else {
+      await env.CACHE.delete(CIRCUIT_KEY);
+    }
   } catch (e) {
+    // Leave the circuit as it was; an open one expires after two days without a successful check.
     console.error("twilio repricing failed", e);
   }
 }

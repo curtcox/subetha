@@ -27,6 +27,8 @@ export interface SkuPrice {
   charge: "action" | "rent";
   transports: string[];
   cost_nanos: number;
+  /** Each cost component (pricing/costs.yaml) in nano-dollars, rounded up. */
+  components_nanos: Record<string, number>;
   /** Price in nano-dollars, per tier. Action SKUs are whole micro-dollars (multiples of 1000). */
   price_nanos: Record<string, number>;
   margin: Record<string, number>;
@@ -80,7 +82,8 @@ export function generatePrices(costs: CostsFile, source = "pricing/costs.yaml"):
     // Tiers must be monotone: a bigger tier never pays more.
     const ps = costs.tiers.map((t) => price_nanos[t.id]!);
     for (let i = 1; i < ps.length; i++) if (ps[i]! > ps[i - 1]!) violations.push(`${id}: tier ${costs.tiers[i]!.id} is more expensive than ${costs.tiers[i - 1]!.id}`);
-    skus[id] = { description: sku.description, unit: sku.unit, charge: sku.charge, transports: sku.transports ?? [], cost_nanos: cost, price_nanos, margin };
+    const components_nanos = Object.fromEntries(Object.entries(sku.components).map(([k, v]) => [k, usdToNanosCeil(v)]));
+    skus[id] = { description: sku.description, unit: sku.unit, charge: sku.charge, transports: sku.transports ?? [], cost_nanos: cost, components_nanos, price_nanos, margin };
   }
 
   // Every transport that can be metered maps to exactly one delivery SKU.

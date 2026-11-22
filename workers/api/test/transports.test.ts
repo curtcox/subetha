@@ -2,6 +2,9 @@ import { createExecutionContext, createMessageBatch, env, getQueueResult, SELF }
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index.ts";
 import { processJob } from "../src/delivery/consumer.ts";
+import { checkTwilioPrices, CIRCUIT_KEY, providerCeilingUsd } from "../src/cron.ts";
+import type { PriceTable } from "@subetha/pricing";
+import PRICES from "@subetha/pricing/prices.json";
 import { signWebhook } from "../src/delivery/webhook.ts";
 import { smsSegments, twilioSignature, verifyTwilioSignature, voiceTwiml } from "../src/delivery/twilio.ts";
 import { verifySlackSignature } from "../src/delivery/slack.ts";
@@ -189,5 +192,54 @@ describe("Twilio SMS keywords", () => {
     expect(help.status).toBe(200);
     expect(await help.text()).toContain("Reply STOP to opt out");
     expect((await send("STOP")).status).toBe(200);
+  });
+});
+
+describe("Twilio price check (daily cron)", () => {
+  const twilio = (sms: string[], voice: string[]) =>
+    stubProviders((url) => {
+      if (url.endsWith("/Messaging/Countries/US")) return Response.json({ outbound_sms_prices: [{ carrier: "x", prices: sms.map((p) => ({ number_type: "local", current_price: p })) }] });
+      if (url.endsWith("/Voice/Countries/US")) return Response.json({ outbound_prefix_prices: voice.map((p) => ({ prefixes: ["1"], current_price: p })) });
+      return new Response("not found", { status: 404 });
+    });
+  const prices = PRICES as unknown as PriceTable;
+
+  it("derives each provider ceiling from the price table's margin floor", () => {
+    const sms = providerCeilingUsd(prices.skus.deliver_sms_us!, "twilio");
+    // At the ceiling, the cheapest tier keeps exactly the minimum margin.
+    const s = prices.skus.deliver_sms_us!;
+    const cheapest = Math.min(...Object.values(s.price_nanos));
+    const cost = s.cost_nanos - s.components_nanos.twilio! + sms * 1e9;
+    expect((cheapest - cost) / cheapest).toBeCloseTo(prices.min_margin, 6);
+    expect(sms).toBeGreaterThan(s.components_nanos.twilio! / 1e9); // today's assumption fits
+    expect(providerCeilingUsd(prices.skus.deliver_voice_us!, "twilio")).toBeGreaterThan(prices.skus.deliver_voice_us!.components_nanos.twilio! / 1e9);
+  });
+
+  it("opens the telephony circuit when SMS or voice costs more than prices absorb, and closes it after", async () => {
+    await E.CACHE.delete(CIRCUIT_KEY);
+    twilio(["0.0079", "0.0083"], ["0.0140"]);
+    await checkTwilioPrices(E);
+    expect(await E.CACHE.get(CIRCUIT_KEY)).toBeNull();
+    expect(await E.CACHE.get("twilio:us:voice:max_usd")).toBe("0.014");
+
+    twilio(["0.0083"], ["0.0140", "0.0300"]);
+    await checkTwilioPrices(E);
+    expect(await E.CACHE.get(CIRCUIT_KEY)).toMatch(/voice 0\.03 >/);
+
+    twilio([], ["0.0140"]); // no SMS price: unknown destinations are not served
+    await checkTwilioPrices(E);
+    expect(await E.CACHE.get(CIRCUIT_KEY)).toMatch(/SMS price unknown/);
+
+    twilio(["0.0083"], ["0.0140"]);
+    await checkTwilioPrices(E);
+    expect(await E.CACHE.get(CIRCUIT_KEY)).toBeNull();
+  });
+
+  it("leaves the circuit alone when Twilio can't be reached", async () => {
+    await E.CACHE.put(CIRCUIT_KEY, "open: earlier");
+    stubProviders(() => new Response("down", { status: 503 }));
+    await checkTwilioPrices(E);
+    expect(await E.CACHE.get(CIRCUIT_KEY)).toBe("open: earlier");
+    await E.CACHE.delete(CIRCUIT_KEY);
   });
 });

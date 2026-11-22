@@ -30,6 +30,13 @@
       "charge": "action",
       "transports": [],
       "cost_nanos": 1500,
+      "components_nanos": {
+        "worker_request": 300,
+        "do_request": 150,
+        "do_duration": 200,
+        "analytics": 100,
+        "overhead": 750
+      },
       "price_nanos": {
         "standard": 6000,
         "bulk": 6000,
@@ -51,6 +58,10 @@
         "poll"
       ],
       "cost_nanos": 300,
+      "components_nanos": {
+        "do_duration": 100,
+        "egress_overhead": 200
+      },
       "price_nanos": {
         "standard": 2000,
         "bulk": 2000,
@@ -72,6 +83,12 @@
         "fcm"
       ],
       "cost_nanos": 2000,
+      "components_nanos": {
+        "queue_ops": 1200,
+        "worker_request": 300,
+        "cpu": 200,
+        "overhead": 300
+      },
       "price_nanos": {
         "standard": 6000,
         "bulk": 6000,
@@ -91,6 +108,12 @@
         "webhook"
       ],
       "cost_nanos": 2300,
+      "components_nanos": {
+        "queue_ops": 1200,
+        "worker_request": 300,
+        "cpu": 300,
+        "overhead": 500
+      },
       "price_nanos": {
         "standard": 10000,
         "bulk": 10000,
@@ -110,6 +133,12 @@
         "slack"
       ],
       "cost_nanos": 2300,
+      "components_nanos": {
+        "queue_ops": 1200,
+        "worker_request": 300,
+        "cpu": 300,
+        "overhead": 500
+      },
       "price_nanos": {
         "standard": 10000,
         "bulk": 10000,
@@ -129,6 +158,11 @@
         "mcp"
       ],
       "cost_nanos": 850,
+      "components_nanos": {
+        "do_request": 150,
+        "do_duration": 200,
+        "overhead": 500
+      },
       "price_nanos": {
         "standard": 7000,
         "bulk": 7000,
@@ -148,6 +182,11 @@
         "email"
       ],
       "cost_nanos": 121200,
+      "components_nanos": {
+        "provider": 100000,
+        "queue_ops": 1200,
+        "overhead": 20000
+      },
       "price_nanos": {
         "standard": 443000,
         "bulk": 413000,
@@ -165,6 +204,11 @@
       "charge": "action",
       "transports": [],
       "cost_nanos": 10000,
+      "components_nanos": {
+        "email_worker": 3000,
+        "parse_cpu": 3000,
+        "overhead": 4000
+      },
       "price_nanos": {
         "standard": 70000,
         "bulk": 68000,
@@ -184,6 +228,12 @@
         "sms"
       ],
       "cost_nanos": 11501200,
+      "components_nanos": {
+        "twilio": 8300000,
+        "carrier_fee": 3000000,
+        "queue_ops": 1200,
+        "overhead": 200000
+      },
       "price_nanos": {
         "standard": 16602000,
         "bulk": 15452000,
@@ -201,6 +251,11 @@
       "charge": "action",
       "transports": [],
       "cost_nanos": 11000000,
+      "components_nanos": {
+        "twilio": 8300000,
+        "carrier_fee": 2500000,
+        "overhead": 200000
+      },
       "price_nanos": {
         "standard": 15900000,
         "bulk": 14800000,
@@ -220,6 +275,11 @@
         "voice"
       ],
       "cost_nanos": 16900000,
+      "components_nanos": {
+        "twilio": 14000000,
+        "tts": 2400000,
+        "overhead": 500000
+      },
       "price_nanos": {
         "standard": 24660000,
         "bulk": 22970000,
@@ -239,6 +299,11 @@
         "lxmf"
       ],
       "cost_nanos": 15200,
+      "components_nanos": {
+        "container_time": 10000,
+        "queue_ops": 1200,
+        "overhead": 4000
+      },
       "price_nanos": {
         "standard": 51000,
         "bulk": 47000,
@@ -256,6 +321,11 @@
       "charge": "action",
       "transports": [],
       "cost_nanos": 1000,
+      "components_nanos": {
+        "worker_request": 300,
+        "kv_read": 500,
+        "overhead": 200
+      },
       "price_nanos": {
         "standard": 3000,
         "bulk": 3000,
@@ -273,6 +343,11 @@
       "charge": "action",
       "transports": [],
       "cost_nanos": 6800,
+      "components_nanos": {
+        "r2_class_a": 4500,
+        "worker_request": 300,
+        "overhead": 2000
+      },
       "price_nanos": {
         "standard": 17000,
         "bulk": 15000,
@@ -290,6 +365,10 @@
       "charge": "rent",
       "transports": [],
       "cost_nanos": 40,
+      "components_nanos": {
+        "do_storage": 30,
+        "d1_storage": 10
+      },
       "price_nanos": {
         "standard": 100,
         "bulk": 90,
@@ -307,6 +386,10 @@
       "charge": "rent",
       "transports": [],
       "cost_nanos": 600,
+      "components_nanos": {
+        "r2_storage": 500,
+        "overhead": 100
+      },
       "price_nanos": {
         "standard": 1600,
         "bulk": 1450,
@@ -324,6 +407,10 @@
       "charge": "rent",
       "transports": [],
       "cost_nanos": 500,
+      "components_nanos": {
+        "d1_storage": 100,
+        "overhead": 400
+      },
       "price_nanos": {
         "standard": 2000,
         "bulk": 1875,
@@ -341,6 +428,10 @@
       "charge": "rent",
       "transports": [],
       "cost_nanos": 2100,
+      "components_nanos": {
+        "d1_storage": 100,
+        "overhead": 2000
+      },
       "price_nanos": {
         "standard": 9200,
         "bulk": 8675,
@@ -358,6 +449,10 @@
       "charge": "rent",
       "transports": [],
       "cost_nanos": 1000,
+      "components_nanos": {
+        "do_duration": 500,
+        "overhead": 500
+      },
       "price_nanos": {
         "standard": 3000,
         "bulk": 2750,
