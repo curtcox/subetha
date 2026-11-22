@@ -1027,17 +1027,22 @@ paths:
       tags: [devices]
       operationId: enrollDevice
       summary: Enroll a device directly by its id (admin)
+      description: >-
+        Needs the same proof of key possession as `/v1/device/code` (device ids are public), so
+        get `time` and `proof` from the device (`enrollmentProof` in the SDKs).
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [device_id]
+              required: [device_id, time, proof]
               properties:
                 device_id: { type: string, pattern: "^dev_[a-z2-7]{52}$" }
-                name: { type: string }
-                capabilities: { type: array, items: { $ref: "#/components/schemas/Transport" } }
+                time: { type: integer, description: Unix seconds (±300 s). }
+                proof: { type: string, description: 'base64url Ed25519 signature of "subetha-enroll-v1\n" + device_id + "\n" + time.' }
+                name: { type: string, maxLength: 64 }
+                capabilities: { type: array, maxItems: 32, items: { $ref: "#/components/schemas/Transport" } }
       responses:
         "201":
           description: Enrolled.

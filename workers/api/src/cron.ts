@@ -19,6 +19,8 @@ export async function runCron(cron: string, env: Env, now: number) {
     await reconcile(env, now);
     await checkTwilioPrices(env);
     await deleteExpiredFiles(env, now);
+    // Device codes live 10 minutes; approved ones are kept a day for the device's last poll.
+    await env.DB.prepare("DELETE FROM device_codes WHERE expires_at < ?").bind(now - 86_400_000).run();
     await backupDatabase(env, now);
   }
 }

@@ -60,6 +60,28 @@ export async function authenticateDevice(req: Request, env: Env, nowSec = Math.f
   return { kind: "device", accountId: row.account_id, deviceId: id };
 }
 
+/** Name and capabilities are stored per device; keep them small (they're user-supplied). */
+function deviceFields(body: { name?: unknown; capabilities?: unknown }): { name: string; capabilities: string } {
+  const name = typeof body.name === "string" ? body.name.slice(0, 64) : "";
+  const caps = body.capabilities ?? [];
+  if (!Array.isArray(caps) || caps.length > 32 || !caps.every((x) => typeof x === "string" && x.length <= 32)) {
+    throw new ApiError("bad_request", "capabilities must be at most 32 strings of up to 32 characters");
+  }
+  return { name, capabilities: JSON.stringify(caps) };
+}
+
+/** Checks an enrollment proof (the device signs "subetha-enroll-v1\n<id>\n<time>" with its key). */
+async function checkProof(body: { device_id?: string; time?: number; proof?: string }): Promise<string> {
+  const id = body.device_id ?? "";
+  const now = Math.floor(Date.now() / 1000);
+  if (!DEVICE_ID_RE.test(id) || typeof body.time !== "number" || Math.abs(now - body.time) > SKEW_S || !body.proof) {
+    throw new ApiError("bad_request", "device_id, time, and proof are required (see enrollmentProof in the SDKs)");
+  }
+  try { publicKeyFromDeviceId(id); } catch { throw new ApiError("bad_request", "non-canonical device id"); }
+  if (!(await ed25519Verify(id, body.proof, `${ENROLL_DOMAIN}${id}\n${body.time}`))) throw new ApiError("unauthorized", "bad proof");
+  return id;
+}
+
 function userCode(): string {
   const b = crypto.getRandomValues(new Uint8Array(8));
   const s = Array.from(b, (x) => USER_CODE_ALPHABET[x % USER_CODE_ALPHABET.length]).join("");
@@ -76,14 +98,16 @@ export function registerDeviceRoutes(app: Hono<Vars>, principal: PrincipalFn) {
   app.post("/v1/devices", async (c) => {
     const p = await principal(c);
     const accountId = requireAdmin(p);
-    const body = (await c.req.json()) as { device_id?: string; name?: string; capabilities?: string[] };
-    if (!body.device_id || !DEVICE_ID_RE.test(body.device_id)) throw new ApiError("bad_request", "device_id must be dev_<base32 ed25519 public key>");
-    try { publicKeyFromDeviceId(body.device_id); } catch { throw new ApiError("bad_request", "non-canonical device id"); }
+    // Device ids are public (every signed message carries one), so registering one directly
+    // needs the same proof of key possession as the code flow.
+    const body = (await c.req.json()) as { device_id?: string; name?: string; capabilities?: string[]; time?: number; proof?: string };
+    const id = await checkProof(body);
+    const f = deviceFields(body);
     await c.env.DB.prepare("INSERT INTO devices (id, account_id, name, capabilities, created_at) VALUES (?, ?, ?, ?, ?)")
-      .bind(body.device_id, accountId, body.name ?? "", JSON.stringify(body.capabilities ?? []), Date.now()).run()
+      .bind(id, accountId, f.name, f.capabilities, Date.now()).run()
       .catch((e) => { throw String(e).includes("UNIQUE") ? new ApiError("conflict", "device already enrolled") : e; });
-    await audit(c.env, accountId, p.kind, "device.enroll", { id: body.device_id });
-    return c.json({ id: body.device_id, enrolled: true }, 201);
+    await audit(c.env, accountId, p.kind, "device.enroll", { id });
+    return c.json({ id, enrolled: true }, 201);
   });
 
   app.delete("/v1/devices/:id", async (c) => {
@@ -98,14 +122,16 @@ export function registerDeviceRoutes(app: Hono<Vars>, principal: PrincipalFn) {
   // Device-code flow, step 1: the device asks for a code, proving it holds its key.
   app.post("/v1/device/code", async (c) => {
     const body = (await c.req.json()) as { device_id?: string; name?: string; capabilities?: string[]; time?: number; proof?: string };
-    const id = body.device_id ?? "";
-    const now = Math.floor(Date.now() / 1000);
-    if (!DEVICE_ID_RE.test(id) || typeof body.time !== "number" || Math.abs(now - body.time) > SKEW_S || !body.proof) throw new ApiError("bad_request", "device_id, time, and proof are required");
-    if (!(await ed25519Verify(id, body.proof, `${ENROLL_DOMAIN}${id}\n${body.time}`))) throw new ApiError("unauthorized", "bad proof");
+    const id = await checkProof(body);
+    const f = deviceFields(body);
     const deviceCode = randomBase32(20);
     const code = userCode();
-    await c.env.DB.prepare("INSERT INTO device_codes (device_code_hash, user_code, device_id, name, capabilities, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(await sha256Hex(deviceCode), code, id, (body.name ?? "").slice(0, 64), JSON.stringify(body.capabilities ?? []), Date.now(), Date.now() + CODE_TTL_MS).run();
+    await c.env.DB.batch([
+      // One pending code per device: a new request replaces the old one.
+      c.env.DB.prepare("DELETE FROM device_codes WHERE device_id = ? AND account_id IS NULL").bind(id),
+      c.env.DB.prepare("INSERT INTO device_codes (device_code_hash, user_code, device_id, name, capabilities, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(await sha256Hex(deviceCode), code, id, f.name, f.capabilities, Date.now(), Date.now() + CODE_TTL_MS),
+    ]);
     return c.json({ device_code: deviceCode, user_code: code, verification_uri: `${c.env.BASE_URL}/console/#device`, verification_uri_complete: `${c.env.BASE_URL}/console/#device=${code}`, expires_in: CODE_TTL_MS / 1000, interval: 5 });
   });
 
@@ -116,11 +142,12 @@ export function registerDeviceRoutes(app: Hono<Vars>, principal: PrincipalFn) {
     const { user_code } = (await c.req.json()) as { user_code?: string };
     const row = await c.env.DB.prepare("SELECT * FROM device_codes WHERE user_code = ?").bind((user_code ?? "").toUpperCase()).first<{ device_code_hash: string; device_id: string; name: string; capabilities: string; account_id: string | null; expires_at: number }>();
     if (!row || row.expires_at < Date.now() || row.account_id) throw new ApiError("not_found", "unknown or expired code");
-    await c.env.DB.batch([
-      c.env.DB.prepare("UPDATE device_codes SET account_id = ? WHERE device_code_hash = ?").bind(accountId, row.device_code_hash),
-      // Re-enrolling a revoked device (or one already ours) is fine; taking over another account's active device is not.
-      c.env.DB.prepare("INSERT INTO devices (id, account_id, name, capabilities, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, revoked_at = NULL WHERE devices.revoked_at IS NOT NULL OR devices.account_id = excluded.account_id").bind(row.device_id, accountId, row.name, row.capabilities, Date.now()),
-    ]);
+    // Re-enrolling a revoked device (or one already ours) is fine; taking over another account's
+    // active device is not, and then the approval must fail rather than report success.
+    const r = await c.env.DB.prepare("INSERT INTO devices (id, account_id, name, capabilities, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, revoked_at = NULL WHERE devices.revoked_at IS NOT NULL OR devices.account_id = excluded.account_id")
+      .bind(row.device_id, accountId, row.name, row.capabilities, Date.now()).run();
+    if (!r.meta.changes) throw new ApiError("conflict", "this device is enrolled in another account; revoke it there first");
+    await c.env.DB.prepare("UPDATE device_codes SET account_id = ? WHERE device_code_hash = ?").bind(accountId, row.device_code_hash).run();
     await audit(c.env, accountId, p.kind, "device.enroll", { id: row.device_id, via: "code" });
     return c.json({ device_id: row.device_id, name: row.name, enrolled: true });
   });

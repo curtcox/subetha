@@ -1,5 +1,6 @@
 // Regressions for the Phase 3 security review (spend caps, replay, idempotency, races).
 import { env, runInDurableObject, SELF } from "cloudflare:test";
+import { enrollmentProof } from "@subetha/sdk";
 import { deviceKeyFromSeed, hexDecode, signEnvelope, ulid } from "@subetha/sdk/protocol";
 import { describe, expect, it } from "vitest";
 import type { Env } from "../src/types.ts";
@@ -73,5 +74,41 @@ describe("security review", () => {
     await runInDurableObject(stub, async (_obj, state) => { state.storage.sql.exec("DELETE FROM messages"); });
     const replay = await post();
     expect(replay.status).toBe(409);
+  });
+});
+
+describe("security review: devices", () => {
+  const post = (path: string, body: unknown, token?: string) =>
+    SELF.fetch(`${BASE}${path}`, { method: "POST", headers: token ? auth(token) : {}, body: JSON.stringify(body) });
+
+  it("needs proof of key possession to register a device directly", async () => {
+    const a = await bootstrap("devproof");
+    const key = await deviceKeyFromSeed(new Uint8Array(32).fill(21));
+    expect((await post("/v1/devices", { device_id: key.deviceId }, a.token)).status).toBe(400);
+    const other = await deviceKeyFromSeed(new Uint8Array(32).fill(22));
+    const forged = { ...(await enrollmentProof(other)), device_id: key.deviceId };
+    expect((await post("/v1/devices", forged, a.token)).status).toBe(401);
+    expect((await post("/v1/devices", { ...(await enrollmentProof(key)), capabilities: Array(40).fill("ws") }, a.token)).status).toBe(400);
+    expect((await post("/v1/devices", await enrollmentProof(key), a.token)).status).toBe(201);
+  });
+
+  it("refuses to approve a code for a device another account holds", async () => {
+    const owner = await bootstrap("devown");
+    const other = await bootstrap("devother");
+    const key = await deviceKeyFromSeed(new Uint8Array(32).fill(23));
+    expect((await post("/v1/devices", await enrollmentProof(key), owner.token)).status).toBe(201);
+    const code = await json(await post("/v1/device/code", await enrollmentProof(key)));
+    const approve = await post("/v1/device/approve", { user_code: code.user_code }, other.token);
+    expect(approve.status).toBe(409);
+    const token = await json(await post("/v1/device/token", { device_code: code.device_code }));
+    expect(token.error).toBe("authorization_pending");
+  });
+
+  it("keeps one pending code per device", async () => {
+    const key = await deviceKeyFromSeed(new Uint8Array(32).fill(24));
+    await post("/v1/device/code", await enrollmentProof(key));
+    await post("/v1/device/code", await enrollmentProof(key));
+    const n = await E.DB.prepare("SELECT COUNT(*) AS n FROM device_codes WHERE device_id = ?").bind(key.deviceId).first<{ n: number }>();
+    expect(n?.n).toBe(1);
   });
 });

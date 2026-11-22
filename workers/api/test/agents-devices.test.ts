@@ -127,7 +127,8 @@ describe("devices", () => {
 describe("cron rent metering", () => {
   it("charges device/endpoint rent daily and freezes accounts that can't pay", async () => {
     const a = await bootstrap("renter", 1);
-    await SELF.fetch(`${BASE}/v1/devices`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ device_id: "dev_js22x5vnph57lk54zl6me2oyltjgkhwuxcc3lbu7eqno34ffxiuq" }) });
+    const k1 = await deviceKeyFromSeed(new Uint8Array(32).fill(11));
+    expect((await SELF.fetch(`${BASE}/v1/devices`, { method: "POST", headers: auth(a.token), body: JSON.stringify(await enrollmentProof(k1)) })).status).toBe(201);
     const before = await balance(a.token);
     await meterRent(E, Date.UTC(2026, 5, 1));
     expect(await balance(a.token)).toBe(before - 2);
@@ -135,7 +136,8 @@ describe("cron rent metering", () => {
     expect(await balance(a.token)).toBe(before - 2);
 
     const b = await bootstrap("deadbeat", 0);
-    await SELF.fetch(`${BASE}/v1/devices`, { method: "POST", headers: auth(b.token), body: JSON.stringify({ device_id: "dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena" }) });
+    const k2 = await deviceKeyFromSeed(new Uint8Array(32).fill(12));
+    expect((await SELF.fetch(`${BASE}/v1/devices`, { method: "POST", headers: auth(b.token), body: JSON.stringify(await enrollmentProof(k2)) })).status).toBe(201);
     await meterRent(E, Date.UTC(2026, 5, 2));
     const row = await E.DB.prepare("SELECT frozen_since FROM accounts WHERE id = ?").bind(b.account_id).first<{ frozen_since: number }>();
     expect(row?.frozen_since).toBe(Date.UTC(2026, 5, 2));

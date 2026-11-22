@@ -30,7 +30,8 @@ short code, you approve it in the console, the device is enrolled.
 3. **`POST /v1/device/token`** by the device, every `interval` seconds, until it stops answering
    `{"error": "authorization_pending"}`.
 
-The owner's side, and direct enrollment when you already know a device's id:
+The owner's side, and direct enrollment when the device can hand you its id and a fresh proof
+(the same `enrollmentProof` output; device ids are public, so the id alone isn't enough):
 
 <!-- include: samples/curl/device-flow.sh -->
 

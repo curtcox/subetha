@@ -8,8 +8,9 @@ AUTH=(-H "Authorization: Bearer $SUBETHA_TOKEN" -H "Content-Type: application/js
 # Approve the code a device is showing (the console's "Devices" page does the same):
 curl -sS "${AUTH[@]}" -d '{"user_code":"BCDF-GHJK"}' "$SUBETHA_URL/v1/device/approve"
 
-# Or register a device directly when you already know its id (e.g. printed by `subetha` on the device):
-curl -sS "${AUTH[@]}" -d '{"device_id":"dev_kxisxbay4mtidk6z454fh3jcjhf3wfpggcprvnuu42wa2fvbeiwa","name":"garage-pi","capabilities":["ws","lan"]}' \
+# Or register a device directly. Device ids are public, so this needs the device's proof of key
+# possession: the JSON from enrollmentProof() in any SDK, valid for 5 minutes.
+curl -sS "${AUTH[@]}" -d '{"device_id":"dev_kxisxbay4mtidk6z454fh3jcjhf3wfpggcprvnuu42wa2fvbeiwa","time":1763750000,"proof":"<base64url signature>","name":"garage-pi","capabilities":["ws","lan"]}' \
   "$SUBETHA_URL/v1/devices"
 
 # List and revoke:
