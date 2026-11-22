@@ -24,3 +24,4 @@ apps/site/public/openapi.yaml
 apps/site/public/openapi.json
 test-results/
 apps/site/public/tools/tools.js
+samples/android/app/src/main/jniLibs/

@@ -27,8 +27,11 @@ android {
 
 dependencies {
     implementation("org.subetha:subetha:0.1.0")
-    // For signed/encrypted messages and edge transports, add org.subetha:subetha-core plus
-    // libsubetha_core.so per ABI in src/main/jniLibs (see sdk/kotlin/README.md).
+    // The Rust core (edge transports, signatures, E2EE) through UniFFI/JNA. The app runs without
+    // libsubetha_core.so in src/main/jniLibs; the Edge tab then explains how to add it.
+    implementation("org.subetha:subetha-core:0.1.0") { exclude(group = "net.java.dev.jna", module = "jna") }
+    implementation("net.java.dev.jna:jna:5.15.0@aar")
+    implementation("androidx.core:core-ktx:1.15.0")
 
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.material3:material3")

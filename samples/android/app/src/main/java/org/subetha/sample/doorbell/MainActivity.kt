@@ -1,8 +1,12 @@
 package org.subetha.sample.doorbell
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,11 +31,14 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.DateFormat
@@ -95,19 +102,41 @@ fun DoorbellScreen(vm: DoorbellViewModel) {
 }
 
 @Composable
-fun EdgeScreen() {
+fun EdgeScreen(vm: EdgeViewModel = viewModel()) {
+    val s by vm.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var text by remember { mutableStateOf("Ding dong") }
+    val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) vm.toggleListening()
+    }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Edge transports", style = MaterialTheme.typography.titleLarge)
+        Text("Edge: sound", style = MaterialTheme.typography.titleLarge)
+        if (!s.coreAvailable) {
+            Text(
+                "libsubetha_core.so isn't bundled in this build. Build it with cargo-ndk into " +
+                    "app/src/main/jniLibs (see samples/android/README.md) to send messages by sound.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            return@Column
+        }
         Text(
-            "Offline delivery over BLE (store-and-forward gossip), data-over-sound (16-FSK audio modem) " +
-                "and animated QR (fountain codes) comes from the Rust core: sdk/core edge::ble, edge::gossip, " +
-                "edge::audio and edge::qr, through org.subetha:subetha-core (UniFFI).",
-        )
-        Text(
-            "This screen is a stub (track F). The app supplies the radios: a BLE GATT server/client with the " +
-                "core's service UUIDs and MTU chunking, AudioRecord/AudioTrack at 48 kHz, and CameraX frames for QR.",
+            "Two phones, no network: one plays a message as a 16-FSK modem frame, the other listens " +
+                "and decodes it (about 50 bytes a second). Same topic on both.",
             style = MaterialTheme.typography.bodySmall,
         )
+        OutlinedTextField(s.topic, vm::editTopic, Modifier.fillMaxWidth(), label = { Text("Topic") }, singleLine = true)
+        OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), label = { Text("Message") }, singleLine = true)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { vm.send(text) }, enabled = !s.sending && text.isNotBlank()) { Text("Send by sound") }
+            OutlinedButton(onClick = {
+                val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                if (granted || s.listening) vm.toggleListening() else askMic.launch(Manifest.permission.RECORD_AUDIO)
+            }) { Text(if (s.listening) "Stop listening" else "Listen") }
+        }
+        if (s.status.isNotEmpty()) Text(s.status, style = MaterialTheme.typography.bodySmall)
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(s.heard) { m -> Card(Modifier.fillMaxWidth()) { Text(m, Modifier.padding(12.dp)) } }
+        }
         Spacer(Modifier)
     }
 }
