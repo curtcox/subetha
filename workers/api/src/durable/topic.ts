@@ -68,7 +68,8 @@ export class TopicDO extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS subs (id TEXT PRIMARY KEY, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS traces (id TEXT PRIMARY KEY, json TEXT NOT NULL, expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS sent (ref TEXT PRIMARY KEY, at INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS sent (ref TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, until INTEGER NOT NULL);`);
     ctx.blockConcurrencyWhile(async () => {
       this.meta = this.kvGet<TopicMeta>("meta");
       this.leases = this.kvGet<Lease[]>("leases") ?? [];
@@ -83,6 +84,10 @@ export class TopicDO extends DurableObject<Env> {
   }
   private kvPut(k: string, v: unknown) {
     this.sql.exec("INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", k, JSON.stringify(v));
+  }
+  /** Adds to a numeric kv counter synchronously (no await between read and write). */
+  private bump(k: string, delta: number) {
+    this.kvPut(k, Math.max(0, (this.kvGet<number>(k) ?? 0) + delta));
   }
   private persistMoney() {
     this.kvPut("leases", this.leases);
@@ -125,9 +130,23 @@ export class TopicDO extends DurableObject<Env> {
     const key = `topic_spend:${today()}`;
     const spent = this.kvGet<number>(key) ?? 0;
     if (cap != null && spent + micros > cap) return "cap";
-    if (!(await this.spendOwner(micros))) return "broke";
+    // Count it before awaiting, so concurrent requests can't all pass the same check.
     this.kvPut(key, spent + micros);
+    if (!(await this.spendOwner(micros))) {
+      this.bump(key, -micros);
+      return "broke";
+    }
     return "ok";
+  }
+
+  /**
+   * Token (and OAuth client) spend caps cover everything the token causes, reads included,
+   * even though the topic owner pays for reads.
+   */
+  private async capTokenRead(caller: Caller, micros: number): Promise<void> {
+    if (!caller.tokenId || !caller.accountId || (caller.caps.daily == null && caller.caps.total == null)) return;
+    const r = await accountStub(this.env, caller.accountId).trackTokenSpend(caller.tokenId, micros, { tokenDaily: caller.caps.daily, tokenTotal: caller.caps.total });
+    if (!r.ok && r.code === "spend_cap_exceeded") throw rpcError("spend_cap_exceeded", `spend cap reached: ${r.cap}`, { cap: r.cap, remaining_usd_micros: r.remaining });
   }
 
   /** Lease bookkeeping spans awaits (input gates stay open during RPC), so it is serialized. */
@@ -273,7 +292,13 @@ export class TopicDO extends DurableObject<Env> {
       if (row) {
         if (row.body_hash !== input.bodyHash) throw rpcError("conflict", "Idempotency-Key reused with a different request");
         const msg = this.messageById(row.message_id);
-        if (msg) return { message: msg, created_topic: false, duplicate: true, cost_micros: 0, plan: [], dry_run: input.dryRun };
+        if (msg) {
+          // A replay is still an API request: charged, and rate limited when anonymous.
+          const price = actionPriceMicros(PRICES, "api_request", this.tier());
+          if (anonymous) { this.anonRateLimit(Date.now()); if ((await this.spendOwnerCapped(price)) !== "ok") throw rpcError("no_funded_owner"); }
+          else await this.chargeCaller(caller, price, `idem:${row.message_id}:${ulid()}`);
+          return { message: msg, created_topic: false, duplicate: true, cost_micros: anonymous ? 0 : price, plan: [], dry_run: input.dryRun };
+        }
       }
     }
 
@@ -299,6 +324,12 @@ export class TopicDO extends DurableObject<Env> {
     }
 
     const apiPrice = actionPriceMicros(PRICES, "api_request", this.tier());
+    // Signed messages are accepted for MAX_MESSAGE_AGE_S but stored only for the retention
+    // period: remember their ids for the whole window so a captured one can't be replayed.
+    this.sql.exec("DELETE FROM seen WHERE until < ?", nowSec);
+    if (signed && !this.messageById(env.id!) && this.sql.exec("SELECT 1 FROM seen WHERE id = ?", env.id!.toUpperCase()).toArray().length) {
+      throw rpcError("conflict", "this signed message was already published");
+    }
     const dup = this.messageById(env.id!);
     if (dup) {
       if (anonymous) { this.anonRateLimit(nowMs); if (!(await this.spendOwnerCapped(apiPrice).then((r) => r === "ok"))) throw rpcError("no_funded_owner"); }
@@ -339,24 +370,31 @@ export class TopicDO extends DurableObject<Env> {
       return { message: env, created_topic: created, duplicate: false, cost_micros: estimate, plan: caller.accountId === meta.owner ? plan.deliveries : [], dry_run: true };
     }
 
-    // Anonymous limits.
-    let ownerCost = liveCost;
+    // Owner-side spend: live deliveries (+ the publish when anonymous), queued reservations,
+    // and retention. Both daily counters are checked and incremented with no await in between,
+    // so concurrent publishes can't all pass the same check; failures below roll them back.
+    const ownerCost = liveCost + (anonymous ? publishPrice : 0);
+    const ownerTotal = ownerCost + queued.reduce((n, d) => n + d.cost_micros, 0);
+    const ownerAll = ownerTotal + Math.ceil(retentionNanos / 1000);
+    const anonKey = `anon_spend:${today()}`;
     if (anonymous) {
       this.anonRateLimit(nowMs);
-      ownerCost += publishPrice;
-      const spentKey = `anon_spend:${today()}`;
-      const spent = this.kvGet<number>(spentKey) ?? 0;
+      const spent = this.kvGet<number>(anonKey) ?? 0;
       const cap = meta.policy.anon_daily_cap_micros ?? 1_000_000;
-      if (spent + ownerCost > cap) throw rpcError("spend_cap_exceeded", "anonymous daily cap reached for this topic");
-      this.kvPut(spentKey, spent + ownerCost);
+      if (spent + ownerAll > cap) throw rpcError("spend_cap_exceeded", "anonymous daily cap reached for this topic");
     }
-    // Topic daily cap (owner-side spend, including queued reservations).
     const topicKey = `topic_spend:${today()}`;
     const topicSpent = this.kvGet<number>(topicKey) ?? 0;
-    const ownerTotal = ownerCost + queued.reduce((n, d) => n + d.cost_micros, 0);
     if (meta.policy.daily_cap_micros != null && topicSpent + ownerTotal > meta.policy.daily_cap_micros) {
       throw rpcError("spend_cap_exceeded", "topic daily cap reached", { cap: "topic_daily" });
     }
+    if (anonymous) this.bump(anonKey, ownerAll);
+    this.kvPut(topicKey, topicSpent + ownerTotal);
+    const rollback = () => {
+      if (anonymous) this.bump(anonKey, -ownerAll);
+      this.bump(topicKey, -ownerTotal);
+    };
+    try {
 
     // A token of the owner's own account is capped on everything it causes, not just the publish.
     if (caller.tokenId && caller.accountId === meta.owner) {
@@ -376,12 +414,16 @@ export class TopicDO extends DurableObject<Env> {
         throw e;
       }
     }
-    this.kvPut(topicKey, topicSpent + ownerTotal);
+    } catch (e) {
+      rollback();
+      throw e;
+    }
 
     // Store and fan out.
     const json = JSON.stringify(env);
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("INSERT INTO messages (id, time, expires, json) VALUES (?, ?, ?, ?)", env.id!, time, storeUntil, json);
+      if (signed) this.sql.exec("INSERT OR IGNORE INTO seen (id, until) VALUES (?, ?)", env.id!.toUpperCase(), time + MAX_MESSAGE_AGE_S + MAX_CLOCK_SKEW_S);
       if (input.idempotencyKey) this.sql.exec("INSERT OR REPLACE INTO idem (key, body_hash, message_id, created) VALUES (?, ?, ?, ?)", input.idempotencyKey, input.bodyHash, env.id!, nowMs);
     });
     this.broadcast(env);
@@ -527,6 +569,7 @@ export class TopicDO extends DurableObject<Env> {
     this.checkRead(params.caller);
     const msgs = this.backlog(params.since ?? "all", params.filter);
     const cost = actionPriceMicros(PRICES, "api_request", this.tier()) + msgs.length * actionPriceMicros(PRICES, "deliver_live", this.tier());
+    await this.capTokenRead(params.caller, cost);
     const paid = await this.spendOwnerCapped(cost);
     if (paid === "cap") throw rpcError("spend_cap_exceeded", "topic daily cap reached", { cap: "topic_daily" });
     if (paid === "broke") throw rpcError("insufficient_balance", "topic owner's balance cannot cover delivery", { payer: "topic_owner" });
@@ -543,6 +586,11 @@ export class TopicDO extends DurableObject<Env> {
     }
     const backlog = this.backlog(params.since, params.filter);
     const cost = actionPriceMicros(PRICES, "api_request", this.tier()) + backlog.length * actionPriceMicros(PRICES, "deliver_live", this.tier());
+    try {
+      await this.capTokenRead(params.caller, cost);
+    } catch (e) {
+      return new Response((e as Error).message.split("\u0000")[0], { status: 403 });
+    }
     const paid = await this.spendOwnerCapped(cost);
     if (paid === "cap") return new Response("ApiError:spend_cap_exceeded:topic daily cap reached", { status: 403 });
     if (paid === "broke") return new Response("ApiError:insufficient_balance:topic owner's balance cannot cover delivery", { status: 402 });
