@@ -67,6 +67,9 @@ importers:
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0
+      '@subetha/sdk':
+        specifier: workspace:*
+        version: link:../sdk/js
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.5

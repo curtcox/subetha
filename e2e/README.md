@@ -26,4 +26,6 @@ What's covered:
 - a message composed in one console arriving in another, and its trace;
 - dry runs, which cost one API call and deliver nothing;
 - HTTP 402 with the shortfall, from curl and from the console;
-- a scoped token made in the console, which can publish only where its scope allows.
+- a scoped token made in the console, which can publish only where its scope allows;
+- device enrollment: the device-code link opens the Devices tab with the code filled in, the
+  approved device publishes with signed requests, and revoking it in the console locks it out.
