@@ -55,7 +55,7 @@ describe("audio receiver", () => {
       for (let o = 0; o < stream.length; o += 128) rx.push(stream.subarray(o, o + 128));
       expect(got, `${rate} Hz`).toEqual([payload]);
     }
-  });
+  }, 30_000); // demodulates ~14 s of audio; CI runners take longer than vitest's 5 s default
 });
 
 describe("streaming resampler", () => {
