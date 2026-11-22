@@ -207,7 +207,9 @@ describe("security review: verification codes per destination", () => {
     let sent = 0;
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input instanceof Request ? input.url : input).startsWith(BASE)) return realFetch(input, init);
-      sent++;
+      // Count only codes for this test's address (other tests' queued deliveries may run too).
+      const body = input instanceof Request ? await input.clone().text() : String(init?.body ?? "");
+      if (body.toLowerCase().includes("target@example.com")) sent++;
       return new Response(JSON.stringify({ MessageId: "m-1" }));
     });
     const broke = await bootstrap("vbroke", 0);
