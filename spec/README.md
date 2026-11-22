@@ -170,7 +170,8 @@ Edge transports (§10) run between devices without the relay. Their framings are
 Rust core (`sdk/core/src/edge`) and the TypeScript SDK (`sdk/js/src/edge`) and pinned by
 `vectors/edge.json`. Checksums: CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF, check value
 0x29B1) and CRC-32/IEEE (check value 0xCBF43926). All multi-byte integers are big-endian.
-Every framing carries one opaque payload, normally a §11.4 gossip message or a JSON envelope.
+Every framing carries one opaque payload, normally a §11.4 gossip message. One-way links
+(audio, QR) carry a single `deliver` message.
 
 ### 11.1 Audio (16-FSK)
 
@@ -244,3 +245,18 @@ to or relays. The holder delivers them with `hops` decremented. Receivers drop e
 no id, on topics they don't want, with `hops` outside 0..16, expired, already seen (§6), or with a
 signature that doesn't verify (§4). Nodes may also require signatures. Signatures exclude
 `hops` and E2EE (§5) hides content, so relaying nodes can neither forge nor read messages.
+
+### 11.5 LAN
+
+Peers multicast a beacon to `239.255.83.69:47353` (UDP, TTL 1) every few seconds:
+
+```json
+{"subetha":"lan/1","node":"0123456789abcdef","port":51234}
+```
+
+`node` is 16 random lowercase hex characters per process, and `port` is the peer's unicast UDP
+port. A node ignores its own beacons and forgets peers it hasn't heard from in 30 s. On hearing a
+new peer, or receiving a unicast datagram from an unknown address, a node sends that peer its
+summary (§11.4). Gossip messages travel peer to peer over unicast UDP, split into datagrams with
+the §11.3 chunk framing at 1200 data bytes each (`ATT_MTU` = 1209 in §11.3 terms). Receivers
+reassemble each peer's datagrams separately.

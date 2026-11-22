@@ -42,3 +42,25 @@ describe("CLI", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("CLI lan", async () => {
+  const { startLan } = await import("../src/edge/lan-node.ts");
+  it("two CLIs exchange a message over UDP multicast", async () => {
+    const port = String(40000 + Math.floor(Math.random() * 10000));
+    const rx = io();
+    const tx = io();
+    const lan = (o: { port?: number }) => ({ ...o, interfaceAddress: "127.0.0.1" });
+    const listening = main(["lan", "@me/door", "--for", "2", "--port", port], { ...rx.io, startLan: (n, m, o) => startLan(n, m, lan(o ?? {})) }, async () => "");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await main(["lan", "@me/door", "--send", "knock knock", "-t", "Door", "--for", "1", "--port", port], { ...tx.io, startLan: (n, m, o) => startLan(n, m, lan(o ?? {})) }, async () => "")).toBe(0);
+    expect(await listening).toBe(0);
+    expect(rx.out).toEqual(["@me/door: [Door] knock knock"]);
+    expect(rx.err[0]).toMatch(/^lan node [0-9a-f]{16} listening on udp \d+$/);
+  });
+  it("needs a valid topic and a UDP shim", async () => {
+    const t = io();
+    expect(await main(["lan", "nope"], t.io, async () => "")).not.toBe(0);
+    expect(await main(["lan", "@me/door"], t.io, async () => "")).not.toBe(0);
+    expect(t.err.join("\n")).toContain("needs Node");
+  });
+});

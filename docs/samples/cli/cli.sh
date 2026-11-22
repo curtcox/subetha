@@ -12,3 +12,6 @@ npx subetha tail @me/backups                         # everything retained, then
 npx subetha balance
 npx subetha token create --scopes "publish:@me/*" --daily-cap 1 --name ci
 npx subetha token list
+
+# Offline: gossip with SubEtha peers on the local network (no relay, no charge)
+npx subetha lan @me/doorbell --send "Door opened" --for 10

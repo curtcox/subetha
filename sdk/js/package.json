@@ -10,7 +10,8 @@
       "import": "./src/index.ts"
     },
     "./protocol": "./src/protocol/index.ts",
-    "./edge": "./src/edge/index.ts"
+    "./edge": "./src/edge/index.ts",
+    "./edge/lan-node": "./src/edge/lan-node.ts"
   },
   "bin": {
     "subetha": "./bin/subetha.js"

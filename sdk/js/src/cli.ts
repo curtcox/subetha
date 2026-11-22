@@ -1,8 +1,18 @@
 // `subetha` CLI: pub | sub | tail | poll | cost | route | login | balance | token | prices
 import { SubEtha, SubEthaError, type PublishOptions } from "./client.ts";
-import type { Transport } from "./protocol/index.ts";
+import { GossipNode } from "./edge/gossip.ts";
+import type { LanHandle, LanOptions } from "./edge/lan-node.ts";
+import { isTopic, ulid, type Envelope, type Transport } from "./protocol/index.ts";
 
-interface Io { out: (s: string) => void; err: (s: string) => void; env: Record<string, string | undefined>; readConfig: () => Promise<Config>; writeConfig: (c: Config) => Promise<void> }
+interface Io {
+  out: (s: string) => void;
+  err: (s: string) => void;
+  env: Record<string, string | undefined>;
+  readConfig: () => Promise<Config>;
+  writeConfig: (c: Config) => Promise<void>;
+  /** LAN shim (Node only): see edge/lan-node.ts. */
+  startLan?: (node: GossipNode, onMessage: (e: Envelope) => void, opts?: LanOptions) => Promise<LanHandle>;
+}
 export interface Config { baseUrl?: string; token?: string }
 
 const HELP = `subetha — send and receive messages over any transport (https://subetha.org)
@@ -16,6 +26,8 @@ Usage:
   subetha cost <topic> [message] [pub options]   dry-run: route plan + cost estimate
   subetha route …                alias for cost
   subetha login <token> [--url https://subetha.org]
+  subetha lan <topic>[,<topic>…] [--send MESSAGE] [--hops 2] [--relay t1,t2] [--for SECONDS] [--json]
+                                 offline: gossip with SubEtha peers on the local network (no relay, free)
   subetha balance | prices
   subetha token create --scopes publish:@me/* [--daily-cap USD] [--name NAME]
   subetha token list | token revoke <id>
@@ -41,6 +53,12 @@ function parseArgs(argv: string[]) {
 
 const list = (v: string | true | undefined) => (typeof v === "string" ? v.split(",").map((s) => s.trim()).filter(Boolean) : undefined);
 const usd = (micros: number) => `$${(micros / 1e6).toFixed(6)}`;
+
+/** Envelope fields from -t/-p/--tags for messages built locally (LAN). */
+function pubFields(flags: Record<string, string | true>): Partial<Envelope> {
+  const o = pubOptions(flags);
+  return { ...(o.title ? { title: o.title } : {}), ...(o.priority ? { priority: o.priority } : {}), ...(o.tags ? { tags: o.tags } : {}) };
+}
 
 function pubOptions(flags: Record<string, string | true>): PublishOptions {
   const o: PublishOptions = {};
@@ -116,6 +134,28 @@ export async function main(argv: string[], io: Io, readStdin: () => Promise<stri
             onError: (e) => io.err(`reconnecting: ${e.message}`),
           });
         });
+        return 0;
+      }
+      case "lan": {
+        const topics = (pos.shift() ?? "").split(",").filter(Boolean);
+        if (!topics.length || !topics.every(isTopic)) throw new Error("usage: subetha lan <topic>[,<topic>…] [--send MESSAGE]");
+        if (!io.startLan) throw new Error("LAN gossip needs Node (UDP)");
+        const node = new GossipNode();
+        topics.forEach((t) => node.subscribe(t));
+        list(flags.relay)?.forEach((t) => node.setRelayable(t, true));
+        const lan = await io.startLan(node, (m) => io.out(flags.json ? JSON.stringify(m) : `${m.topic}: ${m.title ? `[${m.title}] ` : ""}${m.message}`), {
+          port: typeof flags.port === "string" ? Number(flags.port) : undefined,
+        });
+        io.err(`lan node ${lan.nodeId} listening on udp ${lan.unicastPort}`);
+        if (typeof flags.send === "string") {
+          const now = Math.floor(Date.now() / 1000);
+          const hops = typeof flags.hops === "string" ? Number(flags.hops) : 2;
+          node.publish({ id: ulid(), time: now, expires: now + 86_400, topic: topics[0]!, message: flags.send, hops, ...pubFields(flags) });
+          await lan.resync();
+        }
+        const seconds = typeof flags.for === "string" ? Number(flags.for) : Infinity;
+        await new Promise((r) => (Number.isFinite(seconds) ? setTimeout(r, seconds * 1000) : undefined));
+        await lan.stop();
         return 0;
       }
       case "login": {

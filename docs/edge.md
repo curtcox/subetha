@@ -13,6 +13,7 @@ Try it in the browser with the [Edge lab](/tools/edge.html). Open it on two devi
 | Sound (16-FSK, 2–5 kHz) | one way, broadcast | ~50 bytes/s | a metre or two | all (Web Audio + microphone) |
 | Animated QR (fountain coded) | one way | ~1–3 KB/s at 6 fps | line of sight | display: all; scan: browsers with `BarcodeDetector` (Chrome), or pass a decoder such as jsQR |
 | Bluetooth LE (GATT + gossip) | both ways | ~1–10 KB/s | ~10 m | Chrome and Edge, central role only (the peer must be a native app or gateway) |
+| LAN (UDP multicast + gossip) | both ways | network speed | the local network | none (browsers have no UDP). Node, the CLI, and native apps |
 
 ## How it works
 
@@ -55,6 +56,20 @@ In a page:
 
 Without the browser shims, `AudioFrameReceiver`, `QrFrameReceiver`, and `BleLink` take raw
 samples, scanned strings, or GATT chunks. Native shims (and tests) drive them the same way.
+
+## LAN
+
+Devices on the same network find each other with UDP multicast beacons and gossip directly,
+with no internet connection needed. From the CLI:
+
+```bash
+subetha lan @me/doorbell                         # print messages from peers on this network
+subetha lan @me/doorbell --send "Door opened" --hops 2 --for 10
+```
+
+In Node, `startLan(node, onMessage)` from `@subetha/sdk/edge/lan-node` joins the LAN and
+returns `{ resync(), peers(), stop() }`. Call `resync()` after publishing so peers hear about the
+new message right away. `LanGossip` is the socket-free core, for other runtimes.
 
 ## Mobile and Rust
 

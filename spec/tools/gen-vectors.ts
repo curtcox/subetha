@@ -7,7 +7,7 @@ import {
   base64urlEncode, canonicalEnvelope, canonicalize, decryptEnvelope, deviceKeyFromSeed, encryptEnvelope, hexDecode, hexEncode, signEnvelope, type Json,
 } from "@subetha/sdk/protocol";
 import {
-  audioFrameSamples, audioTones, base45Encode, chunk, FountainEncoder, frameBlocks, modulate, robustSolitonCdf, SplitMix64,
+  audioFrameSamples, audioTones, base45Encode, chunk, encodeBeacon, FountainEncoder, frameBlocks, LAN_CHUNK_MTU, modulate, robustSolitonCdf, SplitMix64,
 } from "@subetha/sdk/edge";
 
 const out = join(dirname(fileURLToPath(import.meta.url)), "..", "vectors");
@@ -122,7 +122,7 @@ write("e2ee.json", {
   const enc = new FountainEncoder(fountainPayload, 30);
   const blePayload = ascii("{\"type\":\"request\",\"ids\":[\"01JD5A2Z3K8Q9V6X7W4T1R0S2M\"]}");
   write("edge.json", {
-    description: "Edge framings (spec §11). crc: check values. splitmix64: first outputs per seed (u64 as hex; f64 and below() continue from a fresh generator). base45: RFC 9285. audio: the symbol tones (Hz) for each payload must match exactly; pcm_s16le is `pcm_payload` modulated after 1000 samples of silence, quantized round(x*32767): demodulating it must give the payload, and modulating must match within ±2 per sample. fountain: robust soliton CDFs (compare within 1e-12), frame_blocks for given (seq, k, crc), and the frames of `payload` at `frame_size` (hex). ble: chunks (hex) of `payload` with `seq` at `att_mtu`. gossip: wire messages each implementation must parse.",
+    description: "Edge framings (spec §11). crc: check values. splitmix64: first outputs per seed (u64 as hex; f64 and below() continue from a fresh generator). base45: RFC 9285. audio: the symbol tones (Hz) for each payload must match exactly; pcm_s16le is `pcm_payload` modulated after 1000 samples of silence, quantized round(x*32767): demodulating it must give the payload, and modulating must match within ±2 per sample. fountain: robust soliton CDFs (compare within 1e-12), frame_blocks for given (seq, k, crc), and the frames of `payload` at `frame_size` (hex). ble: chunks (hex) of `payload` with `seq` at `att_mtu`. lan: the beacon's exact bytes, and the datagrams (hex) for a generated payload. gossip: wire messages each implementation must parse.",
     crc: { input: "123456789", crc16_ccitt_false: 0x29b1, crc32: 0xcbf43926 },
     splitmix64: [sm(0n), sm(7n), sm(0xdeadbeefcafef00dn)],
     base45: [["", ""], ["AB", "BB8"], ["Hello!!", "%69 VD92EX0"], ["base-45", "UJCLQE7W581"], ["ietf!", "QED8WEX0"]].map(([p, e]) => ({ plain: p, encoded: e }))
@@ -146,6 +146,15 @@ write("e2ee.json", {
       frames: Array.from({ length: 12 }, (_, s) => ({ seq: s, hex: hexEncode(enc.frame(s)) })),
     },
     ble: { seq: 7, att_mtu: 23, payload: new TextDecoder().decode(blePayload), chunks: chunk(7, blePayload, 23).map(hexEncode) },
+    lan: {
+      group: "239.255.83.69",
+      port: 47353,
+      beacon: { node: "0123456789abcdef", port: 51234, bytes: new TextDecoder().decode(encodeBeacon({ node: "0123456789abcdef", port: 51234 })) },
+      seq: 513,
+      payload_len: 2500,
+      payload_rule: "byte i = (i * 31 + 7) mod 256",
+      datagrams: chunk(513, Uint8Array.from({ length: 2500 }, (_, i) => (i * 31 + 7) & 0xff), LAN_CHUNK_MTU).map(hexEncode),
+    },
     gossip: [
       { type: "summary", topics: { "@alice/doorbell": ["01JD5A2Z3K8Q9V6X7W4T1R0S2M", "01JD5A2Z3K8Q9V6X7W4T1R0S2N"] } },
       { type: "request", ids: ["01JD5A2Z3K8Q9V6X7W4T1R0S2M"] },

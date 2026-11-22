@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 use subetha_core::canonical::{canonical_envelope, canonicalize, canonicalize_str};
 use subetha_core::e2ee::{aad, decrypt_map, encrypt_map};
 use subetha_core::encoding::{base45_encode, base64url_decode, base64url_encode, hex_decode, hex_encode};
-use subetha_core::edge::{audio, ble, gossip::GossipMessage, qr};
+use subetha_core::edge::{audio, ble, gossip::GossipMessage, lan, qr};
 use subetha_core::random::SplitMix64;
 use subetha_core::crc::{crc16_ccitt, crc32};
 use subetha_core::envelope::validate_envelope;
@@ -268,6 +268,18 @@ fn edge_ble_and_gossip() {
     let chunks = ble::chunk(b["seq"].as_u64().unwrap() as u16, payload, b["att_mtu"].as_u64().unwrap() as usize).unwrap();
     let want: Vec<String> = arr(b, "chunks").iter().map(|c| c.as_str().unwrap().to_owned()).collect();
     assert_eq!(chunks.iter().map(|c| hex_encode(c)).collect::<Vec<_>>(), want);
+    let l = &v["lan"];
+    assert_eq!(l["group"].as_str().unwrap(), lan::GROUP);
+    assert_eq!(l["port"].as_u64().unwrap(), u64::from(lan::PORT));
+    let b = &l["beacon"];
+    let beacon = lan::Beacon::new(b["node"].as_str().unwrap(), b["port"].as_u64().unwrap() as u16);
+    assert_eq!(String::from_utf8(beacon.encode()).unwrap(), b["bytes"].as_str().unwrap());
+    assert_eq!(lan::Beacon::parse(b["bytes"].as_str().unwrap().as_bytes()), Some(beacon));
+    let n = l["payload_len"].as_u64().unwrap() as usize;
+    let payload: Vec<u8> = (0..n).map(|i| ((i * 31 + 7) % 256) as u8).collect();
+    let d = lan::datagrams(l["seq"].as_u64().unwrap() as u16, &payload).unwrap();
+    let want: Vec<String> = arr(l, "datagrams").iter().map(|c| c.as_str().unwrap().to_owned()).collect();
+    assert_eq!(d.iter().map(|c| hex_encode(c)).collect::<Vec<_>>(), want);
     for m in arr(&v, "gossip") {
         let parsed: GossipMessage = serde_json::from_value(m.clone()).unwrap();
         let back = serde_json::to_value(&parsed).unwrap();
