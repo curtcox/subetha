@@ -22,6 +22,9 @@ import org.subetha.JdkDeviceSigner
 import org.subetha.PublishOptions
 import org.subetha.SubEtha
 import org.subetha.TopicKey
+import kotlinx.serialization.json.JsonPrimitive
+import org.subetha.core.ffi.FfiException
+import org.subetha.core.ffi.canonicalizeJson
 import org.subetha.core.ffi.requestSigningInput
 import org.subetha.core.ffi.validateEnvelopeJson
 import org.subetha.signRequest
@@ -56,6 +59,23 @@ class CoreTest {
             val e = v[k]!!.jsonObject
             assertEquals(e["valid"]!!.jsonPrimitive.content.toBoolean(), CoreEnvelopeCrypto.verify(e["envelope"].toString()), k)
         }
+    }
+
+    @Test
+    fun canonicalAndTopicConformance() {
+        val c = vectors("canonical.json")
+        for (v in c["valid"]!!.jsonArray) {
+            val o = v.jsonObject
+            assertEquals(o["canonical"]!!.jsonPrimitive.content, canonicalizeJson(o["input"].toString()), o["name"].toString())
+        }
+        for (v in c["invalid"]!!.jsonArray) {
+            val o = v.jsonObject
+            kotlin.test.assertFailsWith<FfiException>(o["name"].toString()) { canonicalizeJson(o["input_json"]!!.jsonPrimitive.content) }
+        }
+        val t = vectors("topics.json")
+        val problems = { topic: String -> validateEnvelopeJson("{\"topic\":${JsonPrimitive(topic)}}") }
+        for (v in t["valid"]!!.jsonArray) assertTrue(problems(v.jsonPrimitive.content).isEmpty(), v.toString())
+        for (v in t["invalid"]!!.jsonArray) assertFalse(problems(v.jsonPrimitive.content).isEmpty(), v.toString())
     }
 
     @Test

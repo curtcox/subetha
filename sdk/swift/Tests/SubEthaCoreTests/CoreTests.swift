@@ -30,6 +30,20 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(try CoreDeviceSigner(seed: g.seed).deviceId, g.deviceId)
     }
 
+    func testCanonicalAndTopicVectors() throws {
+        let c = try vectors("canonical.json")
+        for v in c["valid"]!.arrayValue! {
+            XCTAssertEqual(try Core.canonicalize(v["input"]!.jsonString()), v["canonical"]!.stringValue!, v["name"]!.stringValue!)
+        }
+        for v in c["invalid"]!.arrayValue! {
+            XCTAssertThrowsError(try Core.canonicalize(v["input_json"]!.stringValue!), v["name"]!.stringValue!)
+        }
+        let t = try vectors("topics.json")
+        func problems(_ topic: String) -> [String] { Core.validate("{\"topic\":\(JSONValue.string(topic).jsonString())}") }
+        for v in t["valid"]!.arrayValue! { XCTAssertTrue(problems(v.stringValue!).isEmpty, v.stringValue!) }
+        for v in t["invalid"]!.arrayValue! { XCTAssertFalse(problems(v.stringValue!).isEmpty, v.stringValue!) }
+    }
+
     func testSignatureVectors() throws {
         let v = try vectors("signatures.json")
         let crypto = CoreEnvelopeCrypto()

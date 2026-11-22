@@ -124,5 +124,5 @@ Only the native libraries come from cargo or CI. Regenerate whenever `ffi.rs` ch
    Edge screens: CoreBluetooth / Android BLE peripheral advertising the GATT service,
    AVAudioEngine / AudioRecord for sound, AVCapture / CameraX + a QR detector, and
    Network.framework / `MulticastSocket` for LAN. Also export the outbox and deduper.
-6. **Conformance.** The Kotlin and Swift core tests already load `spec/vectors/signatures.json`
-   and `e2ee.json`. Extend them to `canonical.json` and `topics.json`.
+6. **Conformance.** The Kotlin and Swift core tests load every applicable vector file:
+   `canonical.json`, `topics.json`, `signatures.json`, `e2ee.json`, and `edge.json`.
