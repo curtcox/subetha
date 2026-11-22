@@ -13,7 +13,8 @@ npx expo run:android # or run:ios: a development build with the native modules
 The Rust core comes from [`@subetha/react-native-core`](../../sdk/react-native-core/README.md)
 (`file:../../sdk/react-native-core`, copied rather than symlinked: see `.npmrc`), so build it
 before `npm install`, and reinstall after rebuilding it. `core.ts` loads it with `loadCore`. It
-is optional: in Expo Go, or without the native build, the app runs without it.
+is optional: in Expo Go, or without the native build, the app runs without it. The app enables React Native's New
+Architecture (`newArchEnabled` in `app.json`), which the core's Turbo Module needs.
 
 `npx expo start` runs it in Expo Go too, but Expo Go lacks Bluetooth, microphone streaming,
 and UDP, so on the Edge tab only QR and sound playback work there. CI type-checks the app,
