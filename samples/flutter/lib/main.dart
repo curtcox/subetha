@@ -3,8 +3,19 @@ import 'dart:async';
 // Flutter's navigator Route would clash with SubEtha's message Route.
 import 'package:flutter/material.dart' hide Route;
 import 'package:subetha/subetha.dart';
+import 'package:subetha_core/subetha_core.dart' show SubEthaCore;
 
-void main() => runApp(const DoorbellApp());
+import 'edge.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await SubEthaCore.init();
+  } catch (e) {
+    coreError = '$e'; // the Doorbell tab works without the core
+  }
+  runApp(const DoorbellApp());
+}
 
 class DoorbellApp extends StatelessWidget {
   const DoorbellApp({super.key});
@@ -30,7 +41,8 @@ class _HomeState extends State<Home> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: Text(_tab == 0 ? 'Doorbell' : 'Edge')),
-        body: _tab == 0 ? const DoorbellScreen() : const EdgeScreen(),
+        // IndexedStack keeps both tabs alive, so the Edge tab keeps listening and bridging.
+        body: IndexedStack(index: _tab, children: const [DoorbellScreen(), EdgeScreen()]),
         bottomNavigationBar: NavigationBar(
           selectedIndex: _tab,
           onDestinationSelected: (i) => setState(() => _tab = i),
@@ -65,6 +77,7 @@ class _DoorbellScreenState extends State<DoorbellScreen> {
     _client?.close();
     final client = SubEtha(baseUrl: _base.text.trim(), token: _token.text.trim());
     final topic = _topic.text.trim();
+    connectedClient.value = client;
     setState(() {
       _client = client;
       _inbox.clear();
@@ -85,6 +98,7 @@ class _DoorbellScreenState extends State<DoorbellScreen> {
           onError: (Object e) => setState(() {
             _status = _describe(e);
             _client = null;
+            connectedClient.value = null;
           }),
         );
   }
@@ -92,6 +106,7 @@ class _DoorbellScreenState extends State<DoorbellScreen> {
   void _disconnect() {
     _sub?.cancel();
     _client?.close();
+    connectedClient.value = null;
     setState(() {
       _client = null;
       _status = 'Not connected';
@@ -169,21 +184,4 @@ class _DoorbellScreenState extends State<DoorbellScreen> {
       ],
     );
   }
-}
-
-class EdgeScreen extends StatelessWidget {
-  const EdgeScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) => ListView(
-        padding: const EdgeInsets.all(16),
-        children: const [
-          Text('Offline delivery over BLE (store-and-forward gossip), data-over-sound (16-FSK audio modem) '
-              'and animated QR (fountain codes) come from the Rust core: sdk/core edge::ble, edge::gossip, '
-              'edge::audio and edge::qr, through a flutter_rust_bridge plugin (see sdk/flutter/README.md).'),
-          SizedBox(height: 12),
-          Text('This screen is a stub (track F). The app supplies the radios: flutter_blue_plus with the core\'s GATT '
-              'UUIDs and MTU chunking, 48 kHz audio capture/playback, and camera frames for QR.'),
-        ],
-      );
 }
