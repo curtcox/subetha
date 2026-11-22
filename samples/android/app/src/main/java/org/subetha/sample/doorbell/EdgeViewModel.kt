@@ -1,6 +1,7 @@
 package org.subetha.sample.doorbell
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,8 +14,10 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
+import org.subetha.SubEtha
 import org.subetha.core.AudioLink
 import org.subetha.core.Core
+import org.subetha.core.EdgeBridge
 import org.subetha.core.acceptPayload
 import org.subetha.core.deliverPayload
 import org.subetha.core.ffi.EdgeGossipNode
@@ -26,27 +29,43 @@ data class EdgeState(
     val topic: String = "@me/doorbell",
     val listening: Boolean = false,
     val sending: Boolean = false,
+    val bluetooth: Boolean = false,
+    val bluetoothPeers: Int = 0,
+    val bridging: Boolean = false,
     val heard: List<String> = emptyList(),
     val status: String = "",
 )
 
 /**
- * Data over sound between two phones, no network: "Send by sound" plays a message as a modem
- * frame (a gossip `deliver`, spec §11.1/§11.4); "Listen" decodes what the microphone hears.
+ * Edge transports between phones, no network. One gossip node holds what this phone has seen:
+ * - Sound: "Send by sound" plays a message as a modem frame (a gossip `deliver`, spec
+ *   §11.1/§11.4); "Listen" decodes what the microphone hears.
+ * - Bluetooth: [AndroidBle] connects to nearby phones (and Web Bluetooth pages) and gossips
+ *   (spec §11.3/§11.4), so messages hop between phones in range.
+ * - Bridge: with the Doorbell tab connected, relay messages on the topic enter the node (and
+ *   reach Bluetooth peers), and messages heard over the edge are published to the relay. One
+ *   online phone is then the gateway for offline phones nearby (PLAN §3).
  */
-class EdgeViewModel : ViewModel() {
+class EdgeViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(EdgeState(coreAvailable = Core.available))
     val state: StateFlow<EdgeState> = _state.asStateFlow()
     private val audio = AndroidAudio()
     private var node: EdgeGossipNode? = null
     private var link: AudioLink? = null
     private var stopRecording: (() -> Unit)? = null
+    private var ble: AndroidBle? = null
+    private var bridge: EdgeBridge? = null
 
     private fun now() = (System.currentTimeMillis() / 1000).toULong()
 
-    private fun ensureLink(): Pair<EdgeGossipNode, AudioLink> {
+    private fun ensureNode(): EdgeGossipNode {
         val n = node ?: EdgeGossipNode(false).also { node = it }
         n.subscribe(_state.value.topic)
+        return n
+    }
+
+    private fun ensureLink(): Pair<EdgeGossipNode, AudioLink> {
+        val n = ensureNode()
         val l = link ?: AudioLink(audio.sampleRate, play = { audio.play(it) { _state.update { s -> s.copy(sending = false) } } }, onPayload = ::onPayload)
             .also { link = it }
         return n to l
@@ -68,8 +87,10 @@ class EdgeViewModel : ViewModel() {
                     put("hops", 1)
                 }.toString()
                 n.publish(env, now())
+                ble?.resyncAll()
+                bridge?.uplink(env)
                 l.send(deliverPayload(listOf(env)))
-                _state.update { it.copy(status = "Sent ${text.length} characters by sound") }
+                _state.update { it.copy(status = "Sent ${text.length} characters by sound" + if (ble != null) " and Bluetooth" else "") }
             } catch (e: Exception) {
                 _state.update { it.copy(sending = false, status = "Couldn't send: ${e.message}") }
             }
@@ -91,15 +112,79 @@ class EdgeViewModel : ViewModel() {
         _state.update { it.copy(listening = true, status = "Listening…") }
     }
 
+    /** Starts or stops Bluetooth. The UI asks for the Bluetooth permissions first. */
+    fun toggleBluetooth() {
+        if (!_state.value.coreAvailable) return
+        ble?.let {
+            it.close()
+            ble = null
+            _state.update { s -> s.copy(bluetooth = false, bluetoothPeers = 0, status = "Bluetooth off") }
+            return
+        }
+        val b = AndroidBle(getApplication(), ensureNode(), onMessage = { onEnvelope(it, "Bluetooth") }) { status ->
+            _state.update { it.copy(status = status, bluetoothPeers = ble?.peerCount ?: 0) }
+        }
+        if (!b.start()) {
+            b.close()
+            _state.update { it.copy(status = "Turn Bluetooth on first") }
+            return
+        }
+        ble = b
+        _state.update { it.copy(bluetooth = true) }
+    }
+
+    /**
+     * Starts or stops bridging the topic between the relay ([client], from the Doorbell tab) and
+     * the edge. Uplinked messages are billed to that token like any other publish.
+     */
+    fun toggleBridge(client: SubEtha?) {
+        if (!_state.value.coreAvailable) return
+        bridge?.let {
+            it.close()
+            bridge = null
+            _state.update { s -> s.copy(bridging = false, status = "Bridge off") }
+            return
+        }
+        if (client == null) {
+            _state.update { it.copy(status = "Connect on the Doorbell tab first") }
+            return
+        }
+        bridge = EdgeBridge(
+            client,
+            ensureNode(),
+            listOf(_state.value.topic),
+            viewModelScope,
+            since = "10m",
+            onDownlink = { env ->
+                ble?.resyncAll()
+                text(env)?.let { m -> _state.update { it.copy(heard = listOf("relay: $m") + it.heard.take(99)) } }
+            },
+            onError = { e -> _state.update { it.copy(status = "Bridge: ${e.message}") } },
+        )
+        _state.update { it.copy(bridging = true, status = "Bridging ${_state.value.topic} to the relay") }
+    }
+
     private fun onPayload(payload: ByteArray) {
         val n = node ?: return
-        val messages = acceptPayload(n, payload, now()).mapNotNull {
-            (Json.parseToJsonElement(it).jsonObject["message"] as? JsonPrimitive)?.content
-        }
-        if (messages.isNotEmpty()) _state.update { it.copy(heard = messages + it.heard, status = "Heard a message") }
+        acceptPayload(n, payload, now()).forEach { onEnvelope(it, "sound") }
+    }
+
+    /** A new envelope from an edge link: show it, pass it on to Bluetooth peers, and uplink it. */
+    private fun onEnvelope(env: String, via: String) {
+        text(env)?.let { m -> _state.update { it.copy(heard = listOf("$via: $m") + it.heard.take(99), status = "Heard a message by $via") } }
+        ble?.resyncAll() // the sender already knows; other peers may not (multi-hop)
+        bridge?.let { b -> viewModelScope.launch { b.uplink(env) } }
+    }
+
+    private fun text(env: String): String? = try {
+        (Json.parseToJsonElement(env).jsonObject["message"] as? JsonPrimitive)?.content
+    } catch (_: Exception) {
+        null
     }
 
     override fun onCleared() {
         stopRecording?.invoke()
+        ble?.close()
+        bridge?.close()
     }
 }

@@ -2,6 +2,7 @@ package org.subetha.sample.doorbell
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -67,7 +68,7 @@ fun App(vm: DoorbellViewModel = viewModel()) {
         },
     ) { padding ->
         Column(Modifier.padding(padding).padding(16.dp).fillMaxSize()) {
-            if (tab == 0) DoorbellScreen(vm) else EdgeScreen()
+            if (tab == 0) DoorbellScreen(vm) else EdgeScreen(vm)
         }
     }
 }
@@ -101,16 +102,28 @@ fun DoorbellScreen(vm: DoorbellViewModel) {
     }
 }
 
+/** Runtime permissions for BLE scanning, connecting and advertising. */
+fun bluetoothPermissions(): List<String> =
+    if (Build.VERSION.SDK_INT >= 31) {
+        listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE)
+    } else {
+        listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+
 @Composable
-fun EdgeScreen(vm: EdgeViewModel = viewModel()) {
+fun EdgeScreen(doorbell: DoorbellViewModel, vm: EdgeViewModel = viewModel()) {
     val s by vm.state.collectAsStateWithLifecycle()
+    val d by doorbell.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var text by remember { mutableStateOf("Ding dong") }
     val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) vm.toggleListening()
     }
+    val askBluetooth = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        if (result.values.all { it }) vm.toggleBluetooth()
+    }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Edge: sound", style = MaterialTheme.typography.titleLarge)
+        Text("Edge: sound and Bluetooth", style = MaterialTheme.typography.titleLarge)
         if (!s.coreAvailable) {
             Text(
                 "libsubetha_core.so isn't bundled in this build. Build it with cargo-ndk into " +
@@ -121,7 +134,8 @@ fun EdgeScreen(vm: EdgeViewModel = viewModel()) {
         }
         Text(
             "Two phones, no network: one plays a message as a 16-FSK modem frame, the other listens " +
-                "and decodes it (about 50 bytes a second). Same topic on both.",
+                "and decodes it (about 50 bytes a second). With Bluetooth on, phones in range gossip " +
+                "what they hold, so a message hops from phone to phone. Same topic on all of them.",
             style = MaterialTheme.typography.bodySmall,
         )
         OutlinedTextField(s.topic, vm::editTopic, Modifier.fillMaxWidth(), label = { Text("Topic") }, singleLine = true)
@@ -132,6 +146,18 @@ fun EdgeScreen(vm: EdgeViewModel = viewModel()) {
                 val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
                 if (granted || s.listening) vm.toggleListening() else askMic.launch(Manifest.permission.RECORD_AUDIO)
             }) { Text(if (s.listening) "Stop listening" else "Listen") }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = {
+                val needed = bluetoothPermissions().filter {
+                    ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+                }
+                if (needed.isEmpty() || s.bluetooth) vm.toggleBluetooth() else askBluetooth.launch(needed.toTypedArray())
+            }) { Text(if (s.bluetooth) "Bluetooth off (${s.bluetoothPeers} peers)" else "Bluetooth on") }
+            OutlinedButton(
+                onClick = { vm.toggleBridge(doorbell.connectedClient) },
+                enabled = s.bridging || d.connected,
+            ) { Text(if (s.bridging) "Stop bridging" else "Bridge to relay") }
         }
         if (s.status.isNotEmpty()) Text(s.status, style = MaterialTheme.typography.bodySmall)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -23,4 +23,28 @@ adb install app/build/outputs/apk/debug/app-debug.apk
   ```
 
   (from the repo root). Without it the app still runs and the Edge tab says what's missing.
-  BLE (`BleLink`) and QR come next.
+- **Bluetooth** on the Edge tab: `AndroidBle` makes the phone both a peripheral (GATT server
+  with the spec §11.3 service, advertising) and a central (scans for that service and
+  connects), and gives every connection an `org.subetha.core.BleLink` for chunking and gossip.
+  Phones in range exchange summaries and fetch what they're missing, so a message hops from
+  phone to phone (each envelope's `hops` limits how far). Web Bluetooth pages (the Edge lab at
+  `/tools/edge.html`) can connect to the phone as centrals.
+- **Bridge to relay**: with the Doorbell tab connected, the Edge tab's bridge (`EdgeBridge`)
+  puts relay messages on the topic into the gossip node, where Bluetooth peers pick them up,
+  and publishes messages heard over sound or Bluetooth to the relay. Uplinks are billed to the
+  Doorbell tab's token.
+
+### Offline BLE-hop demo
+
+Two phones with the core library, the same topic on both Edge tabs:
+
+1. Phone A (online): connect on the Doorbell tab, then on the Edge tab tap **Bluetooth on** and
+   **Bridge to relay**.
+2. Phone B (airplane mode with Bluetooth turned back on): tap **Bluetooth on**. The button
+   shows `1 peers` once the phones connect.
+3. `curl -H "Authorization: Bearer $SUBETHA_TOKEN" -d "ding" https://subetha.org/@me/doorbell`:
+   A shows `relay: ding` and B shows `Bluetooth: ding`.
+4. On B, type a message and tap **Send by sound**: it also goes out over Bluetooth, A uplinks
+   it, and it shows up in the console and on the Doorbell tab.
+
+QR (camera) comes next.

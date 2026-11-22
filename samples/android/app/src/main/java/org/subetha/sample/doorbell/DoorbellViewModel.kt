@@ -33,6 +33,9 @@ class DoorbellViewModel : ViewModel() {
     private val _state = MutableStateFlow(DoorbellState())
     val state: StateFlow<DoorbellState> = _state.asStateFlow()
     private var client: SubEtha? = null
+
+    /** The connected client, for the Edge tab's relay bridge. */
+    val connectedClient: SubEtha? get() = client.takeIf { _state.value.connected }
     private var subscription: Job? = null
 
     fun edit(token: String? = null, topic: String? = null, baseUrl: String? = null) = _state.update {
