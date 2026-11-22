@@ -10,6 +10,8 @@ import SubEthaCore
 ///   decodes them from the camera.
 /// - Bluetooth: `AppleBle` connects to nearby phones (and Web Bluetooth pages) and gossips
 ///   (spec §11.3/§11.4), so messages hop between phones in range.
+/// - LAN: `AppleLan` finds phones on the same Wi-Fi by UDP multicast and gossips with them
+///   (spec §11.5). Needs Apple's multicast entitlement on a device.
 /// - Bridge: with the Doorbell tab connected, relay messages on the topic enter the node (and
 ///   reach Bluetooth peers), and messages heard over the edge are published to the relay. One
 ///   online phone is then the gateway for offline phones nearby (PLAN §3).
@@ -20,6 +22,8 @@ final class EdgeModel: ObservableObject {
     @Published private(set) var sending = false
     @Published private(set) var bluetooth = false
     @Published private(set) var peers = 0
+    @Published private(set) var lan = false
+    @Published private(set) var lanPeers = 0
     @Published private(set) var bridging = false
     @Published private(set) var heard: [String] = []
     /// The animated QR code being shown, if any.
@@ -31,6 +35,8 @@ final class EdgeModel: ObservableObject {
     private let audio = AppleAudio()
     private var ble: AppleBle?
     private var bridge: EdgeBridge?
+    private var lanLink: AppleLan?
+    private var lanPeerTimer: Timer?
     private lazy var listener = SoundListener { [weak self] payload in
         Task { @MainActor in self?.accept(payload, via: "sound") }
     }
@@ -48,7 +54,7 @@ final class EdgeModel: ObservableObject {
         guard let data = try? JSONSerialization.data(withJSONObject: env, options: [.withoutEscapingSlashes]),
               let json = String(data: data, encoding: .utf8) else { return nil }
         _ = try? node.publish(envelopeJson: json, nowSecs: now)
-        ble?.resyncAll()
+        resyncLinks()
         if let bridge { Task { await bridge.uplink(json) } }
         return json
     }
@@ -139,6 +145,40 @@ final class EdgeModel: ObservableObject {
         status = "Starting Bluetooth…"
     }
 
+    /// Joins or leaves the LAN (UDP multicast on the current Wi-Fi network).
+    func toggleLan() {
+        if let lanLink {
+            lanLink.stop()
+            self.lanLink = nil
+            lanPeerTimer?.invalidate()
+            lanPeerTimer = nil
+            lan = false
+            lanPeers = 0
+            status = "Left the LAN"
+            return
+        }
+        node.subscribe(topic: topic)
+        let l = AppleLan(node: node, onMessage: { [weak self] env in Task { @MainActor in self?.received(env, via: "LAN") } })
+        do {
+            try l.start()
+        } catch {
+            status = "Couldn't join the LAN: \(error.localizedDescription). Multicast on iOS needs the com.apple.developer.networking.multicast entitlement."
+            return
+        }
+        lanLink = l
+        lan = true
+        status = "On the LAN as \(l.nodeId)"
+        lanPeerTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.lanPeers = self?.lanLink?.peerCount ?? 0 }
+        }
+    }
+
+    /// Tells Bluetooth and LAN peers what the node holds.
+    private func resyncLinks() {
+        ble?.resyncAll()
+        lanLink?.resync()
+    }
+
     /// Bridges the topic between the relay (`client`, from the Doorbell tab) and the edge.
     /// Uplinked messages are billed to that token like any other publish.
     func toggleBridge(client: SubEtha?) {
@@ -164,12 +204,12 @@ final class EdgeModel: ObservableObject {
     /// A new envelope from an edge link: show it, pass it on to Bluetooth peers, and uplink it.
     private func received(_ env: String, via: String) {
         if let m = Self.text(env) { heard.insert("\(via): \(m)", at: 0); status = "Heard a message by \(via)" }
-        ble?.resyncAll() // the sender already knows; other peers may not (multi-hop)
+        resyncLinks() // the sender already knows; other peers may not (multi-hop)
         if let bridge { Task { await bridge.uplink(env) } }
     }
 
     private func downlinked(_ env: String) {
-        ble?.resyncAll()
+        resyncLinks()
         if let m = Self.text(env) { heard.insert("relay: \(m)", at: 0) }
     }
 

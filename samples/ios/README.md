@@ -21,6 +21,12 @@ CI builds it for the simulator (`.github/workflows/mobile.yml`, job `ios-sample`
     service, advertising) and a central (CBCentralManager scanning for it), with a `BleLink`
     per connection. It talks to the Android sample and to Web Bluetooth pages (the Edge lab at
     `/tools/edge.html`). Foreground only: iOS restricts BLE in the background.
+  - **LAN**: `AppleLan` drives SubEthaCore's `LanGossip` with BSD UDP sockets: multicast
+    beacons on 239.255.83.69:47353 and gossip over unicast (spec §11.5), with the Android
+    sample and `subetha lan`. On a device, joining the multicast group needs Apple's
+    `com.apple.developer.networking.multicast` entitlement (request it from Apple, then add it
+    to the target); without it "Join LAN" reports the error. The simulator uses the Mac's
+    network and needs no entitlement.
   - **Bridge to relay**: with the Doorbell tab connected, `EdgeBridge` brings relay messages on
     the topic into the node (Bluetooth peers then fetch them) and publishes what's heard over
     the edge. The offline BLE-hop demo in `samples/android/README.md` works with any mix of

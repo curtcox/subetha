@@ -64,7 +64,7 @@ struct EdgeView: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("Two phones, no network: one plays a message as a 16-FSK modem frame, the other listens and decodes it (about 50 bytes a second). With Bluetooth on, phones in range gossip what they hold, so a message hops from phone to phone. Same topic on all of them.")
+                    Text("Two phones, no network: one plays a message as a 16-FSK modem frame, the other listens and decodes it (about 50 bytes a second). With Bluetooth on, phones in range gossip what they hold, so a message hops from phone to phone; on the same Wi-Fi, LAN does the same over UDP. Same topic on all of them.")
                         .font(.footnote).foregroundStyle(.secondary)
                     TextField("Topic", text: $edge.topic)
                         .textInputAutocapitalization(.never)
@@ -86,8 +86,9 @@ struct EdgeView: View {
                             .frame(height: 280)
                     }
                 }
-                Section("Bluetooth and relay") {
+                Section("Bluetooth, LAN and relay") {
                     Button(edge.bluetooth ? "Bluetooth off (\(edge.peers) peers)" : "Bluetooth on", action: edge.toggleBluetooth)
+                    Button(edge.lan ? "Leave LAN (\(edge.lanPeers) peers)" : "Join LAN", action: edge.toggleLan)
                     Button(edge.bridging ? "Stop bridging" : "Bridge to relay") { edge.toggleBridge(client: doorbell.connectedClient) }
                         .disabled(!edge.bridging && !doorbell.connected)
                 }
