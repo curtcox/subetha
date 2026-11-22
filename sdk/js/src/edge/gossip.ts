@@ -23,6 +23,11 @@ export interface GossipConfig {
   requireSignatures: boolean;
   /** Dedupe LRU size. */
   dedupeCapacity: number;
+  /**
+   * Checks a signed envelope. Default: `verifyEnvelope` (WebCrypto Ed25519). Runtimes without
+   * WebCrypto Ed25519 (React Native's Hermes) pass the Rust core's verifier instead.
+   */
+  verify: (env: Envelope) => boolean | Promise<boolean>;
 }
 
 export interface Handled {
@@ -31,7 +36,7 @@ export interface Handled {
   dropped: { id: string | undefined; reason: DropReason }[];
 }
 
-const DEFAULTS: GossipConfig = { summaryLimit: 64, storeLimit: 256, requireSignatures: false, dedupeCapacity: 10_000 };
+const DEFAULTS: GossipConfig = { summaryLimit: 64, storeLimit: 256, requireSignatures: false, dedupeCapacity: 10_000, verify: (e) => verifyEnvelope(e) };
 const nowSecs = () => Math.floor(Date.now() / 1000);
 const hopsOf = (e: Envelope) => e.hops ?? 0;
 const expired = (e: Envelope, now: number) => e.expires !== undefined && e.expires < now;
@@ -189,7 +194,13 @@ export class GossipNode {
     if (expired(env, now)) return "expired";
     if (this.hasSeen(env.id)) return "duplicate";
     if (env.sig !== undefined) {
-      if (!(await verifyEnvelope(env))) return "bad_signature";
+      let ok = false;
+      try {
+        ok = await this.config.verify(env);
+      } catch {
+        // a verifier that throws counts as a failed check
+      }
+      if (!ok) return "bad_signature";
     } else if (this.config.requireSignatures) {
       return "unsigned";
     }

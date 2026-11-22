@@ -31,7 +31,14 @@ export function parseBeacon(bytes: Uint8Array): LanBeacon | null {
   return null;
 }
 
-export const randomNodeId = () => [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
+/** A random 64-bit node id. Not a secret: Math.random is the fallback where crypto is missing (Hermes). */
+export const randomNodeId = () => {
+  const b = new Uint8Array(8);
+  const c = (globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } }).crypto;
+  if (c?.getRandomValues) c.getRandomValues(b);
+  else for (let i = 0; i < 8; i++) b[i] = Math.floor(Math.random() * 256);
+  return [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+};
 
 interface Peer { node: string; host: string; port: number; seen: number; reasm: Reassembler }
 

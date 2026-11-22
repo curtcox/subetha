@@ -240,6 +240,21 @@ describe("gossip", () => {
     expect(relay.stored).toBe(1);
   });
 
+  it("checks signatures with a pluggable verifier", async () => {
+    const key = await deviceKeyFromSeed(new Uint8Array(32).fill(2));
+    const signed = await signEnvelope(env("ok", 1), key);
+    const seen: string[] = [];
+    const trusting = new GossipNode({ verify: (e) => (seen.push(e.message!), e.message === "ok") });
+    trusting.subscribe(TOPIC);
+    const h = await trusting.handle({ type: "deliver", envelopes: [signed, { ...signed, id: ulid(now * 1000), message: "no" }, env("unsigned", 1)] }, now);
+    expect(h.delivered.map((e) => e.message)).toEqual(["ok", "unsigned"]);
+    expect(h.dropped.map((d) => d.reason)).toEqual(["bad_signature"]);
+    expect(seen).toEqual(["ok", "no"]); // unsigned messages never reach the verifier
+    const throwing = new GossipNode({ verify: () => { throw new Error("no crypto"); } });
+    throwing.subscribe(TOPIC);
+    expect((await throwing.handle({ type: "deliver", envelopes: [signed] }, now)).dropped[0]!.reason).toBe("bad_signature");
+  });
+
   it("runs a session over a byte link", async () => {
     const a = new GossipNode();
     const b = new GossipNode();
