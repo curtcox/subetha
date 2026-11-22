@@ -108,6 +108,8 @@ public data class SubscribeOptions(
     val verify: Boolean = false,
     /** Also drop unsigned messages. */
     val requireSignature: Boolean = false,
+    /** Pass envelopes through as received (no E2EE decryption), e.g. to forward them. */
+    val raw: Boolean = false,
     val initialBackoffMs: Long = 500,
     val maxBackoffMs: Long = 30_000,
     /** Called each time the stream (re)connects. */

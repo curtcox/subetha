@@ -141,6 +141,15 @@ public class SubEtha @JvmOverloads constructor(
         return Message(requestObject("POST", "/", env, headers))
     }
 
+    /**
+     * Publishes an envelope exactly as given: one built elsewhere, or one that arrived over an
+     * edge link (signatures and E2EE stay intact; the relay drops it as a duplicate by id).
+     */
+    public suspend fun publishEnvelope(envelope: JsonObject, idempotencyKey: String? = null): Message {
+        val headers = idempotencyKey?.let { mapOf("Idempotency-Key" to it) } ?: emptyMap()
+        return Message(requestObject("POST", "/", JsonObject(envelope - "event"), headers))
+    }
+
     /** Dry run: who would get it, how, and the worst-case cost. Nothing is delivered. */
     public suspend fun estimate(topic: String, message: String, options: PublishOptions = PublishOptions()): Estimate {
         val env = buildEnvelope(topic, message, options)
@@ -210,7 +219,7 @@ public class SubEtha @JvmOverloads constructor(
             if (options.verify || options.requireSignature) {
                 if (raw["sig"] != null) { if (!crypto!!.verify(raw.toString())) return null } else if (options.requireSignature) return null
             }
-            return receive(raw)
+            return if (options.raw) Message(raw) else receive(raw)
         }
 
         suspend fun afterEmit(m: Message) {

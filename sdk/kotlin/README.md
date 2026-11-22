@@ -55,6 +55,34 @@ no native library, but most Android versions lack it. `CoreDeviceSigner` works e
 core library loads, and also signs envelopes (`PublishOptions(sign = true)`, the default when a
 signer is configured). E2EE needs `crypto = CoreEnvelopeCrypto` plus `topicKeys`.
 
+### Edge transports
+
+`org.subetha.core` (in `subetha-core`) has drivers for the edge transports (spec §11). The
+platform moves bytes and samples; the drivers do the protocol:
+
+```kotlin
+val node = EdgeGossipNode(requireSignatures = true).apply { subscribe("@me/doorbell") }
+
+// BLE: one link per GATT connection, central or peripheral.
+val link = BleLink(node, write = { chunk -> gatt.writeCharacteristic(rx, chunk, WRITE_TYPE_NO_RESPONSE) },
+                   onMessage = { env -> showMessage(env) }, attMtu = negotiatedMtu)
+link.resync()                       // on connect and after publishing
+// onCharacteristicChanged(…, value) -> link.receive(value)
+
+// Sound: play through AudioTrack, feed AudioRecord buffers back in.
+val audio = AudioLink(sampleRate = 44_100, play = { samples -> track.write(samples, 0, samples.size, WRITE_BLOCKING) },
+                      onPayload = { p -> acceptPayload(node, p).forEach(::showMessage) })
+audio.send(deliverPayload(listOf(envelopeJson)))
+// recorder loop: audio.onSamples(buffer)
+
+// Gateway: relay messages go out over edge links, edge messages go up to the relay.
+val bridge = EdgeBridge(client, node, listOf("@me/doorbell"), scope, onDownlink = { link.resync() })
+// in onMessage: scope.launch { bridge.uplink(env) }
+```
+
+`GossipSession` is the transport-neutral core of `BleLink`, for any other two-way link (LAN,
+a serial port).
+
 ## Building and testing
 
 ```bash
