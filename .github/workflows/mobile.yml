@@ -231,9 +231,17 @@ jobs:
       - name: Expo prebuild (android/)
         working-directory: samples/react-native
         run: npx expo prebuild --platform android --no-install
+      # Caches ~/.gradle between runs (Maven Central rate-limits runners: HTTP 429).
+      - uses: gradle/actions/setup-gradle@v4
       - name: assembleDebug (x86_64)
         working-directory: samples/react-native/android
-        run: ./gradlew assembleDebug -PreactNativeArchitectures=x86_64 --no-daemon
+        # One retry, only for dependency downloads that the repository refused or dropped.
+        run: |
+          build() { ./gradlew assembleDebug -PreactNativeArchitectures=x86_64 --no-daemon 2>&1 | tee "$RUNNER_TEMP/gradle.log"; return "${PIPESTATUS[0]}"; }
+          build && exit 0
+          grep -qE "status code 429|Could not (GET|HEAD|resolve) '?https?:" "$RUNNER_TEMP/gradle.log" || exit 1
+          echo "dependency download failed; retrying in 60 s"; sleep 60
+          build
       - uses: actions/upload-artifact@v4
         with:
           name: doorbell-expo-debug-x86_64.apk
