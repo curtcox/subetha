@@ -84,3 +84,9 @@ a.tile h3 { color: var(--accent); margin-top: 0; }
 .usage-plot .tip .tip-total { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
 details > summary { cursor: pointer; color: var(--accent); margin: 8px 0; }
 details table { margin-bottom: 10px; }
+/* status page */
+.status-banner { font-size: 18px; }
+.status-banner.ok { border-color: var(--ok); }
+.status-banner.bad { border-color: var(--bad); }
+.state { white-space: nowrap; }
+.state-ok { color: var(--ok); } .state-bad { color: var(--bad); } .state-off { color: var(--muted); }

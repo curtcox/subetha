@@ -116,7 +116,7 @@ in this repository; nothing is deployed to staging or production yet.
 | **E** Rust core + mobile SDKs | Mostly done | Rust core passing all vectors; UniFFI bindings; Swift, Kotlin, Dart, and React Native SDKs; doorbell sample apps on all four platforms; mobile CI | flutter_rust_bridge plugin for the core in Flutter; running the scripted flow on devices |
 | **F** Edge transports | In progress | Protocol logic in the core: audio modem, fountain-coded QR, BLE chunking, gossip | Platform shims (BLE, audio, camera), demos |
 | **G** Docs + dev tools | Mostly done | Docs with CI-run samples, OpenAPI + drift test, llms.txt, static docs build; pricing calculator, route simulator, token builder, API explorer, copy-as for six languages, trace viewer, usage by category (`/v1/usage` + chart) | Nightly samples against staging |
-| **Phase 3** Launch hardening | Started | Rate limits, load-test script, legal drafts, `/v1/status` | Load tests, abuse tuning, legal review, status page, backups, security review |
+| **Phase 3** Launch hardening | Started | Rate limits, load-test script, legal drafts, `/v1/status` and a status page (`/status/`, also on Pages so it works when the Worker is down) | Load tests, abuse tuning, legal review, backups, security review |
 
 ## File size limits
 

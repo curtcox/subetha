@@ -237,10 +237,12 @@ await esbuild({ entryPoints: [join(here, "src/web.ts")], outfile: join(out, "too
 // ---------------------------------------------------------------- GitHub Pages extras
 if (pages) {
   // Static files from the production site, with root-absolute links moved under the base path.
-  for (const f of ["index.html", "style.css", "sdk.js", "tools/index.html", "tools/pricing.html", "tools/simulator.html"]) {
+  for (const f of ["index.html", "style.css", "sdk.js", "tools/index.html", "tools/pricing.html", "tools/simulator.html", "status/index.html"]) {
     const src = join(publicDir, f);
     if (!existsSync(src)) continue;
     let text = readFileSync(src, "utf8");
+    // The Pages copy of the status page polls the production API (so it works when the Worker is down).
+    if (f === "status/index.html") text = text.replace('data-api=""', `data-api="${appUrl}"`);
     if (f.endsWith(".html")) text = text.replace(/href="\/console\/"/g, `href="${appUrl}/console/"`).replace(/"\/console\/(#[^"]*)?"/g, `"${appUrl}/console/$1"`).replace(/(href|src)="\/(?!\/)/g, `$1="${base}`);
     write(f, text);
   }
@@ -322,6 +324,7 @@ ${sdks.map(([what, name, v, registry, dir]) => `<tr><td>${what}</td><td><code>${
 <ul>
 <li><a href="docs/">Docs</a> (this build) · <a href="openapi.yaml">openapi.yaml</a> · <a href="llms.txt">llms.txt</a></li>
 <li><a href="pricing-report.html">Pricing invariant report</a>: every SKU's cost, price, and margin at every tier</li>
+<li><a href="status/">Relay status</a> (polls ${appUrl}/v1/status from this page)</li>
 <li><a href="${appUrl}/console/">Live web console</a> (runs against production) · <a href="${appUrl}/sdk.js">sdk.js</a> drop-in web components</li>
 <li><a href="${REPO_URL}/blob/main/PLAN.md">Project plan</a> · <a href="docs/legal/terms.html">Legal drafts</a></li>
 </ul>`;

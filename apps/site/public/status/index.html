@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status · SubEtha</title>
+<meta name="description" content="Live status of the SubEtha relay: storage, queues, and every transport.">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header><a class="brand" href="/">SubEtha</a><nav><a href="/docs/">Docs</a><a href="/docs/pricing.html">Pricing</a><a href="/docs/api.html">API</a><a href="/tools/">Tools</a><a href="/llms.txt">llms.txt</a><a href="https://github.com/curtcox/subetha">GitHub</a></nav><span class="spacer"></span><a href="/console/">Console →</a></header>
+<main id="status" data-api="">
+  <h1>Status</h1>
+  <div id="banner" class="card status-banner" aria-live="polite">Checking…</div>
+  <div class="grid">
+    <div class="card"><h3>Relay</h3><table><tbody id="components"></tbody></table></div>
+    <div class="card"><h3>Transports</h3><table><tbody id="transports"></tbody></table>
+      <p class="muted">BLE, audio, QR, and LAN run on devices and don't depend on the relay.</p></div>
+  </div>
+  <p class="muted" id="checked"></p>
+  <p class="muted">Machine-readable: <a id="raw" href="/v1/status"><code>GET /v1/status</code></a> (HTTP 503 when degraded).</p>
+</main>
+<script>
+(() => {
+  const root = document.getElementById("status");
+  const api = (root.dataset.api || location.origin).replace(/\/+$/, "");
+  document.getElementById("raw").href = `${api}/v1/status`;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  const NAMES = { d1: "Database (D1)", kv: "Cache (KV)", queue: "Delivery queue", attachments: "Attachments (R2)" };
+  const TNAMES = { ws: "WebSocket", sse: "Server-sent events", poll: "JSON polling", mcp: "MCP server", webhook: "Webhooks", webpush: "Web Push", fcm: "FCM (Android)", apns: "APNs (iOS)", email: "Email", slack: "Slack", sms: "SMS (US)", voice: "Voice (US)", lxmf: "Reticulum / LXMF" };
+  const badge = (state, text) => `<span class="state state-${state}">${state === "ok" ? "●" : state === "bad" ? "▲" : "○"} ${esc(text)}</span>`;
+  async function check() {
+    const t0 = performance.now();
+    let s = null, http = 0;
+    try {
+      const r = await fetch(`${api}/v1/status`, { cache: "no-store" });
+      http = r.status;
+      s = await r.json();
+    } catch {}
+    const ms = Math.round(performance.now() - t0);
+    const banner = $("banner");
+    if (!s) {
+      banner.className = "card status-banner bad";
+      banner.innerHTML = `${badge("bad", "Unreachable")} <span class="muted">The relay didn't answer${http ? ` (HTTP ${http})` : ""}.</span>`;
+      $("components").innerHTML = ""; $("transports").innerHTML = "";
+    } else {
+      banner.className = `card status-banner ${s.ok ? "ok" : "bad"}`;
+      banner.innerHTML = s.ok ? `${badge("ok", "All systems operational")} <span class="muted">${esc(s.environment)} · answered in ${ms} ms</span>` : `${badge("bad", "Degraded")} <span class="muted">Some components are failing; see below.</span>`;
+      $("components").innerHTML = Object.entries(s.components).map(([k, c]) => `<tr><td>${esc(NAMES[k] ?? k)}</td><td>${c.ok ? badge("ok", "Operational") : badge("bad", c.error ? "Failing" : "Not configured")}</td><td class="num muted">${c.ms != null ? `${c.ms} ms` : ""}</td></tr>`).join("");
+      $("transports").innerHTML = Object.entries(s.transports).map(([k, on]) => {
+        const paused = (k === "sms" || k === "voice") && s.telephony_circuit;
+        return `<tr><td>${esc(TNAMES[k] ?? k)}</td><td>${on ? badge("ok", "Available") : paused ? badge("bad", "Paused (spend circuit breaker)") : badge("off", "Not enabled")}</td></tr>`;
+      }).join("");
+    }
+    $("checked").textContent = `Last checked ${new Date().toLocaleTimeString()}. Refreshes every 30 seconds.`;
+  }
+  check();
+  setInterval(() => { if (!document.hidden) check(); }, 30_000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+})();
+</script>
+</body>
+</html>
