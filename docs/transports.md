@@ -194,4 +194,6 @@ Bluetooth LE store-and-forward, data-over-sound, animated QR codes, and LAN disc
 the SDKs (the Rust core's `edge` modules) between nearby devices. They never touch the relay and
 are free. Signatures and end-to-end encryption mean an edge relay can neither forge nor read what
 it carries, and `hops` limits how far a message travels. A device with internet access can bridge
-edge traffic to the relay; that leg is billed as a normal relay delivery.
+edge traffic to the relay; that leg is billed as a normal relay delivery. See
+[Edge transports](edge.md) for the SDK APIs, the browser shims, and the
+[Edge lab](/tools/edge.html).

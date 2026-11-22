@@ -52,6 +52,7 @@ const NAV = [
   ["publishing", "Publishing"],
   ["subscribing", "Subscribing"],
   ["transports", "Transports"],
+  ["edge", "Edge transports"],
   ["pricing", "Pricing & billing"],
   ["tokens", "Tokens & policies"],
   ["devices", "Devices"],
@@ -237,7 +238,7 @@ await esbuild({ entryPoints: [join(here, "src/web.ts")], outfile: join(out, "too
 // ---------------------------------------------------------------- GitHub Pages extras
 if (pages) {
   // Static files from the production site, with root-absolute links moved under the base path.
-  for (const f of ["index.html", "style.css", "sdk.js", "tools/index.html", "tools/pricing.html", "tools/simulator.html", "status/index.html"]) {
+  for (const f of ["index.html", "style.css", "sdk.js", "edge.js", "tools/index.html", "tools/pricing.html", "tools/simulator.html", "tools/edge.html", "status/index.html"]) {
     const src = join(publicDir, f);
     if (!existsSync(src)) continue;
     let text = readFileSync(src, "utf8");

@@ -46,7 +46,7 @@ curl -H "Authorization: Bearer $SUBETHA_TOKEN" https://subetha.org/@me/backups/j
   escalation subscriptions, Slack, devices, tokens, billing, usage chart and limits, traces, audit log, and an
   OpenAPI-driven API explorer; "copy as" curl/JS/Python/Swift/Kotlin/Dart), plus a pricing
   calculator and an offline route simulator at `/tools/` that bundle the relay's own price table
-  and planner.
+  and planner, and the Edge lab (sound, animated QR, and Bluetooth between nearby browsers).
 
 ## Repository layout
 
@@ -114,7 +114,7 @@ in this repository; nothing is deployed to staging or production yet.
 | **C** Twilio SMS/voice | Code done, blocked | SMS in/out, voice + DTMF ack, verified US numbers, STOP/HELP, new-funds hold, Twilio price check + circuit breaker | A2P 10DLC approval; live per-destination repricing; staging escalation test |
 | **D** Reticulum gateway | Mostly done | Gateway (both directions, `/deliver` for LXMF endpoints), Docker, Python SDK, BYO-gateway docs | Hosted deployment (Containers or VPS); Sideband round trip |
 | **E** Rust core + mobile SDKs | Mostly done | Rust core passing all vectors; UniFFI bindings; Swift, Kotlin, Dart, and React Native SDKs; doorbell sample apps on all four platforms; mobile CI | flutter_rust_bridge plugin for the core in Flutter; running the scripted flow on devices |
-| **F** Edge transports | In progress | Protocol logic in the core: audio modem, fountain-coded QR, BLE chunking, gossip | Platform shims (BLE, audio, camera), demos |
+| **F** Edge transports | In progress | Protocol logic in the core and the TS SDK (audio modem, fountain-coded QR, BLE chunking, gossip; spec §11 + shared vectors); browser shims (Web Audio, animated QR with a built-in QR encoder, Web Bluetooth central) and the Edge lab at `/tools/edge.html` | Native shims (BLE peripheral, audio, camera) in the mobile SDKs; offline BLE-hop demo on phones; LAN discovery |
 | **G** Docs + dev tools | Mostly done | Docs with CI-run samples, OpenAPI + drift test, llms.txt, static docs build; pricing calculator, route simulator, token builder, API explorer, copy-as for six languages, trace viewer, usage by category (`/v1/usage` + chart), nightly samples-against-staging workflow | Set `SAMPLES_TOKEN` in the staging environment once staging exists |
 | **Phase 3** Launch hardening | Started | Rate limits, load-test script, legal drafts, `/v1/status` and a status page (`/status/`, also on Pages so it works when the Worker is down) | Load tests, abuse tuning, legal review, backups, security review |
 

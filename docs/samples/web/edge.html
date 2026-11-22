@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>SubEtha over sound</title></head>
+<body>
+<button id="play">Play</button> <button id="listen">Listen</button>
+<ul id="got"></ul>
+<script src="https://subetha.org/sdk.js"></script>
+<script src="https://subetha.org/edge.js"></script>
+<script>
+  const { GossipNode, deliverPayload, acceptPayload, playAudioFrame, listenAudio } = SubEthaEdge;
+  const { generateDeviceKey, signEnvelope, ulid } = SubEtha.protocol;
+  const topic = "@me/doorbell";
+  const node = new GossipNode();
+  node.subscribe(topic);
+  const keyPromise = generateDeviceKey();
+
+  document.getElementById("play").onclick = async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const env = await signEnvelope({ id: ulid(), time: now, expires: now + 3600, topic, message: "Door opened", hops: 1 }, await keyPromise);
+    node.publish(env);
+    await playAudioFrame(deliverPayload([env]));
+  };
+  document.getElementById("listen").onclick = () => listenAudio(async (payload) => {
+    for (const env of await acceptPayload(node, payload)) {
+      document.getElementById("got").insertAdjacentHTML("afterbegin", "<li></li>");
+      document.getElementById("got").firstElementChild.textContent = env.message;
+    }
+  });
+</script>
+</body>
+</html>

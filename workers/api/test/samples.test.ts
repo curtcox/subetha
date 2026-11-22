@@ -101,6 +101,15 @@ describe("docs samples (TypeScript)", () => {
     expect(wire.message).not.toContain("4721");
   });
 
+  it("edge.ts", async () => {
+    const { viaSound, again, seconds, sourceBlocks } = await run("edge");
+    expect(viaSound.message).toBe("Door opened");
+    expect(viaSound.sig).toMatch(/^ed25519:/);
+    expect(again).toEqual([]);
+    expect(seconds).toBeLessThan(15);
+    expect(sourceBlocks).toBeGreaterThanOrEqual(1);
+  });
+
   it("tokens.ts", async () => {
     expect((await run("tokens")).denied).toBe("forbidden");
   });

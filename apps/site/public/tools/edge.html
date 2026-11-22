@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Edge lab · SubEtha</title>
+<meta name="description" content="Send SubEtha messages between devices with no network: data over sound, animated QR codes, and Bluetooth LE.">
+<link rel="stylesheet" href="/style.css">
+<style>
+  #qr { max-width: 100%; image-rendering: pixelated; background: #fff; border-radius: 6px; }
+  #cam { width: 100%; max-height: 320px; background: #000; border-radius: 6px; }
+  .meter { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+  .meter > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+</style>
+</head>
+<body>
+<header><a class="brand" href="/">SubEtha</a><nav><a href="/docs/">Docs</a><a href="/docs/pricing.html">Pricing</a><a href="/docs/api.html">API</a><a href="/tools/">Tools</a><a href="/llms.txt">llms.txt</a><a href="https://github.com/curtcox/subetha">GitHub</a></nav><span class="spacer"></span><a href="/console/">Console →</a></header>
+<main>
+  <h1>Edge lab</h1>
+  <p class="muted">Move messages between two devices with no network, using only the speaker and microphone, the screen and camera, or Bluetooth. Nothing reaches the relay, so it’s free.
+    Open this page on two devices and set the same topic on both. Messages are signed with a key generated in this tab. The SDK behind this page is <code>/edge.js</code> (<a href="/docs/edge.html">docs</a>).</p>
+
+  <div class="card">
+    <div class="row">
+      <div><label for="topic">Topic</label><input id="topic" value="@demo/edge"></div>
+      <div><label for="msg">Message</label><input id="msg" value="Door opened"></div>
+      <div><label for="hops">Hops</label><input id="hops" type="number" min="0" max="16" value="2"></div>
+    </div>
+    <p class="muted" id="who"></p>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Sound</h3>
+      <p class="muted">16-FSK at 2–5 kHz, about 50 bytes a second. Turn the volume up and keep the devices within a metre or two.</p>
+      <div class="row"><button id="play">Play message</button><button class="secondary" id="listen">Listen</button></div>
+      <p class="muted" id="audio-status"></p>
+    </div>
+    <div class="card">
+      <h3>Animated QR</h3>
+      <p class="muted">Fountain-coded frames: the camera can join late and miss frames, and it still finishes.</p>
+      <div class="row"><button id="show">Show QR</button><button class="secondary" id="scan">Scan</button></div>
+      <canvas id="qr" width="360" height="360" hidden></canvas>
+      <video id="cam" hidden muted></video>
+      <div class="meter" id="qr-meter" hidden><div></div></div>
+      <p class="muted" id="qr-status"></p>
+    </div>
+    <div class="card">
+      <h3>Bluetooth LE</h3>
+      <p class="muted">Connects to a nearby phone running a SubEtha app (browsers can only be the central). The two then swap messages by gossip, store and forward.</p>
+      <div class="row"><button id="ble">Connect to a peer</button></div>
+      <p class="muted" id="ble-status"></p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Received</h3>
+    <ul class="inbox" id="inbox"><li class="muted">Nothing yet.</li></ul>
+  </div>
+</main>
+<footer class="site muted"><a href="/tools/">Tools</a> · <a href="/docs/edge.html">Edge transports docs</a> · <a href="/docs/legal/terms.html">Terms</a></footer>
+<script src="/sdk.js"></script>
+<script src="/edge.js"></script>
+<script>
+(async () => {
+  const E = window.SubEthaEdge, P = window.SubEtha.protocol;
+  const $ = (id) => document.getElementById(id);
+  const key = await P.generateDeviceKey();
+  $("who").textContent = `This tab signs as ${key.deviceId.slice(0, 16)}…`;
+  const node = new E.GossipNode();
+  let topic = null;
+  const setTopic = () => {
+    if (topic) node.unsubscribe(topic);
+    topic = $("topic").value.trim();
+    if (P.isTopic(topic)) node.subscribe(topic);
+  };
+  $("topic").addEventListener("change", setTopic);
+  setTopic();
+
+  const inbox = $("inbox");
+  const show = (env, via) => {
+    if (inbox.firstElementChild?.classList.contains("muted")) inbox.replaceChildren();
+    const li = document.createElement("li");
+    const from = env.sender ? env.sender.slice(0, 12) + "…" : "unsigned";
+    li.textContent = `${new Date().toLocaleTimeString()} · ${via} · ${env.topic} · ${env.message ?? ""} (from ${from}, hops left ${env.hops ?? 0})`;
+    inbox.prepend(li);
+  };
+
+  async function compose() {
+    if (!P.isTopic(topic)) throw new Error("Enter a topic like @you/name");
+    const now = Math.floor(Date.now() / 1000);
+    const env = await P.signEnvelope({ id: P.ulid(), time: now, expires: now + 3600, topic, message: $("msg").value, hops: Number($("hops").value) || 0 }, key);
+    node.publish(env);
+    return env;
+  }
+  const guard = (status, fn) => async (...a) => {
+    try { await fn(...a); } catch (e) { $(status).textContent = e.message || String(e); }
+  };
+
+  // ---- sound ----
+  let listener = null;
+  $("play").onclick = guard("audio-status", async () => {
+    const env = await compose();
+    const payload = E.deliverPayload([env]);
+    $("audio-status").textContent = `Playing ${payload.length} bytes (${(E.audioFrameSamples(payload.length) / 48000).toFixed(1)} s)…`;
+    $("play").disabled = true;
+    try { await E.playAudioFrame(payload); } finally { $("play").disabled = false; }
+    $("audio-status").textContent = "Sent.";
+  });
+  $("listen").onclick = guard("audio-status", async () => {
+    if (listener) { listener.stop(); listener = null; $("listen").textContent = "Listen"; $("audio-status").textContent = ""; return; }
+    listener = await E.listenAudio(async (payload) => {
+      const got = await E.acceptPayload(node, payload);
+      got.forEach((e) => show(e, "sound"));
+      $("audio-status").textContent = got.length ? "Received." : "Heard a frame (duplicate or not for this topic).";
+    }, { windowSeconds: 12 });
+    $("listen").textContent = "Stop listening";
+    $("audio-status").textContent = "Listening…";
+  });
+
+  // ---- QR ----
+  let anim = null, scanner = null;
+  const stopQr = () => {
+    anim?.stop(); anim = null; scanner?.stop(); scanner = null;
+    $("qr").hidden = $("cam").hidden = $("qr-meter").hidden = true;
+    $("show").textContent = "Show QR"; $("scan").textContent = "Scan";
+  };
+  $("show").onclick = guard("qr-status", async () => {
+    if (anim) { stopQr(); $("qr-status").textContent = ""; return; }
+    stopQr();
+    const env = await compose();
+    $("qr").hidden = false;
+    anim = E.showAnimatedQr($("qr"), E.deliverPayload([env]), { version: 10, ecl: "L", fps: 6 });
+    $("show").textContent = "Stop";
+    $("qr-status").textContent = `Showing ${anim.sourceBlocks} source block(s); point the other device’s camera here.`;
+  });
+  $("scan").onclick = guard("qr-status", async () => {
+    if (scanner) { stopQr(); $("qr-status").textContent = ""; return; }
+    stopQr();
+    if (!E.barcodeDetector()) throw new Error("This browser has no BarcodeDetector. Try Chrome on Android or desktop.");
+    $("cam").hidden = $("qr-meter").hidden = false;
+    const bar = $("qr-meter").firstElementChild;
+    scanner = await E.scanAnimatedQr($("cam"), async (payload) => {
+      const got = await E.acceptPayload(node, payload);
+      got.forEach((e) => show(e, "QR"));
+      bar.style.width = "100%";
+      $("qr-status").textContent = got.length ? "Received." : "Complete (duplicate or not for this topic).";
+    }, { onProgress: (p) => { if (!p.complete) { bar.style.width = `${Math.round((100 * p.known) / p.total)}%`; $("qr-status").textContent = `${p.known} / ${p.total} blocks`; } } });
+    $("scan").textContent = "Stop";
+    $("qr-status").textContent = "Scanning…";
+  });
+
+  // ---- BLE ----
+  let peer = null;
+  $("ble").onclick = guard("ble-status", async () => {
+    if (peer) { await compose(); await peer.resync(); $("ble-status").textContent = "Sent our summary."; return; }
+    peer = await E.connectBlePeer(node, (e) => show(e, "BLE"));
+    $("ble").textContent = "Send message";
+    $("ble-status").textContent = `Connected to ${peer.name ?? "a peer"}.`;
+  });
+  if (!navigator.bluetooth) { $("ble").disabled = true; $("ble-status").textContent = "Web Bluetooth isn’t available in this browser (try Chrome or Edge)."; }
+})();
+</script>
+</body>
+</html>
