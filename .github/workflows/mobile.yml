@@ -10,6 +10,7 @@ on:
       - "sdk/kotlin/**"
       - "sdk/swift/**"
       - "sdk/flutter/**"
+      - "sdk/flutter_core/**"
       - "sdk/react-native/**"
       - "sdk/js/**"
       - "spec/vectors/**"
@@ -24,6 +25,7 @@ on:
       - "sdk/kotlin/**"
       - "sdk/swift/**"
       - "sdk/flutter/**"
+      - "sdk/flutter_core/**"
       - "sdk/react-native/**"
       - "sdk/js/**"
       - "spec/vectors/**"
@@ -113,6 +115,35 @@ jobs:
       - run: dart pub get
       - run: dart analyze
       - run: dart test
+
+  flutter-core:
+    name: Flutter core plugin (flutter_rust_bridge)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/flutter_core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sdk/flutter_core/rust
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Build libsubetha_core_frb for the host
+        run: cargo build --manifest-path rust/Cargo.toml --locked
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - name: Generated bindings match rust/src/api
+        # Generated Dart is formatted by the installed Dart, so a new stable may reformat it:
+        # report drift without failing the build.
+        continue-on-error: true
+        run: |
+          cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
+          flutter_rust_bridge_codegen generate
+          git diff --exit-code -- lib/src/rust rust/src/frb_generated.rs
 
   react-native:
     name: React Native package

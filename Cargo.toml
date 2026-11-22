@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["sdk/core"]
+# Built by the Flutter plugin's own tooling (cargokit), with its own lockfile.
+exclude = ["sdk/flutter_core/rust"]
 
 [workspace.package]
 edition = "2021"

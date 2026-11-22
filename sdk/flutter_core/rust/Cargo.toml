@@ -1,0 +1,22 @@
+[package]
+name = "subetha_core_frb"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "flutter_rust_bridge API over subetha-core for the subetha_core Flutter plugin"
+publish = false
+
+# Not a member of the repository's Cargo workspace (see the root Cargo.toml `exclude`): the
+# plugin's build (cargokit) compiles it on its own, with its own Cargo.lock.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+anyhow = "1"
+flutter_rust_bridge = "=2.13.0"
+subetha-core = { path = "../../core" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
