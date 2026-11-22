@@ -18,6 +18,12 @@ public typealias EdgeQrProgress = SubEthaCoreFFI.EdgeQrProgress
 /// Microphone samples (any rate) in, payloads out.
 public typealias EdgeAudioReceiver = SubEthaCoreFFI.EdgeAudioReceiver
 
+/// Store-and-forward outbox for offline publishing (persist `toJson()`, `restoreJson(json:)`).
+public typealias CoreOutbox = SubEthaCoreFFI.CoreOutbox
+public typealias OutboxItemRecord = SubEthaCoreFFI.OutboxItemRecord
+/// Receiver dedupe across transports (spec §6).
+public typealias CoreDeduper = SubEthaCoreFFI.CoreDeduper
+
 public enum Edge {
     /// SubEtha's GATT service and characteristics (spec §11.3).
     public static let serviceUUID = "53554245-5448-4100-8000-5ebe7a000000"

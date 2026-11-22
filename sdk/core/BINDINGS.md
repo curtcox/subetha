@@ -50,6 +50,9 @@ threads):
 | `EdgeQrDecoder()` | `push_text(text)` / `push_frame(bytes)` per camera detection | `EdgeQrProgress`, then `result()` |
 | `EdgeAudioReceiver(sample_rate, window_seconds)` | `push(samples)` per microphone buffer | payloads as frames are heard |
 
+`src/ffi_store.rs` adds `CoreOutbox` (store-and-forward queue with backoff, `to_json` /
+`restore_json` for persistence) and `CoreDeduper` (spec §6).
+
 Swift wraps them in `SubEthaCore/Edge.swift` (`Edge.modulate`, `Edge.bleChunks`, typealiases,
 GATT UUIDs). Kotlin uses `org.subetha.core.ffi` directly. Both test suites check them against
 `spec/vectors/edge.json` and run a gossip exchange over 23-byte BLE chunks.
@@ -106,7 +109,7 @@ Only the native libraries come from cargo or CI. Regenerate whenever `ffi.rs` ch
 | Maven Central / SwiftPM tag publishing | Manual |
 | React Native Turbo Module via ubrn | Manual / scaffold (`sdk/react-native/ubrn.config.yaml`) |
 | Flutter plugin via flutter_rust_bridge (`sdk/core-frb`) | Not started (plan in `sdk/flutter/README.md`) |
-| Stateful edge objects (gossip node, chunk reassembler, QR encoder/decoder, audio receiver) as `uniffi::Object` | Done (`ffi_edge.rs`); the outbox and deduper are not exported yet |
+| Stateful edge objects (gossip node, chunk reassembler, QR encoder/decoder, audio receiver) as `uniffi::Object` | Done (`ffi_edge.rs`), plus the outbox and deduper (`ffi_store.rs`) |
 
 ## Next steps
 
@@ -123,6 +126,6 @@ Only the native libraries come from cargo or CI. Regenerate whenever `ffi.rs` ch
 5. **Platform shims.** The edge objects are exported. Next, wire them into the sample apps'
    Edge screens: CoreBluetooth / Android BLE peripheral advertising the GATT service,
    AVAudioEngine / AudioRecord for sound, AVCapture / CameraX + a QR detector, and
-   Network.framework / `MulticastSocket` for LAN. Also export the outbox and deduper.
+   Network.framework / `MulticastSocket` for LAN.
 6. **Conformance.** The Kotlin and Swift core tests load every applicable vector file:
    `canonical.json`, `topics.json`, `signatures.json`, `e2ee.json`, and `edge.json`.

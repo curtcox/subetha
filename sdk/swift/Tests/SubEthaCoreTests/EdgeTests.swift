@@ -85,4 +85,21 @@ final class EdgeTests: XCTestCase {
         let again = try watch.handle(message: Edge.deliverPayload([env]), nowSecs: now)
         XCTAssertTrue(again.dropped.first?.hasSuffix(":duplicate") ?? false)
     }
+
+    func testOutboxAndDeduper() throws {
+        let outbox = CoreOutbox(baseBackoffMs: 1000, maxBackoffMs: 10000, maxAttempts: 3, capacity: 10)
+        let id = Core.newMessageId()
+        let env = "{\"id\":\"\(id)\",\"topic\":\"@a/b\",\"message\":\"queued while offline\"}"
+        XCTAssertEqual(try outbox.enqueue(envelopeJson: env, nowMs: 0).result, "queued")
+        XCTAssertEqual(outbox.poll(nowMs: 0).map { $0.id }, [id])
+        XCTAssertTrue(outbox.poll(nowMs: 10).isEmpty)
+        let restored = CoreOutbox(baseBackoffMs: 1000, maxBackoffMs: 10000, maxAttempts: 3, capacity: 10)
+        try restored.restoreJson(json: outbox.toJson())
+        XCTAssertEqual(restored.len(), 1)
+        XCTAssertTrue(outbox.ack(id: id))
+        XCTAssertTrue(outbox.isEmpty())
+        let dedupe = CoreDeduper(capacity: 100)
+        XCTAssertTrue(dedupe.accept(id: id, expiresSecs: nil, nowSecs: 1))
+        XCTAssertFalse(dedupe.accept(id: id.lowercased(), expiresSecs: nil, nowSecs: 1))
+    }
 }

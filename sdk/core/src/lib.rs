@@ -27,6 +27,7 @@ pub mod encoding;
 pub mod envelope;
 pub mod ffi;
 pub mod ffi_edge;
+pub mod ffi_store;
 pub mod random;
 pub mod routing;
 pub mod sign;

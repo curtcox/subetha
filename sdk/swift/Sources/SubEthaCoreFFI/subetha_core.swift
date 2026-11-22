@@ -547,6 +547,468 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 
 
 /**
+ * Receiver-side dedupe across transports (spec §6).
+ */
+public protocol CoreDeduperProtocol : AnyObject {
+    
+    /**
+     * True if the message is new (and records it). Expired messages are never new.
+     */
+    func accept(id: String?, expiresSecs: UInt64?, nowSecs: UInt64)  -> Bool
+    
+    /**
+     * `accept` for an envelope in JSON.
+     */
+    func acceptEnvelope(envelopeJson: String, nowSecs: UInt64) throws  -> Bool
+    
+    func has(id: String)  -> Bool
+    
+}
+
+/**
+ * Receiver-side dedupe across transports (spec §6).
+ */
+open class CoreDeduper:
+    CoreDeduperProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_subetha_core_fn_clone_corededuper(self.pointer, $0) }
+    }
+public convenience init(capacity: UInt32) {
+    let pointer =
+        try! rustCall() {
+    uniffi_subetha_core_fn_constructor_corededuper_new(
+        FfiConverterUInt32.lower(capacity),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_subetha_core_fn_free_corededuper(pointer, $0) }
+    }
+
+    
+
+    
+    /**
+     * True if the message is new (and records it). Expired messages are never new.
+     */
+open func accept(id: String?, expiresSecs: UInt64?, nowSecs: UInt64) -> Bool {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_corededuper_accept(self.uniffiClonePointer(),
+        FfiConverterOptionString.lower(id),
+        FfiConverterOptionUInt64.lower(expiresSecs),
+        FfiConverterUInt64.lower(nowSecs),$0
+    )
+})
+}
+    
+    /**
+     * `accept` for an envelope in JSON.
+     */
+open func acceptEnvelope(envelopeJson: String, nowSecs: UInt64)throws  -> Bool {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
+    uniffi_subetha_core_fn_method_corededuper_accept_envelope(self.uniffiClonePointer(),
+        FfiConverterString.lower(envelopeJson),
+        FfiConverterUInt64.lower(nowSecs),$0
+    )
+})
+}
+    
+open func has(id: String) -> Bool {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_corededuper_has(self.uniffiClonePointer(),
+        FfiConverterString.lower(id),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCoreDeduper: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = CoreDeduper
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> CoreDeduper {
+        return CoreDeduper(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: CoreDeduper) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreDeduper {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: CoreDeduper, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCoreDeduper_lift(_ pointer: UnsafeMutableRawPointer) throws -> CoreDeduper {
+    return try FfiConverterTypeCoreDeduper.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCoreDeduper_lower(_ value: CoreDeduper) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeCoreDeduper.lower(value)
+}
+
+
+
+
+/**
+ * Outgoing messages waiting for an ack, retried with exponential backoff. The caller supplies
+ * the clock (ms) and persists `to_json()` across restarts.
+ */
+public protocol CoreOutboxProtocol : AnyObject {
+    
+    /**
+     * Removes an item once the relay or a peer confirmed it. False if it wasn't queued.
+     */
+    func ack(id: String)  -> Bool
+    
+    /**
+     * Queues a (signed/encrypted) envelope by its id; due immediately. It must have an id.
+     */
+    func enqueue(envelopeJson: String, nowMs: UInt64) throws  -> OutboxEnqueueRecord
+    
+    /**
+     * Drops expired items and items out of attempts, returning them (dead letters).
+     */
+    func expire(nowMs: UInt64)  -> [OutboxDroppedRecord]
+    
+    func isEmpty()  -> Bool
+    
+    func len()  -> UInt64
+    
+    /**
+     * Records a failed attempt now; returns when it will be retried.
+     */
+    func nack(id: String, nowMs: UInt64)  -> UInt64?
+    
+    /**
+     * When the next item falls due (ms), to schedule a timer.
+     */
+    func nextWakeMs()  -> UInt64?
+    
+    /**
+     * Items due now. Each counts as an attempt and comes back after a backoff unless acked.
+     */
+    func poll(nowMs: UInt64)  -> [OutboxItemRecord]
+    
+    /**
+     * Adds items saved with `to_json()`.
+     */
+    func restoreJson(json: String) throws 
+    
+    /**
+     * Makes an item due immediately (e.g. when connectivity returns).
+     */
+    func retryNow(id: String, nowMs: UInt64)  -> Bool
+    
+    /**
+     * The queue as JSON, to persist.
+     */
+    func toJson()  -> String
+    
+}
+
+/**
+ * Outgoing messages waiting for an ack, retried with exponential backoff. The caller supplies
+ * the clock (ms) and persists `to_json()` across restarts.
+ */
+open class CoreOutbox:
+    CoreOutboxProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_subetha_core_fn_clone_coreoutbox(self.pointer, $0) }
+    }
+public convenience init(baseBackoffMs: UInt64, maxBackoffMs: UInt64, maxAttempts: UInt32?, capacity: UInt32) {
+    let pointer =
+        try! rustCall() {
+    uniffi_subetha_core_fn_constructor_coreoutbox_new(
+        FfiConverterUInt64.lower(baseBackoffMs),
+        FfiConverterUInt64.lower(maxBackoffMs),
+        FfiConverterOptionUInt32.lower(maxAttempts),
+        FfiConverterUInt32.lower(capacity),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_subetha_core_fn_free_coreoutbox(pointer, $0) }
+    }
+
+    
+
+    
+    /**
+     * Removes an item once the relay or a peer confirmed it. False if it wasn't queued.
+     */
+open func ack(id: String) -> Bool {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_coreoutbox_ack(self.uniffiClonePointer(),
+        FfiConverterString.lower(id),$0
+    )
+})
+}
+    
+    /**
+     * Queues a (signed/encrypted) envelope by its id; due immediately. It must have an id.
+     */
+open func enqueue(envelopeJson: String, nowMs: UInt64)throws  -> OutboxEnqueueRecord {
+    return try  FfiConverterTypeOutboxEnqueueRecord.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
+    uniffi_subetha_core_fn_method_coreoutbox_enqueue(self.uniffiClonePointer(),
+        FfiConverterString.lower(envelopeJson),
+        FfiConverterUInt64.lower(nowMs),$0
+    )
+})
+}
+    
+    /**
+     * Drops expired items and items out of attempts, returning them (dead letters).
+     */
+open func expire(nowMs: UInt64) -> [OutboxDroppedRecord] {
+    return try!  FfiConverterSequenceTypeOutboxDroppedRecord.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_coreoutbox_expire(self.uniffiClonePointer(),
+        FfiConverterUInt64.lower(nowMs),$0
+    )
+})
+}
+    
+open func isEmpty() -> Bool {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_coreoutbox_is_empty(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+open func len() -> UInt64 {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_coreoutbox_len(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Records a failed attempt now; returns when it will be retried.
+     */
+open func nack(id: String, nowMs: UInt64) -> UInt64? {
+    return try!  FfiConverterOptionUInt64.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_coreoutbox_nack(self.uniffiClonePointer(),
+        FfiConverterString.lower(id),
+        FfiConverterUInt64.lower(nowMs),$0
+    )
+})
+}
+    
+    /**
+     * When the next item falls due (ms), to schedule a timer.
+     */
+open func nextWakeMs() -> UInt64? {
+    return try!  FfiConverterOptionUInt64.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_coreoutbox_next_wake_ms(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Items due now. Each counts as an attempt and comes back after a backoff unless acked.
+     */
+open func poll(nowMs: UInt64) -> [OutboxItemRecord] {
+    return try!  FfiConverterSequenceTypeOutboxItemRecord.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_coreoutbox_poll(self.uniffiClonePointer(),
+        FfiConverterUInt64.lower(nowMs),$0
+    )
+})
+}
+    
+    /**
+     * Adds items saved with `to_json()`.
+     */
+open func restoreJson(json: String)throws  {try rustCallWithError(FfiConverterTypeFfiError.lift) {
+    uniffi_subetha_core_fn_method_coreoutbox_restore_json(self.uniffiClonePointer(),
+        FfiConverterString.lower(json),$0
+    )
+}
+}
+    
+    /**
+     * Makes an item due immediately (e.g. when connectivity returns).
+     */
+open func retryNow(id: String, nowMs: UInt64) -> Bool {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_coreoutbox_retry_now(self.uniffiClonePointer(),
+        FfiConverterString.lower(id),
+        FfiConverterUInt64.lower(nowMs),$0
+    )
+})
+}
+    
+    /**
+     * The queue as JSON, to persist.
+     */
+open func toJson() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_subetha_core_fn_method_coreoutbox_to_json(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCoreOutbox: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = CoreOutbox
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> CoreOutbox {
+        return CoreOutbox(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: CoreOutbox) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoreOutbox {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: CoreOutbox, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCoreOutbox_lift(_ pointer: UnsafeMutableRawPointer) throws -> CoreOutbox {
+    return try FfiConverterTypeCoreOutbox.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCoreOutbox_lower(_ value: CoreOutbox) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeCoreOutbox.lower(value)
+}
+
+
+
+
+/**
  * Buffers microphone samples at any rate and returns payloads as frames are heard.
  */
 public protocol EdgeAudioReceiverProtocol : AnyObject {
@@ -1811,6 +2273,238 @@ public func FfiConverterTypeLanBeaconRecord_lower(_ value: LanBeaconRecord) -> R
 }
 
 
+public struct OutboxDroppedRecord {
+    public var id: String
+    public var envelopeJson: String
+    /**
+     * "expired", "max_attempts", or "overflow".
+     */
+    public var reason: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, envelopeJson: String, 
+        /**
+         * "expired", "max_attempts", or "overflow".
+         */reason: String) {
+        self.id = id
+        self.envelopeJson = envelopeJson
+        self.reason = reason
+    }
+}
+
+
+
+extension OutboxDroppedRecord: Equatable, Hashable {
+    public static func ==(lhs: OutboxDroppedRecord, rhs: OutboxDroppedRecord) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.envelopeJson != rhs.envelopeJson {
+            return false
+        }
+        if lhs.reason != rhs.reason {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(envelopeJson)
+        hasher.combine(reason)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOutboxDroppedRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OutboxDroppedRecord {
+        return
+            try OutboxDroppedRecord(
+                id: FfiConverterString.read(from: &buf), 
+                envelopeJson: FfiConverterString.read(from: &buf), 
+                reason: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: OutboxDroppedRecord, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.envelopeJson, into: &buf)
+        FfiConverterString.write(value.reason, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutboxDroppedRecord_lift(_ buf: RustBuffer) throws -> OutboxDroppedRecord {
+    return try FfiConverterTypeOutboxDroppedRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutboxDroppedRecord_lower(_ value: OutboxDroppedRecord) -> RustBuffer {
+    return FfiConverterTypeOutboxDroppedRecord.lower(value)
+}
+
+
+public struct OutboxEnqueueRecord {
+    /**
+     * "queued", "duplicate", or "expired".
+     */
+    public var result: String
+    /**
+     * Set when the queue was full and its oldest item was evicted to make room.
+     */
+    public var evictedId: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * "queued", "duplicate", or "expired".
+         */result: String, 
+        /**
+         * Set when the queue was full and its oldest item was evicted to make room.
+         */evictedId: String?) {
+        self.result = result
+        self.evictedId = evictedId
+    }
+}
+
+
+
+extension OutboxEnqueueRecord: Equatable, Hashable {
+    public static func ==(lhs: OutboxEnqueueRecord, rhs: OutboxEnqueueRecord) -> Bool {
+        if lhs.result != rhs.result {
+            return false
+        }
+        if lhs.evictedId != rhs.evictedId {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(result)
+        hasher.combine(evictedId)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOutboxEnqueueRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OutboxEnqueueRecord {
+        return
+            try OutboxEnqueueRecord(
+                result: FfiConverterString.read(from: &buf), 
+                evictedId: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: OutboxEnqueueRecord, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.result, into: &buf)
+        FfiConverterOptionString.write(value.evictedId, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutboxEnqueueRecord_lift(_ buf: RustBuffer) throws -> OutboxEnqueueRecord {
+    return try FfiConverterTypeOutboxEnqueueRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutboxEnqueueRecord_lower(_ value: OutboxEnqueueRecord) -> RustBuffer {
+    return FfiConverterTypeOutboxEnqueueRecord.lower(value)
+}
+
+
+public struct OutboxItemRecord {
+    public var id: String
+    public var envelopeJson: String
+    public var attempts: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, envelopeJson: String, attempts: UInt32) {
+        self.id = id
+        self.envelopeJson = envelopeJson
+        self.attempts = attempts
+    }
+}
+
+
+
+extension OutboxItemRecord: Equatable, Hashable {
+    public static func ==(lhs: OutboxItemRecord, rhs: OutboxItemRecord) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.envelopeJson != rhs.envelopeJson {
+            return false
+        }
+        if lhs.attempts != rhs.attempts {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(envelopeJson)
+        hasher.combine(attempts)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOutboxItemRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OutboxItemRecord {
+        return
+            try OutboxItemRecord(
+                id: FfiConverterString.read(from: &buf), 
+                envelopeJson: FfiConverterString.read(from: &buf), 
+                attempts: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: OutboxItemRecord, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.envelopeJson, into: &buf)
+        FfiConverterUInt32.write(value.attempts, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutboxItemRecord_lift(_ buf: RustBuffer) throws -> OutboxItemRecord {
+    return try FfiConverterTypeOutboxItemRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutboxItemRecord_lower(_ value: OutboxItemRecord) -> RustBuffer {
+    return FfiConverterTypeOutboxItemRecord.lower(value)
+}
+
+
 /**
  * Header values for a device-signed HTTP request (`X-Device-Id`, `X-Device-Time`,
  * `X-Device-Nonce`, `X-Device-Signature`).
@@ -1957,6 +2651,54 @@ extension FfiError: Foundation.LocalizedError {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
+    typealias SwiftType = UInt32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
+    typealias SwiftType = UInt64?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt64.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt64.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
@@ -2096,6 +2838,56 @@ fileprivate struct FfiConverterSequenceData: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterData.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeOutboxDroppedRecord: FfiConverterRustBuffer {
+    typealias SwiftType = [OutboxDroppedRecord]
+
+    public static func write(_ value: [OutboxDroppedRecord], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeOutboxDroppedRecord.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [OutboxDroppedRecord] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [OutboxDroppedRecord]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeOutboxDroppedRecord.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeOutboxItemRecord: FfiConverterRustBuffer {
+    typealias SwiftType = [OutboxItemRecord]
+
+    public static func write(_ value: [OutboxItemRecord], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeOutboxItemRecord.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [OutboxItemRecord] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [OutboxItemRecord]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeOutboxItemRecord.read(from: &buf))
         }
         return seq
     }
@@ -2450,6 +3242,48 @@ private var initializationResult: InitializationResult = {
     if (uniffi_subetha_core_checksum_func_verify_envelope_json() != 59783) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_subetha_core_checksum_method_corededuper_accept() != 9973) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_corededuper_accept_envelope() != 46263) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_corededuper_has() != 47428) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_coreoutbox_ack() != 36225) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_coreoutbox_enqueue() != 15241) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_coreoutbox_expire() != 21764) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_coreoutbox_is_empty() != 34777) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_coreoutbox_len() != 13529) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_coreoutbox_nack() != 18184) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_coreoutbox_next_wake_ms() != 15086) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_coreoutbox_poll() != 43828) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_coreoutbox_restore_json() != 51525) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_coreoutbox_retry_now() != 64894) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_method_coreoutbox_to_json() != 35309) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_subetha_core_checksum_method_edgeaudioreceiver_push() != 63742) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -2502,6 +3336,12 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_subetha_core_checksum_method_edgeqrencoder_source_blocks() != 25945) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_constructor_corededuper_new() != 38638) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_constructor_coreoutbox_new() != 52355) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_subetha_core_checksum_constructor_edgeaudioreceiver_new() != 57524) {

@@ -18,6 +18,8 @@ import kotlinx.serialization.json.long
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.BeforeEach
 import org.subetha.Encoding
+import org.subetha.core.ffi.CoreDeduper
+import org.subetha.core.ffi.CoreOutbox
 import org.subetha.core.ffi.EdgeAudioReceiver
 import org.subetha.core.ffi.EdgeChunkReassembler
 import org.subetha.core.ffi.EdgeGossipNode
@@ -102,5 +104,23 @@ class EdgeTest {
         assertEquals("ding", Json.parseToJsonElement(delivered[0]).jsonObject["message"]!!.jsonPrimitive.content)
         // One-way links carry a deliver message; the receiver dedupes it.
         assertTrue(watch.handle(edgeDeliverPayload(listOf(env)), now).dropped.single().endsWith(":duplicate"))
+    }
+
+    @Test
+    fun outboxAndDeduper() {
+        val outbox = CoreOutbox(1000uL, 10000uL, 3u, 10u)
+        val id = newMessageId()
+        val env = """{"id":"$id","topic":"@a/b","message":"queued while offline"}"""
+        assertEquals("queued", outbox.enqueue(env, 0uL).result)
+        assertEquals(listOf(id), outbox.poll(0uL).map { it.id })
+        assertTrue(outbox.poll(10uL).isEmpty())
+        val restored = CoreOutbox(1000uL, 10000uL, 3u, 10u)
+        restored.restoreJson(outbox.toJson())
+        assertEquals(1uL, restored.len())
+        assertTrue(outbox.ack(id))
+        assertTrue(outbox.isEmpty())
+        val dedupe = CoreDeduper(100u)
+        assertTrue(dedupe.accept(id, null, 1uL))
+        assertFalse(dedupe.accept(id.lowercase(), null, 1uL))
     }
 }

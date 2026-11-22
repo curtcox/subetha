@@ -251,6 +251,106 @@ typedef void (*UniffiForeignFutureCompleteVoid)(uint64_t, UniffiForeignFutureStr
     );
 
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_COREDEDUPER
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_COREDEDUPER
+void*_Nonnull uniffi_subetha_core_fn_clone_corededuper(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FREE_COREDEDUPER
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FREE_COREDEDUPER
+void uniffi_subetha_core_fn_free_corededuper(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CONSTRUCTOR_COREDEDUPER_NEW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CONSTRUCTOR_COREDEDUPER_NEW
+void*_Nonnull uniffi_subetha_core_fn_constructor_corededuper_new(uint32_t capacity, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREDEDUPER_ACCEPT
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREDEDUPER_ACCEPT
+int8_t uniffi_subetha_core_fn_method_corededuper_accept(void*_Nonnull ptr, RustBuffer id, RustBuffer expires_secs, uint64_t now_secs, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREDEDUPER_ACCEPT_ENVELOPE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREDEDUPER_ACCEPT_ENVELOPE
+int8_t uniffi_subetha_core_fn_method_corededuper_accept_envelope(void*_Nonnull ptr, RustBuffer envelope_json, uint64_t now_secs, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREDEDUPER_HAS
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREDEDUPER_HAS
+int8_t uniffi_subetha_core_fn_method_corededuper_has(void*_Nonnull ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_COREOUTBOX
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_COREOUTBOX
+void*_Nonnull uniffi_subetha_core_fn_clone_coreoutbox(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FREE_COREOUTBOX
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FREE_COREOUTBOX
+void uniffi_subetha_core_fn_free_coreoutbox(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CONSTRUCTOR_COREOUTBOX_NEW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CONSTRUCTOR_COREOUTBOX_NEW
+void*_Nonnull uniffi_subetha_core_fn_constructor_coreoutbox_new(uint64_t base_backoff_ms, uint64_t max_backoff_ms, RustBuffer max_attempts, uint32_t capacity, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_ACK
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_ACK
+int8_t uniffi_subetha_core_fn_method_coreoutbox_ack(void*_Nonnull ptr, RustBuffer id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_ENQUEUE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_ENQUEUE
+RustBuffer uniffi_subetha_core_fn_method_coreoutbox_enqueue(void*_Nonnull ptr, RustBuffer envelope_json, uint64_t now_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_EXPIRE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_EXPIRE
+RustBuffer uniffi_subetha_core_fn_method_coreoutbox_expire(void*_Nonnull ptr, uint64_t now_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_IS_EMPTY
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_IS_EMPTY
+int8_t uniffi_subetha_core_fn_method_coreoutbox_is_empty(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_LEN
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_LEN
+uint64_t uniffi_subetha_core_fn_method_coreoutbox_len(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_NACK
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_NACK
+RustBuffer uniffi_subetha_core_fn_method_coreoutbox_nack(void*_Nonnull ptr, RustBuffer id, uint64_t now_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_NEXT_WAKE_MS
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_NEXT_WAKE_MS
+RustBuffer uniffi_subetha_core_fn_method_coreoutbox_next_wake_ms(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_POLL
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_POLL
+RustBuffer uniffi_subetha_core_fn_method_coreoutbox_poll(void*_Nonnull ptr, uint64_t now_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_RESTORE_JSON
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_RESTORE_JSON
+void uniffi_subetha_core_fn_method_coreoutbox_restore_json(void*_Nonnull ptr, RustBuffer json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_RETRY_NOW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_RETRY_NOW
+int8_t uniffi_subetha_core_fn_method_coreoutbox_retry_now(void*_Nonnull ptr, RustBuffer id, uint64_t now_ms, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_TO_JSON
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_METHOD_COREOUTBOX_TO_JSON
+RustBuffer uniffi_subetha_core_fn_method_coreoutbox_to_json(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_EDGEAUDIORECEIVER
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_CLONE_EDGEAUDIORECEIVER
 void*_Nonnull uniffi_subetha_core_fn_clone_edgeaudioreceiver(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
@@ -977,6 +1077,90 @@ uint16_t uniffi_subetha_core_checksum_func_verify_envelope_json(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREDEDUPER_ACCEPT
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREDEDUPER_ACCEPT
+uint16_t uniffi_subetha_core_checksum_method_corededuper_accept(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREDEDUPER_ACCEPT_ENVELOPE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREDEDUPER_ACCEPT_ENVELOPE
+uint16_t uniffi_subetha_core_checksum_method_corededuper_accept_envelope(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREDEDUPER_HAS
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREDEDUPER_HAS
+uint16_t uniffi_subetha_core_checksum_method_corededuper_has(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_ACK
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_ACK
+uint16_t uniffi_subetha_core_checksum_method_coreoutbox_ack(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_ENQUEUE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_ENQUEUE
+uint16_t uniffi_subetha_core_checksum_method_coreoutbox_enqueue(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_EXPIRE
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_EXPIRE
+uint16_t uniffi_subetha_core_checksum_method_coreoutbox_expire(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_IS_EMPTY
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_IS_EMPTY
+uint16_t uniffi_subetha_core_checksum_method_coreoutbox_is_empty(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_LEN
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_LEN
+uint16_t uniffi_subetha_core_checksum_method_coreoutbox_len(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_NACK
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_NACK
+uint16_t uniffi_subetha_core_checksum_method_coreoutbox_nack(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_NEXT_WAKE_MS
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_NEXT_WAKE_MS
+uint16_t uniffi_subetha_core_checksum_method_coreoutbox_next_wake_ms(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_POLL
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_POLL
+uint16_t uniffi_subetha_core_checksum_method_coreoutbox_poll(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_RESTORE_JSON
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_RESTORE_JSON
+uint16_t uniffi_subetha_core_checksum_method_coreoutbox_restore_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_RETRY_NOW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_RETRY_NOW
+uint16_t uniffi_subetha_core_checksum_method_coreoutbox_retry_now(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_TO_JSON
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_COREOUTBOX_TO_JSON
+uint16_t uniffi_subetha_core_checksum_method_coreoutbox_to_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEAUDIORECEIVER_PUSH
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEAUDIORECEIVER_PUSH
 uint16_t uniffi_subetha_core_checksum_method_edgeaudioreceiver_push(void
@@ -1082,6 +1266,18 @@ uint16_t uniffi_subetha_core_checksum_method_edgeqrencoder_frame_text(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEQRENCODER_SOURCE_BLOCKS
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_METHOD_EDGEQRENCODER_SOURCE_BLOCKS
 uint16_t uniffi_subetha_core_checksum_method_edgeqrencoder_source_blocks(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_CONSTRUCTOR_COREDEDUPER_NEW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_CONSTRUCTOR_COREDEDUPER_NEW
+uint16_t uniffi_subetha_core_checksum_constructor_corededuper_new(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_CONSTRUCTOR_COREOUTBOX_NEW
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_CONSTRUCTOR_COREOUTBOX_NEW
+uint16_t uniffi_subetha_core_checksum_constructor_coreoutbox_new(void
     
 );
 #endif
