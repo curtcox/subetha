@@ -115,6 +115,29 @@ export function barcodeDetector(): QrDetector | null {
   return async (video) => (await d.detect(video)).map((r) => r.rawValue);
 }
 
+/** The jsQR function's shape (https://github.com/cozmo/jsQR); the SDK doesn't bundle it. */
+export type JsQr = (data: Uint8ClampedArray, width: number, height: number, opts?: { inversionAttempts?: "dontInvert" | "onlyInvert" | "attemptBoth" | "invertFirst" }) => { data: string } | null;
+
+/**
+ * A QrDetector for browsers without BarcodeDetector (Firefox, Safari, Chrome on Windows and Linux),
+ * from jsQR. Frames are scaled down to `maxSide` pixels first, which keeps it fast on phones.
+ */
+export function jsQrDetector(jsQR: JsQr, opts: { maxSide?: number } = {}): QrDetector {
+  let ctx: CanvasRenderingContext2D | null = null;
+  return async (video) => {
+    if (!video.videoWidth || !video.videoHeight) return [];
+    const k = Math.min(1, (opts.maxSide ?? 720) / Math.max(video.videoWidth, video.videoHeight));
+    const w = Math.round(video.videoWidth * k), h = Math.round(video.videoHeight * k);
+    ctx ??= document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+    if (!ctx) return [];
+    ctx.canvas.width = w;
+    ctx.canvas.height = h;
+    ctx.drawImage(video, 0, 0, w, h);
+    const found = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: "dontInvert" });
+    return found ? [found.data] : [];
+  };
+}
+
 /** Scans animated QR frames with the camera until a payload is complete or stopped. */
 export async function scanAnimatedQr(
   video: HTMLVideoElement,
@@ -122,7 +145,7 @@ export async function scanAnimatedQr(
   opts: { detect?: QrDetector; onProgress?: (p: FountainProgress) => void; stream?: MediaStream } = {},
 ): Promise<Stoppable> {
   const detect = opts.detect ?? barcodeDetector();
-  if (!detect) throw new Error("no QR detector: this browser lacks BarcodeDetector; pass opts.detect (e.g. a jsQR wrapper)");
+  if (!detect) throw new Error("no QR detector: this browser lacks BarcodeDetector; pass opts.detect (e.g. jsQrDetector(jsQR))");
   const stream = opts.stream ?? await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
   video.srcObject = stream;
   video.playsInline = true;

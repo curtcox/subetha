@@ -133,10 +133,26 @@
     $("show").textContent = "Stop";
     $("qr-status").textContent = `Showing ${anim.sourceBlocks} source block(s); point the other device’s camera here.`;
   });
+  // BarcodeDetector where the browser has one (Chrome on Android, macOS, ChromeOS); elsewhere jsQR,
+  // served next to this page and loaded on first use.
+  let jsQrLoad = null;
+  async function qrDetector() {
+    const native = E.barcodeDetector();
+    if (native) return native;
+    jsQrLoad ??= new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "jsqr.js";
+      s.onload = resolve;
+      s.onerror = () => { jsQrLoad = null; reject(new Error("Couldn't load the QR decoder.")); };
+      document.head.appendChild(s);
+    });
+    await jsQrLoad;
+    return E.jsQrDetector(window.jsQR);
+  }
   $("scan").onclick = guard("qr-status", async () => {
     if (scanner) { stopQr(); $("qr-status").textContent = ""; return; }
     stopQr();
-    if (!E.barcodeDetector()) throw new Error("This browser has no BarcodeDetector. Try Chrome on Android or desktop.");
+    const detect = await qrDetector();
     $("cam").hidden = $("qr-meter").hidden = false;
     const bar = $("qr-meter").firstElementChild;
     scanner = await E.scanAnimatedQr($("cam"), async (payload) => {
@@ -144,7 +160,7 @@
       got.forEach((e) => show(e, "QR"));
       bar.style.width = "100%";
       $("qr-status").textContent = got.length ? "Received." : "Complete (duplicate or not for this topic).";
-    }, { onProgress: (p) => { if (!p.complete) { bar.style.width = `${Math.round((100 * p.known) / p.total)}%`; $("qr-status").textContent = `${p.known} / ${p.total} blocks`; } } });
+    }, { detect, onProgress: (p) => { if (!p.complete) { bar.style.width = `${Math.round((100 * p.known) / p.total)}%`; $("qr-status").textContent = `${p.known} / ${p.total} blocks`; } } });
     $("scan").textContent = "Stop";
     $("qr-status").textContent = "Scanning…";
   });
