@@ -75,9 +75,36 @@ new message right away. `LanGossip` is the socket-free core, for other runtimes.
 
 The Rust core (`subetha_core::edge`) has the same modem, fountain codec, BLE chunking, and gossip
 node. The Swift, Kotlin, Flutter, and React Native SDKs reach it through the core bindings, and
-the platform supplies the radio, speaker, microphone, or camera. A phone running the SDK can
-act as a BLE **peripheral** (advertising the service in [spec §11.3](https://github.com/curtcox/subetha/blob/main/spec/README.md#113-bluetooth-le)),
-which is what browsers connect to.
+the platform supplies the radio, speaker, microphone, or camera.
+
+The Kotlin (`org.subetha:subetha-core`) and Swift (`SubEthaCore`) SDKs add drivers that do
+everything except move bytes, the same as the TypeScript ones:
+
+| Driver | Feed it | It gives you |
+|---|---|---|
+| `AudioLink` | microphone samples at the device's rate | decoded payloads; samples to play for yours |
+| `QrSender` / `QrReceiver` | scanned QR strings | base45 text for each animated frame; completed payloads |
+| `BleLink` | each notification or write from a peer, and the negotiated ATT MTU | chunks to write or notify |
+| `GossipSession` | gossip messages over any two-way link | replies and new envelopes |
+| `EdgeBridge` | a `SubEtha` client and a gossip node | relay messages in the node; `uplink` for edge messages |
+
+The sample apps wire them to the platform APIs, and are the place to copy from:
+
+- **Android** ([`samples/android`](https://github.com/curtcox/subetha/tree/main/samples/android)):
+  `AndroidBle.kt` (BluetoothGattServer and advertising as a peripheral, scanning and GATT client
+  connections as a central, one queued GATT operation at a time), `AndroidAudio.kt`
+  (AudioTrack/AudioRecord), and `QrViews.kt` (ZXing on CameraX frames).
+- **iOS** ([`samples/ios`](https://github.com/curtcox/subetha/tree/main/samples/ios)):
+  `AppleBle.swift` (CBPeripheralManager and CBCentralManager), `AppleAudio.swift`
+  (AVAudioEngine in measurement mode), and `QrViews.swift` (CoreImage and
+  AVCaptureMetadataOutput).
+
+A phone running either sample is a BLE **peripheral** as well as a central, advertising the
+service in [spec §11.3](https://github.com/curtcox/subetha/blob/main/spec/README.md#113-bluetooth-le), so
+browsers (which can only be centrals) connect to it. Phones that see each other connect and
+gossip. Each envelope's `hops` limits how many phones it passes through. iOS only does BLE in the
+foreground for this, and can't put data in its advertisements, so two phones may end up with two
+connections between them. That's harmless because gossip drops duplicates.
 
 ## Bridging to the relay
 
@@ -89,3 +116,7 @@ signature still verifies because `hops` isn't signed, and the relay drops a mess
 already seen by id. Uplinked publishes are billed to the gateway's token like any other.
 
 <!-- include: samples/ts/edge-bridge.ts#snippet -->
+
+On phones, the samples' **Bridge to relay** button does the same with `EdgeBridge`. The
+[offline BLE-hop demo](https://github.com/curtcox/subetha/tree/main/samples/android#offline-ble-hop-demo)
+uses one online phone as the gateway for an offline one.
