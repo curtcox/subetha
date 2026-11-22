@@ -97,6 +97,7 @@ applications in the Clerk dashboard, so clients can register themselves.
 |---|---|
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` | Twilio console → Account Info. The auth token also verifies inbound webhook signatures. |
 | `TWILIO_FROM` | A Twilio US number in E.164 (`+1…`), registered to an approved **A2P 10DLC** campaign (PLAN §14 Phase 0: takes weeks). Set its "A message comes in" webhook to `https://<host>/v1/hooks/twilio/sms` (POST). |
+| `TWILIO_API_BASE` | Optional. Leave unset in staging and production; the E2E tests set it to a local mock Twilio. |
 
 ### Email
 

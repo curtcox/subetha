@@ -2,7 +2,9 @@
 
 Playwright tests that drive the web console (`apps/site/public/console`) against the real relay
 Worker under `wrangler dev`. `serve.mjs` builds the SDK bundle and the site, applies the D1
-migrations to a fresh state directory (`e2e/.state`), and starts `wrangler dev` on port 8788.
+migrations to a fresh state directory (`e2e/.state`), and starts `wrangler dev` on port 8788,
+with Twilio pointed at a local mock (`mock-twilio.mjs`, on the port two above) that records each
+SMS and call and lists them at `GET /__calls?to=+1…`.
 Each test creates its own account through the local-only `/v1/dev/bootstrap` endpoint.
 
 ```bash
@@ -29,6 +31,12 @@ What's covered:
 - a scoped token made in the console, which can publish only where its scope allows;
 - device enrollment: the device-code link opens the Devices tab with the code filled in, the
   approved device publishes with signed requests, and revoking it in the console locks it out;
+- escalation through the real delivery queue: an urgent message nobody acks goes to SMS after
+  2 s and to a voice call after 4 s (verification codes for both are read back from the mock
+  Twilio), a signed keypress callback acks it, and the call-status callback settles the call;
+  the same alarm received live by a console is acked over the WebSocket, so both steps are skipped;
+- the endpoint inspector: a test delivery to a webhook shows the signed request, and the
+  in-browser checker verifies its signature with the endpoint's secret;
 - the Edge lab's sound transport: a signed envelope modulated into a WAV file is played into
   Chromium as a fake microphone, and the page demodulates, verifies, and shows it (and the Play
   button runs without errors);

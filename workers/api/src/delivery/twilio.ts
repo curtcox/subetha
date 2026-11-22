@@ -11,13 +11,15 @@ export const US_E164 = /^\+1[2-9]\d{2}[2-9]\d{6}$/;
 
 function twilioAuth(env: Env) {
   if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN || !env.TWILIO_FROM) throw new PermanentError("Twilio is not configured");
-  return { sid: env.TWILIO_ACCOUNT_SID, auth: `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`)}`, from: env.TWILIO_FROM };
+  // TWILIO_API_BASE points local end-to-end tests at a mock; production leaves it unset.
+  const base = (env.TWILIO_API_BASE || "https://api.twilio.com").replace(/\/+$/, "");
+  return { base, sid: env.TWILIO_ACCOUNT_SID, auth: `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`)}`, from: env.TWILIO_FROM };
 }
 
 export async function sendSms(env: Env, to: string, body: string): Promise<{ sid: string; segments: number }> {
   if (!US_E164.test(to)) throw new PermanentError("only US numbers are supported");
   const t = twilioAuth(env);
-  const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${t.sid}/Messages.json`, {
+  const r = await fetch(`${t.base}/2010-04-01/Accounts/${t.sid}/Messages.json`, {
     method: "POST",
     headers: { authorization: t.auth, "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ To: to, From: t.from, Body: body }).toString(),
@@ -39,7 +41,7 @@ export function voiceTwiml(text: string, ackUrl: string | null): string {
 export async function makeCall(env: Env, to: string, twiml: string, statusCallback?: string): Promise<{ sid: string }> {
   if (!US_E164.test(to)) throw new PermanentError("only US numbers are supported");
   const t = twilioAuth(env);
-  const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${t.sid}/Calls.json`, {
+  const r = await fetch(`${t.base}/2010-04-01/Accounts/${t.sid}/Calls.json`, {
     method: "POST",
     headers: { authorization: t.auth, "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ To: to, From: t.from, Twiml: twiml, TimeLimit: String(CALL_TIME_LIMIT_S), ...(statusCallback ? { StatusCallback: statusCallback, StatusCallbackEvent: "completed" } : {}) }).toString(),

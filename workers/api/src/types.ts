@@ -44,6 +44,8 @@ export interface Env {
   TWILIO_ACCOUNT_SID?: string;
   TWILIO_AUTH_TOKEN?: string;
   TWILIO_FROM?: string;
+  /** Twilio REST base URL (default https://api.twilio.com); local E2E tests point it at a mock. */
+  TWILIO_API_BASE?: string;
   EMAIL_FROM?: string;
   SES_ACCESS_KEY_ID?: string;
   SES_SECRET_ACCESS_KEY?: string;
