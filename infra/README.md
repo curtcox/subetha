@@ -34,8 +34,9 @@ npx wrangler d1 create subetha-staging
 # KV for the token/policy cache (prints id)
 npx wrangler kv namespace create subetha-cache-staging
 
-# R2 for attachments
+# R2 for attachments, and a separate private bucket for nightly D1 backups
 npx wrangler r2 bucket create subetha-files-staging
+npx wrangler r2 bucket create subetha-backups-staging
 
 # Queues for paid deliveries, plus the dead-letter queue
 npx wrangler queues create subetha-delivery-staging
@@ -105,6 +106,35 @@ curl https://staging.subetha.org/v1/status   # which transports are configured
 
 Migrations run before the new code is deployed, so they must be backward compatible with the
 running version (add columns and tables; don't rename or drop in the same release).
+
+## Backups and restore
+
+Two layers protect D1, which holds everything except live Durable Object state:
+
+1. **D1 Time Travel** (built in, 30 days): point-in-time restore of the whole database.
+   `npx wrangler d1 time-travel restore subetha-production --timestamp <unix or RFC 3339>`
+2. **Nightly logical backups** (`workers/api/src/backup.ts`, run by the 03:17 UTC cron) to the
+   `BACKUPS` bucket. Each day `d1/<YYYY-MM-DD>/` holds one gzip'd NDJSON file per table and
+   a `manifest.json` (schema, row counts, SHA-256 of every file). Days older than
+   `BACKUP_RETENTION_DAYS` (default 35) are pruned. These survive deleting the database or
+   the account it's in, and they're portable to plain SQLite.
+
+Balances live in each account's Durable Object, but every ledger entry is journaled to D1's
+`ledger_journal` with `available_after` and `reserved_after`, so the newest row per account
+restores its balance. The backup bucket contains personal data (emails, phone numbers): keep it
+private, and limit the API tokens that can read it.
+
+To restore a nightly backup into a new, empty database:
+
+```bash
+node --experimental-strip-types scripts/restore-d1.mjs --bucket subetha-backups-production --day 2026-11-22 --out restore.sql
+npx wrangler d1 create subetha-production-restore
+npx wrangler d1 execute subetha-production-restore --remote --file restore.sql
+```
+
+The script checks every file's hash before writing SQL. Point `wrangler.jsonc` at the new
+`database_id` and deploy, then rehydrate the account Durable Objects from `ledger_journal` if
+they were lost too. Run a restore drill against staging once a quarter.
 
 ## Local development
 

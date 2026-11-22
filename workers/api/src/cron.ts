@@ -1,7 +1,9 @@
-// Scheduled jobs (PLAN §7, §8): rent metering, freeze/cleanup, reconciliation, Twilio repricing.
+// Scheduled jobs (PLAN §7, §8, §14): rent metering, freeze/cleanup, reconciliation, Twilio
+// repricing, and the nightly D1 backup.
 import { rentNanos, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { audit, invalidateAccount } from "./accounts.ts";
+import { backupDatabase } from "./backup.ts";
 import { accountStub } from "./durable/account.ts";
 import type { Env } from "./types.ts";
 
@@ -17,6 +19,7 @@ export async function runCron(cron: string, env: Env, now: number) {
     await reconcile(env, now);
     await checkTwilioPrices(env);
     await deleteExpiredFiles(env, now);
+    await backupDatabase(env, now);
   }
 }
 

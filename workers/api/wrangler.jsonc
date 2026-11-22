@@ -21,7 +21,7 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TopicDO", "AccountDO"] }],
   "d1_databases": [{ "binding": "DB", "database_name": "subetha-local", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
   "kv_namespaces": [{ "binding": "CACHE", "id": "00000000000000000000000000000000" }],
-  "r2_buckets": [{ "binding": "FILES", "bucket_name": "subetha-files-local" }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "subetha-files-local" }, { "binding": "BACKUPS", "bucket_name": "subetha-backups-local" }],
   "queues": {
     "producers": [{ "binding": "DELIVERY", "queue": "subetha-delivery-local" }],
     "consumers": [{ "queue": "subetha-delivery-local", "max_batch_size": 20, "max_retries": 5, "dead_letter_queue": "subetha-delivery-dlq-local" }]
@@ -37,7 +37,7 @@
       "durable_objects": { "bindings": [{ "name": "TOPIC", "class_name": "TopicDO" }, { "name": "ACCOUNT", "class_name": "AccountDO" }] },
       "d1_databases": [{ "binding": "DB", "database_name": "subetha-staging", "database_id": "REPLACE_WITH_STAGING_D1_ID", "migrations_dir": "migrations" }],
       "kv_namespaces": [{ "binding": "CACHE", "id": "REPLACE_WITH_STAGING_KV_ID" }],
-      "r2_buckets": [{ "binding": "FILES", "bucket_name": "subetha-files-staging" }],
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "subetha-files-staging" }, { "binding": "BACKUPS", "bucket_name": "subetha-backups-staging" }],
       "queues": {
         "producers": [{ "binding": "DELIVERY", "queue": "subetha-delivery-staging" }],
         "consumers": [{ "queue": "subetha-delivery-staging", "max_batch_size": 20, "max_retries": 5, "dead_letter_queue": "subetha-delivery-dlq-staging" }]
@@ -52,7 +52,7 @@
       "durable_objects": { "bindings": [{ "name": "TOPIC", "class_name": "TopicDO" }, { "name": "ACCOUNT", "class_name": "AccountDO" }] },
       "d1_databases": [{ "binding": "DB", "database_name": "subetha-production", "database_id": "REPLACE_WITH_PRODUCTION_D1_ID", "migrations_dir": "migrations" }],
       "kv_namespaces": [{ "binding": "CACHE", "id": "REPLACE_WITH_PRODUCTION_KV_ID" }],
-      "r2_buckets": [{ "binding": "FILES", "bucket_name": "subetha-files-production" }],
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "subetha-files-production" }, { "binding": "BACKUPS", "bucket_name": "subetha-backups-production" }],
       "queues": {
         "producers": [{ "binding": "DELIVERY", "queue": "subetha-delivery-production" }],
         "consumers": [{ "queue": "subetha-delivery-production", "max_batch_size": 20, "max_retries": 5, "dead_letter_queue": "subetha-delivery-dlq-production" }]

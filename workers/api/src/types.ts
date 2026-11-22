@@ -11,6 +11,9 @@ export interface Env {
   DB: D1Database;
   CACHE: KVNamespace;
   FILES?: R2Bucket;
+  /** Nightly D1 backups (backup.ts); a separate private bucket. */
+  BACKUPS?: R2Bucket;
+  BACKUP_RETENTION_DAYS?: string;
   TOPIC: DurableObjectNamespace<TopicDO>;
   ACCOUNT: DurableObjectNamespace<AccountDO>;
   DELIVERY?: Queue<DeliveryJob>;
