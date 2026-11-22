@@ -72,10 +72,13 @@ app.use("*", async (c, next) => {
 });
 
 // Rate limits (PLAN §9): per identity for authenticated callers, per IP for anonymous ones.
-// Provider hooks are exempt (they're signature-checked and must not be dropped).
+// Provider hooks are exempt (they're signature-checked and must not be dropped), and so are static
+// assets: one console page load is a dozen files, and serving one touches no DO, D1, or provider
+// (a 429 would cost the same Worker invocation).
 app.use("*", async (c, next) => {
   const path = new URL(c.req.url).pathname;
   if (path.startsWith("/v1/hooks/") || path === "/v1/health" || path === "/v1/status") return next();
+  if (isAssetRequest(c.req.method, path)) return next();
   const p = await principal(c);
   const limiter = p.kind === "anonymous" ? c.env.RL_ANON : c.env.RL_AUTH;
   if (limiter) {
@@ -85,6 +88,13 @@ app.use("*", async (c, next) => {
   }
   await next();
 });
+
+/** A GET the catch-all route hands to the static assets (site, docs, console, sdk.js). */
+export function isAssetRequest(method: string, path: string): boolean {
+  if (method !== "GET") return false;
+  if (path.startsWith("/v1/") || path.startsWith("/file/") || path.startsWith("/.well-known/") || path === "/mcp") return false;
+  try { return parseTopicPath(path) === null; } catch { return false; }
+}
 
 const principal = async (c: C) => {
   let p = c.get("principal");
