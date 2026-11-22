@@ -126,7 +126,7 @@ fun EdgeScreen(doorbell: DoorbellViewModel, vm: EdgeViewModel = viewModel()) {
         if (result.values.all { it }) vm.toggleBluetooth()
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Edge: sound, QR and Bluetooth", style = MaterialTheme.typography.titleLarge)
+        Text("Edge: sound, QR, Bluetooth and LAN", style = MaterialTheme.typography.titleLarge)
         if (!s.coreAvailable) {
             Text(
                 "libsubetha_core.so isn't bundled in this build. Build it with cargo-ndk into " +
@@ -138,7 +138,8 @@ fun EdgeScreen(doorbell: DoorbellViewModel, vm: EdgeViewModel = viewModel()) {
         Text(
             "Two phones, no network: one plays a message as a 16-FSK modem frame, the other listens " +
                 "and decodes it (about 50 bytes a second). With Bluetooth on, phones in range gossip " +
-                "what they hold, so a message hops from phone to phone. Same topic on all of them.",
+                "what they hold, so a message hops from phone to phone; on the same Wi-Fi, LAN does the same " +
+                "over UDP. Same topic on all of them.",
             style = MaterialTheme.typography.bodySmall,
         )
         OutlinedTextField(s.topic, vm::editTopic, Modifier.fillMaxWidth(), label = { Text("Topic") }, singleLine = true)
@@ -168,6 +169,9 @@ fun EdgeScreen(doorbell: DoorbellViewModel, vm: EdgeViewModel = viewModel()) {
                 }
                 if (needed.isEmpty() || s.bluetooth) vm.toggleBluetooth() else askBluetooth.launch(needed.toTypedArray())
             }) { Text(if (s.bluetooth) "Bluetooth off (${s.bluetoothPeers} peers)" else "Bluetooth on") }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = vm::toggleLan) { Text(if (s.lan) "Leave LAN (${s.lanPeers} peers)" else "Join LAN") }
             OutlinedButton(
                 onClick = { vm.toggleBridge(doorbell.connectedClient) },
                 enabled = s.bridging || d.connected,

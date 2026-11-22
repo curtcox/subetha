@@ -33,6 +33,10 @@ adb install app/build/outputs/apk/debug/app-debug.apk
   Phones in range exchange summaries and fetch what they're missing, so a message hops from
   phone to phone (each envelope's `hops` limits how far). Web Bluetooth pages (the Edge lab at
   `/tools/edge.html`) can connect to the phone as centrals.
+- **LAN** on the Edge tab: "Join LAN" runs `LanNode` from the Kotlin SDK, which finds phones
+  (and `subetha lan` on laptops) on the same Wi-Fi by UDP multicast beacons and gossips with them
+  over unicast UDP (spec §11.5). The app holds a `WifiManager.MulticastLock` while it's on,
+  because most phones drop multicast otherwise.
 - **Bridge to relay**: with the Doorbell tab connected, the Edge tab's bridge (`EdgeBridge`)
   puts relay messages on the topic into the gossip node, where Bluetooth peers pick them up,
   and publishes messages heard over sound or Bluetooth to the relay. Uplinks are billed to the

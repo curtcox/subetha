@@ -1,9 +1,14 @@
 package org.subetha.sample.doorbell
 
 import android.app.Application
+import android.content.Context
+import android.net.wifi.WifiManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,6 +23,7 @@ import org.subetha.SubEtha
 import org.subetha.core.AudioLink
 import org.subetha.core.Core
 import org.subetha.core.EdgeBridge
+import org.subetha.core.LanNode
 import org.subetha.core.QrReceiver
 import org.subetha.core.QrSender
 import org.subetha.core.acceptPayload
@@ -33,6 +39,8 @@ data class EdgeState(
     val sending: Boolean = false,
     val bluetooth: Boolean = false,
     val bluetoothPeers: Int = 0,
+    val lan: Boolean = false,
+    val lanPeers: Int = 0,
     val bridging: Boolean = false,
     /** The animated QR code being shown, if any. */
     val qr: QrSender? = null,
@@ -49,6 +57,8 @@ data class EdgeState(
  *   decodes them from the camera.
  * - Bluetooth: [AndroidBle] connects to nearby phones (and Web Bluetooth pages) and gossips
  *   (spec §11.3/§11.4), so messages hop between phones in range.
+ * - LAN: [LanNode] finds phones on the same Wi-Fi by UDP multicast and gossips with them
+ *   (spec §11.5), holding a multicast lock while it runs.
  * - Bridge: with the Doorbell tab connected, relay messages on the topic enter the node (and
  *   reach Bluetooth peers), and messages heard over the edge are published to the relay. One
  *   online phone is then the gateway for offline phones nearby (PLAN §3).
@@ -62,6 +72,9 @@ class EdgeViewModel(app: Application) : AndroidViewModel(app) {
     private var stopRecording: (() -> Unit)? = null
     private var ble: AndroidBle? = null
     private var bridge: EdgeBridge? = null
+    private var lan: LanNode? = null
+    private var lanLock: WifiManager.MulticastLock? = null
+    private var lanPeerJob: Job? = null
     private val qrReceiver by lazy { QrReceiver { payload -> node?.let { n -> acceptPayload(n, payload, now()).forEach { onEnvelope(it, "QR") } } } }
 
     private fun now() = (System.currentTimeMillis() / 1000).toULong()
@@ -91,7 +104,7 @@ class EdgeViewModel(app: Application) : AndroidViewModel(app) {
             put("hops", 1)
         }.toString()
         ensureNode().publish(env, now())
-        ble?.resyncAll()
+        resyncLinks()
         bridge?.uplink(env)
         return env
     }
@@ -201,7 +214,7 @@ class EdgeViewModel(app: Application) : AndroidViewModel(app) {
             viewModelScope,
             since = "10m",
             onDownlink = { env ->
-                ble?.resyncAll()
+                resyncLinks()
                 text(env)?.let { m -> _state.update { it.copy(heard = listOf("relay: $m") + it.heard.take(99)) } }
             },
             onError = { e -> _state.update { it.copy(status = "Bridge: ${e.message}") } },
@@ -217,7 +230,7 @@ class EdgeViewModel(app: Application) : AndroidViewModel(app) {
     /** A new envelope from an edge link: show it, pass it on to Bluetooth peers, and uplink it. */
     private fun onEnvelope(env: String, via: String) {
         text(env)?.let { m -> _state.update { it.copy(heard = listOf("$via: $m") + it.heard.take(99), status = "Heard a message by $via") } }
-        ble?.resyncAll() // the sender already knows; other peers may not (multi-hop)
+        resyncLinks() // the sender already knows; other peers may not (multi-hop)
         bridge?.let { b -> viewModelScope.launch { b.uplink(env) } }
     }
 
@@ -227,8 +240,55 @@ class EdgeViewModel(app: Application) : AndroidViewModel(app) {
         null
     }
 
+    /** Tells Bluetooth and LAN peers what the node holds (LAN sends off the main thread). */
+    private fun resyncLinks() {
+        ble?.resyncAll()
+        lan?.let { l -> viewModelScope.launch(Dispatchers.IO) { l.resync() } }
+    }
+
+    /** Joins or leaves the LAN (UDP multicast on the current Wi-Fi network). */
+    fun toggleLan() {
+        if (!_state.value.coreAvailable) return
+        lan?.let {
+            stopLan()
+            _state.update { s -> s.copy(lan = false, lanPeers = 0, status = "Left the LAN") }
+            return
+        }
+        val n = ensureNode()
+        viewModelScope.launch(Dispatchers.IO) {
+            // Most phones drop multicast unless an app holds this lock.
+            val wifi = getApplication<Application>().applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val lock = wifi.createMulticastLock("subetha-lan").apply { setReferenceCounted(false); acquire() }
+            try {
+                val l = LanNode(n, onMessage = { onEnvelope(it, "LAN") })
+                lan = l
+                lanLock = lock
+                lanPeerJob = viewModelScope.launch {
+                    while (isActive) {
+                        _state.update { it.copy(lanPeers = lan?.peerCount ?: 0) }
+                        delay(2_000)
+                    }
+                }
+                _state.update { it.copy(lan = true, status = "On the LAN as ${l.nodeId} (UDP ${l.unicastPort})") }
+            } catch (e: Exception) {
+                lock.release()
+                _state.update { it.copy(status = "Couldn't join the LAN: ${e.message}") }
+            }
+        }
+    }
+
+    private fun stopLan() {
+        lanPeerJob?.cancel()
+        lanPeerJob = null
+        lan?.close()
+        lan = null
+        lanLock?.let { if (it.isHeld) it.release() }
+        lanLock = null
+    }
+
     override fun onCleared() {
         stopRecording?.invoke()
+        stopLan()
         ble?.close()
         bridge?.close()
     }
