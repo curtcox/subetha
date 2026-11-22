@@ -30,6 +30,7 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    systemProperty("subetha.vectors", rootDir.resolve("../../spec/vectors").canonicalPath)
     testLogging { events("failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
 }
 

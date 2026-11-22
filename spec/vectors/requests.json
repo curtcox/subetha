@@ -1,5 +1,5 @@
 {
-  "description": "Device-signed requests (spec §8.1, subetha-req-v2), signed with signatures.devices[0] and `nonce`. `body` is UTF-8. `headers` are the headers the client sends; with the SDK convention (x-device-id, x-device-time, x-device-nonce, then the other headers lowercased and sorted, Authorization skipped) they give `signed_headers` and `signing_input`, and Ed25519 over `signing_input` gives `signature`. `host` and `path_and_query` are WHATWG URL.host and pathname + search.",
+  "description": "Device-signed requests (spec §8.1, subetha-req-v2), signed with signatures.devices[0] and `nonce`. `body` is UTF-8. `headers` are the headers the client sends; with the SDK convention (x-device-id, x-device-time, x-device-nonce, then the other headers lowercased and sorted, skipping Authorization, Host, Content-Length, Connection, Transfer-Encoding, User-Agent, Accept, Accept-Encoding) they give `signed_headers` and `signing_input`, and Ed25519 over `signing_input` gives `signature`. `host` and `path_and_query` are WHATWG URL.host and pathname + search.",
   "seed": "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
   "device_id": "dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena",
   "nonce": "nonce_0123456789abcdef",
@@ -27,7 +27,9 @@
         "X-Priority": "4",
         "X-Tags": "door,warning",
         "Content-Type": "text/plain;charset=UTF-8",
-        "Authorization": "Bearer ignored"
+        "Authorization": "Bearer ignored",
+        "User-Agent": "subetha-test/1",
+        "Accept": "application/json"
       },
       "time": 1763750001,
       "host": "subetha.org",

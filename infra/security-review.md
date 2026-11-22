@@ -19,17 +19,10 @@ endpoints, and authenticated webhooks and devices. Regression tests are in
 | 8 | Low | Web Push endpoints skipped the webhook host checks and followed redirects. | Same host checks as webhooks, and `redirect: "manual"`. |
 | 10 | Low | Repeating an `Idempotency-Key` was free and not rate limited. | Charged as an API request, and rate limited when anonymous. |
 | 11 | Low | `frozen_since` was set by the rent cron but never read. | A frozen account's endpoints drop out of delivery plans until it pays again. |
+| 12 | Medium | Device request signatures (`subetha-req-v1`) didn't cover content or routing headers (`X-Title`, `X-Priority`, `X-Route-Mode`, `X-Max-Cost`, `X-Allow`/`X-Deny`, `Idempotency-Key`, `Content-Type`, …). Anyone relaying a captured request could change its content, cost, and routing within the 5-minute single-use window. | `subetha-req-v2` (spec §8.1) signs every header named in `X-Device-Signed-Headers`. The relay rejects a signed request that carries a covered header (every header the ntfy parser reads, plus `Content-Type` and `Idempotency-Key`) without signing it. A test checks that every header `ntfy.ts` reads is covered. All SDKs (TS, Rust core, Kotlin, Swift, Dart, React Native typings) sign v2 and pass the shared vectors in `spec/vectors/requests.json`. v1 is still accepted only for requests with no covered header. |
 
 ## Open
 
-- **Device request signatures don't cover content or routing headers** (`X-Title`,
-  `X-Priority`, `X-Tags`, `X-Route-Mode`, `X-Max-Cost`, `X-Allow`/`X-Deny`, `Idempotency-Key`,
-  `Content-Type`). An intermediary relaying a captured request could change cost and routing
-  within its 5-minute, single-use window. Fixing this changes the signing input (`subetha-req-v2`)
-  in the relay and every SDK (TS, Python, Rust core, Swift, Kotlin, Dart), with a transition
-  period that accepts both versions. Signing the JSON body (`POST /`) doesn't avoid it, because
-  routing headers override the envelope's `route` (`ntfy.ts`). Query-string forms (`?title=…`)
-  are covered, since the path and query are signed.
 - **The verification-code throttle per destination uses KV**, which is eventually consistent, so
   a burst can send more than one code to the same number within the hour. The per-account
   pending limit and the prepaid charge still bound the cost. A Durable Object counter would make

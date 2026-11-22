@@ -2207,6 +2207,75 @@ public func FfiConverterTypeEnrollmentProofRecord_lower(_ value: EnrollmentProof
 }
 
 
+/**
+ * One HTTP header (name and value).
+ */
+public struct HeaderRecord {
+    public var name: String
+    public var value: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, value: String) {
+        self.name = name
+        self.value = value
+    }
+}
+
+
+
+extension HeaderRecord: Equatable, Hashable {
+    public static func ==(lhs: HeaderRecord, rhs: HeaderRecord) -> Bool {
+        if lhs.name != rhs.name {
+            return false
+        }
+        if lhs.value != rhs.value {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(name)
+        hasher.combine(value)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHeaderRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HeaderRecord {
+        return
+            try HeaderRecord(
+                name: FfiConverterString.read(from: &buf), 
+                value: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: HeaderRecord, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.value, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHeaderRecord_lift(_ buf: RustBuffer) throws -> HeaderRecord {
+    return try FfiConverterTypeHeaderRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHeaderRecord_lower(_ value: HeaderRecord) -> RustBuffer {
+    return FfiConverterTypeHeaderRecord.lower(value)
+}
+
+
 public struct LanBeaconRecord {
     public var node: String
     public var port: UInt16
@@ -2506,21 +2575,23 @@ public func FfiConverterTypeOutboxItemRecord_lower(_ value: OutboxItemRecord) ->
 
 
 /**
- * Header values for a device-signed HTTP request (`X-Device-Id`, `X-Device-Time`,
- * `X-Device-Nonce`, `X-Device-Signature`).
+ * Header values for a device-signed HTTP request (spec §8.1): `X-Device-Id`, `X-Device-Time`,
+ * `X-Device-Nonce`, `X-Device-Signed-Headers`, `X-Device-Signature`.
  */
 public struct SignedRequestRecord {
     public var deviceId: String
     public var time: UInt64
     public var nonce: String
+    public var signedHeaders: String
     public var signature: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(deviceId: String, time: UInt64, nonce: String, signature: String) {
+    public init(deviceId: String, time: UInt64, nonce: String, signedHeaders: String, signature: String) {
         self.deviceId = deviceId
         self.time = time
         self.nonce = nonce
+        self.signedHeaders = signedHeaders
         self.signature = signature
     }
 }
@@ -2538,6 +2609,9 @@ extension SignedRequestRecord: Equatable, Hashable {
         if lhs.nonce != rhs.nonce {
             return false
         }
+        if lhs.signedHeaders != rhs.signedHeaders {
+            return false
+        }
         if lhs.signature != rhs.signature {
             return false
         }
@@ -2548,6 +2622,7 @@ extension SignedRequestRecord: Equatable, Hashable {
         hasher.combine(deviceId)
         hasher.combine(time)
         hasher.combine(nonce)
+        hasher.combine(signedHeaders)
         hasher.combine(signature)
     }
 }
@@ -2563,6 +2638,7 @@ public struct FfiConverterTypeSignedRequestRecord: FfiConverterRustBuffer {
                 deviceId: FfiConverterString.read(from: &buf), 
                 time: FfiConverterUInt64.read(from: &buf), 
                 nonce: FfiConverterString.read(from: &buf), 
+                signedHeaders: FfiConverterString.read(from: &buf), 
                 signature: FfiConverterString.read(from: &buf)
         )
     }
@@ -2571,6 +2647,7 @@ public struct FfiConverterTypeSignedRequestRecord: FfiConverterRustBuffer {
         FfiConverterString.write(value.deviceId, into: &buf)
         FfiConverterUInt64.write(value.time, into: &buf)
         FfiConverterString.write(value.nonce, into: &buf)
+        FfiConverterString.write(value.signedHeaders, into: &buf)
         FfiConverterString.write(value.signature, into: &buf)
     }
 }
@@ -2846,6 +2923,31 @@ fileprivate struct FfiConverterSequenceData: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeHeaderRecord: FfiConverterRustBuffer {
+    typealias SwiftType = [HeaderRecord]
+
+    public static func write(_ value: [HeaderRecord], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeHeaderRecord.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [HeaderRecord] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [HeaderRecord]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeHeaderRecord.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeOutboxDroppedRecord: FfiConverterRustBuffer {
     typealias SwiftType = [OutboxDroppedRecord]
 
@@ -3075,20 +3177,19 @@ public func newRequestNonce() -> String {
 })
 }
 /**
- * The string a device signs for an HTTP request (see workers/api/src/devices.ts):
- * `subetha-req-v1\n METHOD \n host \n path?query \n time \n nonce \n hex(sha256(body))`
- * (no spaces). `host` is what WHATWG `URL.host` gives: lowercase, with `:port` only when the
- * port is not the scheme's default.
+ * The string a device signs for an HTTP request (spec §8.1, `subetha-req-v2`):
+ * `subetha-req-v2\nMETHOD\nhost\npath?query\nhex(sha256(body))`, then `\nname:value` for each
+ * of `signed_headers`, in order. `host` is what WHATWG `URL.host` gives: lowercase, with
+ * `:port` only when the port is not the scheme's default.
  */
-public func requestSigningInput(method: String, host: String, pathAndQuery: String, time: UInt64, nonce: String, body: Data) -> String {
+public func requestSigningInput(method: String, host: String, pathAndQuery: String, body: Data, signedHeaders: [HeaderRecord]) -> String {
     return try!  FfiConverterString.lift(try! rustCall() {
     uniffi_subetha_core_fn_func_request_signing_input(
         FfiConverterString.lower(method),
         FfiConverterString.lower(host),
         FfiConverterString.lower(pathAndQuery),
-        FfiConverterUInt64.lower(time),
-        FfiConverterString.lower(nonce),
-        FfiConverterData.lower(body),$0
+        FfiConverterData.lower(body),
+        FfiConverterSequenceTypeHeaderRecord.lower(signedHeaders),$0
     )
 })
 }
@@ -3115,10 +3216,12 @@ public func signEnvelopeJson(envelopeJson: String, seed: Data)throws  -> String 
 })
 }
 /**
- * Signs an HTTP request. `path_and_query` is the URL path plus `?query` if any. `nonce`
- * `None` draws a fresh one ([`new_request_nonce`]); relays accept each nonce once.
+ * Signs an HTTP request. `path_and_query` is the URL path plus `?query` if any. `headers` are
+ * the headers the request will carry (content and routing headers must be signed;
+ * Authorization, User-Agent and the like are skipped). `nonce` `None` draws a fresh one ([`new_request_nonce`]); relays
+ * accept each nonce once.
  */
-public func signRequest(seed: Data, method: String, host: String, pathAndQuery: String, time: UInt64, nonce: String?, body: Data)throws  -> SignedRequestRecord {
+public func signRequest(seed: Data, method: String, host: String, pathAndQuery: String, time: UInt64, nonce: String?, body: Data, headers: [HeaderRecord])throws  -> SignedRequestRecord {
     return try  FfiConverterTypeSignedRequestRecord.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
     uniffi_subetha_core_fn_func_sign_request(
         FfiConverterData.lower(seed),
@@ -3127,7 +3230,8 @@ public func signRequest(seed: Data, method: String, host: String, pathAndQuery: 
         FfiConverterString.lower(pathAndQuery),
         FfiConverterUInt64.lower(time),
         FfiConverterOptionString.lower(nonce),
-        FfiConverterData.lower(body),$0
+        FfiConverterData.lower(body),
+        FfiConverterSequenceTypeHeaderRecord.lower(headers),$0
     )
 })
 }
@@ -3224,7 +3328,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_subetha_core_checksum_func_new_request_nonce() != 15123) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_subetha_core_checksum_func_request_signing_input() != 42106) {
+    if (uniffi_subetha_core_checksum_func_request_signing_input() != 28779) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_subetha_core_checksum_func_sign_bytes() != 40005) {
@@ -3233,7 +3337,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_subetha_core_checksum_func_sign_envelope_json() != 16092) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_subetha_core_checksum_func_sign_request() != 61337) {
+    if (uniffi_subetha_core_checksum_func_sign_request() != 14068) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_subetha_core_checksum_func_validate_envelope_json() != 42612) {

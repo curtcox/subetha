@@ -64,9 +64,9 @@ public class SubEtha @JvmOverloads constructor(
         val h = LinkedHashMap<String, String>()
         h["User-Agent"] = USER_AGENT
         h["Accept"] = "application/json"
-        if (signRequests) h.putAll(signRequest(deviceSigner!!, method, url, body ?: ByteArray(0), clock()))
-        else if (token != null) h["Authorization"] = "Bearer $token"
         h.putAll(extra)
+        if (signRequests) h.putAll(signRequest(deviceSigner!!, method, url, body ?: ByteArray(0), clock(), headers = h.toMap()))
+        else if (token != null) h["Authorization"] = "Bearer $token"
         return h
     }
 

@@ -60,13 +60,12 @@ class SubEtha {
   // ---------------------------------------------------------------- HTTP
 
   Future<Map<String, String>> _headers(String method, Uri url, List<int>? body, [Map<String, String> extra = const {}]) async {
-    final h = <String, String>{'User-Agent': 'subetha-dart/$version', 'Accept': 'application/json'};
+    final h = <String, String>{'User-Agent': 'subetha-dart/$version', 'Accept': 'application/json', ...extra};
     if (signRequests) {
-      h.addAll(await RequestSigning.headers(deviceSigner!, method, url, body ?? const [], clock()));
+      h.addAll(await RequestSigning.headers(deviceSigner!, method, url, body ?? const [], clock(), headers: Map.of(h)));
     } else if (token != null) {
       h['Authorization'] = 'Bearer $token';
     }
-    h.addAll(extra);
     return h;
   }
 

@@ -60,14 +60,15 @@ public final class SubEtha: @unchecked Sendable {
         r.timeoutInterval = streaming ? 90 : 30
         r.setValue("subetha-swift/\(SubEtha.version)", forHTTPHeaderField: "User-Agent")
         r.setValue("application/json", forHTTPHeaderField: "Accept")
+        for (k, v) in headers { r.setValue(v, forHTTPHeaderField: k) }
         if signRequests, let signer = deviceSigner {
-            for (k, v) in try RequestSigning.headers(signer: signer, method: method, url: url, body: body ?? Data(), time: clock()) {
+            let sent = r.allHTTPHeaderFields ?? [:]
+            for (k, v) in try RequestSigning.headers(signer: signer, method: method, url: url, body: body ?? Data(), time: clock(), headers: sent) {
                 r.setValue(v, forHTTPHeaderField: k)
             }
         } else if let token {
             r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        for (k, v) in headers { r.setValue(v, forHTTPHeaderField: k) }
         return r
     }
 

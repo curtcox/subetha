@@ -47,7 +47,7 @@ val client = SubEtha(deviceSigner = signer)
 val code = client.startEnrollment(name = "Pixel 9") // show code.userCode / open code.verificationUriComplete
 client.awaitEnrollment(code)                        // after the user approves in the console
 
-val device = SubEtha(deviceSigner = signer, signRequests = true) // X-Device-Id/Time/Nonce/Signature, no token
+val device = SubEtha(deviceSigner = signer, signRequests = true) // X-Device-* headers (spec §8.1), no token
 ```
 
 `JdkDeviceSigner` uses the JDK's Ed25519 (deterministic, byte-identical to the core) and needs

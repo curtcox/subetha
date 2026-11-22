@@ -76,16 +76,24 @@ export function parseSignedHeaders(value: string): string[] | string {
 }
 
 /**
+ * Headers the SDKs don't sign: credentials, and headers HTTP stacks set or rewrite themselves.
+ * None of them is covered.
+ */
+export const UNSIGNED_BY_CONVENTION: ReadonlySet<string> = new Set([
+  "authorization", "host", "content-length", "connection", "transfer-encoding", "user-agent", "accept", "accept-encoding",
+]);
+
+/**
  * The SDKs' convention for which headers to sign and in what order: X-Device-Id, -Time, -Nonce,
- * then every other header the client sets (lowercased, sorted), except Authorization and the
- * signature headers. Header-name case and order don't matter on the wire; this just makes
- * signatures reproducible across SDKs.
+ * then every other header the client sets (lowercased, sorted), except UNSIGNED_BY_CONVENTION
+ * and other x-device-* headers. Header-name case and order don't matter on the wire; this just
+ * makes signatures reproducible across SDKs.
  */
 export function headersToSign(deviceId: string, time: number, nonce: string, headers: Record<string, string> | Iterable<[string, string]>): [string, string][] {
   const rest = new Map<string, string>();
   for (const [k, v] of Symbol.iterator in Object(headers) ? (headers as Iterable<[string, string]>) : Object.entries(headers)) {
     const n = k.toLowerCase();
-    if (n === "authorization" || n.startsWith("x-device-")) continue;
+    if (UNSIGNED_BY_CONVENTION.has(n) || n.startsWith("x-device-")) continue;
     rest.set(n, v);
   }
   return [
@@ -103,7 +111,7 @@ export const newRequestNonce = () => base64urlEncode(crypto.getRandomValues(new 
 
 /**
  * Signs a request (spec §8.1, `subetha-req-v2`). `headers` are the headers the request will
- * carry (Authorization is skipped); send them unchanged, plus the returned X-Device-* headers.
+ * carry (Authorization, User-Agent and the like are skipped); send them unchanged, plus the returned X-Device-* headers.
  */
 export async function signRequestV2(
   key: DeviceKey, method: string, url: string, body: Uint8Array, headers: Record<string, string> | Iterable<[string, string]> = {},

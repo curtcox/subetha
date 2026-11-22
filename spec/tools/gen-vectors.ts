@@ -85,7 +85,7 @@ write("signatures.json", {
   const NONCE = "nonce_0123456789abcdef";
   const reqCases: { name: string; method: string; url: string; body: string; headers: Record<string, string>; time: number }[] = [
     { name: "GET poll, no content headers", method: "GET", url: "https://subetha.org/@alice/doorbell/json?poll=1&since=all", body: "", headers: {}, time: 1763750000 },
-    { name: "publish with ntfy headers", method: "post", url: "https://subetha.org/@alice/doorbell", body: "Opened", headers: { "X-Title": "Front door", "X-Priority": "4", "X-Tags": "door,warning", "Content-Type": "text/plain;charset=UTF-8", Authorization: "Bearer ignored" }, time: 1763750001 },
+    { name: "publish with ntfy headers", method: "post", url: "https://subetha.org/@alice/doorbell", body: "Opened", headers: { "X-Title": "Front door", "X-Priority": "4", "X-Tags": "door,warning", "Content-Type": "text/plain;charset=UTF-8", Authorization: "Bearer ignored", "User-Agent": "subetha-test/1", Accept: "application/json" }, time: 1763750001 },
     { name: "JSON publish, port and routing", method: "POST", url: "http://localhost:8787/", body: "{\"topic\":\"@a/b\",\"message\":\"héllo 🚪\"}", headers: { "content-type": "application/json", "idempotency-key": "k-1", "x-route-mode": "cheap", "x-max-cost": "  0.002\t" }, time: 1763750002 },
     { name: "percent-encoded path", method: "PUT", url: "https://staging.subetha.org:443/@a/b%20c?x=%2F", body: "", headers: { "X-Dry-Run": "1" }, time: 1763750003 },
   ];
@@ -106,7 +106,7 @@ write("signatures.json", {
     });
   }
   write("requests.json", {
-    description: "Device-signed requests (spec §8.1, subetha-req-v2), signed with signatures.devices[0] and `nonce`. `body` is UTF-8. `headers` are the headers the client sends; with the SDK convention (x-device-id, x-device-time, x-device-nonce, then the other headers lowercased and sorted, Authorization skipped) they give `signed_headers` and `signing_input`, and Ed25519 over `signing_input` gives `signature`. `host` and `path_and_query` are WHATWG URL.host and pathname + search.",
+    description: "Device-signed requests (spec §8.1, subetha-req-v2), signed with signatures.devices[0] and `nonce`. `body` is UTF-8. `headers` are the headers the client sends; with the SDK convention (x-device-id, x-device-time, x-device-nonce, then the other headers lowercased and sorted, skipping Authorization, Host, Content-Length, Connection, Transfer-Encoding, User-Agent, Accept, Accept-Encoding) they give `signed_headers` and `signing_input`, and Ed25519 over `signing_input` gives `signature`. `host` and `path_and_query` are WHATWG URL.host and pathname + search.",
     seed: seeds[0],
     device_id: key.deviceId,
     nonce: NONCE,

@@ -20,19 +20,23 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 
 // RFC 8032 test 1 seed; spec/vectors/signatures.json devices[0].
 const val SEED = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
 const val DEVICE_ID = "dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena"
-// Pinned in sdk/core/src/ffi.rs (request_signing test).
+// spec/vectors/requests.json nonce; ENROLL_SIG is pinned in sdk/core/src/ffi.rs.
 const val NONCE = "nonce_0123456789abcdef"
-const val REQ_SIG = "hXyR-UJPvVOY_8KJZW1IiAn00acCxmcxs6lMO04YnXBqVMuI4N1oMK5blibRcwE2F-Pb941G_8ik9al432kHAA"
 const val ENROLL_SIG = "ZTDaaJXLPfCowo3I7bl8k3JvIl5nYldqr4735NNFrw4bGcu-Tl2p2W7jYXZH8NuORBcsaVO-5Em3aahKD1eqDQ"
 
 class SubEthaTest {
     private fun obj(s: String): JsonObject = json.parseToJsonElement(s).jsonObject
+
+    private fun vectors(name: String): JsonObject =
+        json.parseToJsonElement(java.io.File(System.getProperty("subetha.vectors"), name).readText()).jsonObject
 
     @Test
     fun publishesJsonWithAuthIdempotencyAndRoute() = runBlocking {
@@ -211,15 +215,25 @@ class SubEthaTest {
     fun jdkSignerMatchesTheCore() {
         val signer = JdkDeviceSigner(Encoding.hexDecode(SEED))
         assertEquals(DEVICE_ID, signer.deviceId)
-        val h = signRequest(signer, "post", "https://x.test/v1/ack?x=1", "{}".toByteArray(), 1763750000, NONCE)
-        assertEquals(mapOf("X-Device-Id" to DEVICE_ID, "X-Device-Time" to "1763750000", "X-Device-Nonce" to NONCE, "X-Device-Signature" to REQ_SIG), h)
         assertEquals(ENROLL_SIG, enrollmentProof(signer, 1763750000).proof)
+        val v = vectors("requests.json")
+        assertEquals(NONCE, v["nonce"]!!.jsonPrimitive.content)
+        for (c in v["cases"]!!.jsonArray.map { it.jsonObject }) {
+            val str = { k: String -> c[k]!!.jsonPrimitive.content }
+            val headers = c["headers"]!!.jsonObject.mapValues { it.value.jsonPrimitive.content }
+            val body = str("body").toByteArray()
+            val time = c["time"]!!.jsonPrimitive.long
+            val h = signRequest(signer, str("method"), str("url"), body, time, NONCE, headers)
+            assertEquals(str("signed_headers"), h["X-Device-Signed-Headers"], str("name"))
+            assertEquals(str("signature"), h["X-Device-Signature"], str("name"))
+            assertEquals(str("signing_input"), requestSigningInput(str("method"), str("url"), body, headersToSign(DEVICE_ID, time, NONCE, headers)), str("name"))
+        }
         // Host as WHATWG URL.host: lowercase, default ports dropped, others kept.
         assertEquals(
-            "subetha-req-v1\nGET\nx.test\n/\n5\n$NONCE\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-            requestSigningInput("GET", "https://X.test:443", 5, NONCE, ByteArray(0)),
+            "subetha-req-v2\nGET\nx.test\n/\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            requestSigningInput("GET", "https://X.test:443", ByteArray(0), emptyList()),
         )
-        assertTrue(requestSigningInput("GET", "http://127.0.0.1:8080/a%20b?q=1", 5, NONCE, ByteArray(0)).startsWith("subetha-req-v1\nGET\n127.0.0.1:8080\n/a%20b?q=1\n"))
+        assertTrue(requestSigningInput("GET", "http://127.0.0.1:8080/a%20b?q=1", ByteArray(0), emptyList()).startsWith("subetha-req-v2\nGET\n127.0.0.1:8080\n/a%20b?q=1\n"))
         val fresh = signRequest(signer, "GET", "https://x.test/", ByteArray(0), 1)
         assertEquals(22, fresh.getValue("X-Device-Nonce").length)
         assertTrue(fresh.getValue("X-Device-Nonce") != signRequest(signer, "GET", "https://x.test/", ByteArray(0), 1).getValue("X-Device-Nonce"))
@@ -241,8 +255,11 @@ class SubEthaTest {
             assertEquals("1763750000", r.headers["x-device-time"])
             val nonce = r.headers["x-device-nonce"]!!
             assertTrue(Regex("^[A-Za-z0-9_-]{16,64}$").matches(nonce))
-            // Verify the way the relay does: the public key comes from the device id.
-            val input = requestSigningInput("POST", s.url + r.pathAndQuery, 1763750000, nonce, r.body.toByteArray())
+            // Verify the way the relay does: the public key comes from the device id, and every
+            // listed header is signed with its value as received.
+            val listed = r.headers["x-device-signed-headers"]!!.split(",")
+            assertEquals(listOf("x-device-id", "x-device-time", "x-device-nonce", "content-type"), listed)
+            val input = requestSigningInput("POST", s.url + r.pathAndQuery, r.body.toByteArray(), listed.map { it to r.headers[it]!! })
             val spki = Encoding.hexDecode("302a300506032b6570032100") + signer.publicKey
             val ok = Signature.getInstance("Ed25519").run {
                 initVerify(KeyFactory.getInstance("Ed25519").generatePublic(X509EncodedKeySpec(spki)))

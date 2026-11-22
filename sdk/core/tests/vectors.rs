@@ -13,6 +13,7 @@ use subetha_core::random::SplitMix64;
 use subetha_core::crc::{crc16_ccitt, crc32};
 use subetha_core::envelope::validate_envelope;
 use subetha_core::sign::{sign_map, signing_input, verify_map, DeviceKey};
+use subetha_core::request::{headers_to_sign, sign_request, signing_input_v2};
 use subetha_core::topic::is_topic;
 use subetha_core::Envelope;
 
@@ -45,7 +46,7 @@ fn every_vector_file_is_covered() {
         .filter(|n| n.ends_with(".json"))
         .collect();
     names.sort();
-    assert_eq!(names, ["canonical.json", "e2ee.json", "edge.json", "signatures.json", "topics.json"], "new vector file: add checks for it");
+    assert_eq!(names, ["canonical.json", "e2ee.json", "edge.json", "requests.json", "signatures.json", "topics.json"], "new vector file: add checks for it");
 }
 
 #[test]
@@ -284,5 +285,23 @@ fn edge_ble_and_gossip() {
         let parsed: GossipMessage = serde_json::from_value(m.clone()).unwrap();
         let back = serde_json::to_value(&parsed).unwrap();
         assert_eq!(&back, m);
+    }
+}
+
+#[test]
+fn request_signing_vectors() {
+    let v = load("requests.json");
+    let key = DeviceKey::from_seed(&seed(&v["seed"]));
+    assert_eq!(key.device_id(), v["device_id"].as_str().unwrap());
+    let nonce = v["nonce"].as_str().unwrap();
+    for c in arr(&v, "cases") {
+        let name = c["name"].as_str().unwrap();
+        let headers: Vec<(String, String)> = obj(&c["headers"]).iter().map(|(k, x)| (k.clone(), x.as_str().unwrap().to_owned())).collect();
+        let (method, host, pq, body, time) = (c["method"].as_str().unwrap(), c["host"].as_str().unwrap(), c["path_and_query"].as_str().unwrap(), c["body"].as_str().unwrap().as_bytes(), c["time"].as_u64().unwrap());
+        let signed = headers_to_sign(key.device_id(), time, nonce, &headers);
+        assert_eq!(signing_input_v2(method, host, pq, body, &signed), c["signing_input"].as_str().unwrap(), "{name}");
+        let r = sign_request(&key, method, host, pq, time, nonce, body, &headers).unwrap();
+        assert_eq!(r.signed_headers, c["signed_headers"].as_str().unwrap(), "{name}");
+        assert_eq!(r.signature, c["signature"].as_str().unwrap(), "{name}");
     }
 }

@@ -7,9 +7,8 @@ import SubEthaCore
 /// Package.swift only when it exists).
 final class CoreTests: XCTestCase {
     let seed = Encoding.hexDecode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")!
-    // Pinned in sdk/core/src/ffi.rs (request_signing test).
+    // spec/vectors/requests.json nonce; enrollSig is pinned in sdk/core/src/ffi.rs.
     let nonce = "nonce_0123456789abcdef"
-    let reqSig = "hXyR-UJPvVOY_8KJZW1IiAn00acCxmcxs6lMO04YnXBqVMuI4N1oMK5blibRcwE2F-Pb941G_8ik9al432kHAA"
     let enrollSig = "ZTDaaJXLPfCowo3I7bl8k3JvIl5nYldqr4735NNFrw4bGcu-Tl2p2W7jYXZH8NuORBcsaVO-5Em3aahKD1eqDQ"
 
     func vectors(_ name: String) throws -> [String: JSONValue] {
@@ -22,9 +21,22 @@ final class CoreTests: XCTestCase {
     func testRequestSignaturesMatchTheCore() throws {
         let s = try CoreDeviceSigner(seed: seed)
         XCTAssertEqual(s.deviceId, "dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena")
-        let h = try RequestSigning.headers(signer: s, method: "POST", url: URL(string: "https://x.test/v1/ack?x=1")!, body: Data("{}".utf8), time: 1763750000, nonce: nonce)
-        XCTAssertEqual(h["X-Device-Signature"], reqSig)
-        XCTAssertEqual(h["X-Device-Nonce"], nonce)
+        let v = try vectors("requests.json")
+        XCTAssertEqual(v["nonce"]!.stringValue!, nonce)
+        for c in v["cases"]!.arrayValue! {
+            let name = c["name"]!.stringValue!
+            var headers: [String: String] = [:]
+            for (k, x) in c["headers"]!.objectValue! { headers[k] = x.stringValue! }
+            let body = Data(c["body"]!.stringValue!.utf8)
+            let time = Int64(c["time"]!.intValue!)
+            let url = URL(string: c["url"]!.stringValue!)!
+            let h = try RequestSigning.headers(signer: s, method: c["method"]!.stringValue!, url: url, body: body, time: time, nonce: nonce, headers: headers)
+            XCTAssertEqual(h["X-Device-Nonce"], nonce)
+            XCTAssertEqual(h["X-Device-Signed-Headers"], c["signed_headers"]!.stringValue!, name)
+            XCTAssertEqual(h["X-Device-Signature"], c["signature"]!.stringValue!, name)
+            let signed = RequestSigning.headersToSign(deviceId: s.deviceId, time: time, nonce: nonce, headers: headers)
+            XCTAssertEqual(RequestSigning.input(method: c["method"]!.stringValue!, url: url, body: body, signedHeaders: signed), c["signing_input"]!.stringValue!, name)
+        }
         XCTAssertEqual(try RequestSigning.enrollmentProof(signer: s, time: 1763750000).proof, enrollSig)
         let g = CoreDeviceSigner.generate()
         XCTAssertEqual(try CoreDeviceSigner(seed: g.seed).deviceId, g.deviceId)

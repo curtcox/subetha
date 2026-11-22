@@ -81,25 +81,54 @@ class RequestSigning {
     return Encoding.base64url(List<int>.generate(16, (_) => r.nextInt(256)));
   }
 
-  /// `subetha-req-v1\nMETHOD\nhost\npath?query\ntime\nnonce\nhex(sha256(body))`.
-  static Future<String> input(String method, Uri url, int time, String nonce, List<int> body) async {
+  /// Headers the SDKs don't sign (spec §8.1): credentials, and headers HTTP stacks set or rewrite.
+  static const unsignedByConvention = {
+    'authorization', 'host', 'content-length', 'connection', 'transfer-encoding', 'user-agent', 'accept', 'accept-encoding',
+  };
+
+  /// The signing input (spec §8.1, `subetha-req-v2`):
+  /// `subetha-req-v2\nMETHOD\nhost\npath?query\nhex(sha256(body))`, then `\nname:value` for each
+  /// of [signedHeaders] in order (values trimmed of spaces and tabs).
+  static Future<String> input(String method, Uri url, List<int> body, List<(String, String)> signedHeaders) async {
     final path = url.path.isEmpty ? '/' : url.path;
     final query = url.hasQuery ? '?${url.query}' : '';
     final digest = Encoding.hex((await Sha256().hash(body)).bytes);
-    return 'subetha-req-v1\n${method.toUpperCase()}\n${host(url)}\n$path$query\n$time\n$nonce\n$digest';
+    final sb = StringBuffer('subetha-req-v2\n${method.toUpperCase()}\n${host(url)}\n$path$query\n$digest');
+    for (final (name, value) in signedHeaders) {
+      sb.write('\n${name.toLowerCase()}:${value.replaceAll(RegExp(r'^[ \t]+|[ \t]+$'), '')}');
+    }
+    return sb.toString();
   }
 
-  /// `X-Device-Id`, `X-Device-Time`, `X-Device-Nonce`, `X-Device-Signature`. Relays accept each
-  /// nonce once, so every request (and retry) is signed afresh.
+  /// The SDK convention for what to sign: X-Device-Id, -Time, -Nonce, then every other header
+  /// the request carries, lowercased and sorted, except [unsignedByConvention] and `x-device-*`.
+  static List<(String, String)> headersToSign(String deviceId, int time, String nonce, Map<String, String> headers) {
+    final rest = <String, String>{};
+    headers.forEach((k, v) {
+      final n = k.toLowerCase();
+      if (unsignedByConvention.contains(n) || n.startsWith('x-device-')) return;
+      rest[n] = v;
+    });
+    final names = rest.keys.toList()..sort();
+    return [('x-device-id', deviceId), ('x-device-time', '$time'), ('x-device-nonce', nonce), for (final n in names) (n, rest[n]!)];
+  }
+
+  /// `X-Device-Id`, `X-Device-Time`, `X-Device-Nonce`, `X-Device-Signed-Headers`,
+  /// `X-Device-Signature`. [headers] are the headers the request will carry (content and
+  /// routing headers must be signed). Relays accept each nonce once, so every request (and
+  /// retry) is signed afresh.
   static Future<Map<String, String>> headers(DeviceSigner signer, String method, Uri url, List<int> body, int time,
-      {String? nonce}) async {
+      {String? nonce, Map<String, String> headers = const {}}) async {
     final n = nonce ?? newNonce();
     if (!RegExp(r'^[A-Za-z0-9_-]{16,64}$').hasMatch(n)) throw ArgumentError('nonce must be 16-64 base64url characters');
-    final sig = await signer.sign(utf8.encode(await input(method, url, time, n, body)));
+    final signed = headersToSign(signer.deviceId, time, n, headers);
+    if (signed.length > 32) throw ArgumentError('at most 32 signed headers');
+    final sig = await signer.sign(utf8.encode(await input(method, url, body, signed)));
     return {
       'X-Device-Id': signer.deviceId,
       'X-Device-Time': '$time',
       'X-Device-Nonce': n,
+      'X-Device-Signed-Headers': signed.map((h) => h.$1).join(','),
       'X-Device-Signature': Encoding.base64url(sig),
     };
   }

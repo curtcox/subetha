@@ -25,6 +25,7 @@ import org.subetha.TopicKey
 import kotlinx.serialization.json.JsonPrimitive
 import org.subetha.core.ffi.FfiException
 import org.subetha.core.ffi.canonicalizeJson
+import org.subetha.core.ffi.HeaderRecord
 import org.subetha.core.ffi.requestSigningInput
 import org.subetha.core.ffi.validateEnvelopeJson
 import org.subetha.signRequest
@@ -93,14 +94,17 @@ class CoreTest {
         val jdk = JdkDeviceSigner(seed)
         assertEquals(jdk.deviceId, core.deviceId)
         val nonce = "nonce_0123456789abcdef"
-        val a = signRequest(core, "POST", "https://x.test/v1/ack?x=1", "{}".toByteArray(), 1763750000, nonce)
-        val b = signRequest(jdk, "POST", "https://x.test/v1/ack?x=1", "{}".toByteArray(), 1763750000, nonce)
+        val headers = mapOf("X-Title" to "Door", "Content-Type" to "text/plain")
+        val a = signRequest(core, "POST", "https://x.test/v1/ack?x=1", "{}".toByteArray(), 1763750000, nonce, headers)
+        val b = signRequest(jdk, "POST", "https://x.test/v1/ack?x=1", "{}".toByteArray(), 1763750000, nonce, headers)
         assertEquals(b, a)
+        val signed = org.subetha.headersToSign(core.deviceId, 1763750000, nonce, headers)
         assertEquals(
-            org.subetha.requestSigningInput("POST", "https://x.test/v1/ack?x=1", 1763750000, nonce, "{}".toByteArray()),
-            requestSigningInput("POST", "x.test", "/v1/ack?x=1", 1763750000uL, nonce, "{}".toByteArray()),
+            org.subetha.requestSigningInput("POST", "https://x.test/v1/ack?x=1", "{}".toByteArray(), signed),
+            requestSigningInput("POST", "x.test", "/v1/ack?x=1", "{}".toByteArray(), signed.map { HeaderRecord(it.first, it.second) }),
         )
-        val r = org.subetha.core.ffi.signRequest(seed, "POST", "x.test", "/v1/ack?x=1", 1763750000uL, nonce, "{}".toByteArray())
+        val r = org.subetha.core.ffi.signRequest(seed, "POST", "x.test", "/v1/ack?x=1", 1763750000uL, nonce, "{}".toByteArray(), headers.map { HeaderRecord(it.key, it.value) })
+        assertEquals(a["X-Device-Signed-Headers"], r.signedHeaders)
         assertEquals(a["X-Device-Signature"], r.signature)
         assertEquals(22, org.subetha.core.ffi.newRequestNonce().length)
         val g = CoreDeviceSigner.generate()

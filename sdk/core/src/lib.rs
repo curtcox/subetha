@@ -1,7 +1,8 @@
 //! SubEtha core SDK.
 //!
 //! Protocol (spec v0, `spec/README.md`):
-//! [`encoding`], [`canonical`], [`topic`], [`ulid`], [`envelope`], [`sign`], [`e2ee`], [`dedupe`].
+//! [`encoding`], [`canonical`], [`topic`], [`ulid`], [`envelope`], [`sign`], [`e2ee`], [`dedupe`],
+//! [`request`] (device-signed HTTP requests).
 //!
 //! Delivery: [`store`] (store-and-forward outbox) and [`routing`] (delivery plans and policy
 //! intersection).
@@ -29,6 +30,7 @@ pub mod ffi;
 pub mod ffi_edge;
 pub mod ffi_store;
 pub mod random;
+pub mod request;
 pub mod routing;
 pub mod sign;
 pub mod store;

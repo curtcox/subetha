@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -9,9 +10,8 @@ import 'package:test/test.dart';
 // RFC 8032 test 1 seed; spec/vectors/signatures.json devices[0].
 const seedHex = '9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60';
 const deviceId = 'dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena';
-// Pinned in sdk/core/src/ffi.rs (request_signing test).
+// spec/vectors/requests.json nonce; enrollSig is pinned in sdk/core/src/ffi.rs.
 const nonce = 'nonce_0123456789abcdef';
-const reqSig = 'hXyR-UJPvVOY_8KJZW1IiAn00acCxmcxs6lMO04YnXBqVMuI4N1oMK5blibRcwE2F-Pb941G_8ik9al432kHAA';
 const enrollSig = 'ZTDaaJXLPfCowo3I7bl8k3JvIl5nYldqr4735NNFrw4bGcu-Tl2p2W7jYXZH8NuORBcsaVO-5Em3aahKD1eqDQ';
 
 class Recorded {
@@ -193,13 +193,24 @@ void main() {
   test('Ed25519 signer matches the core', () async {
     final signer = await Ed25519DeviceSigner.fromSeed(Encoding.hexDecode(seedHex));
     expect(signer.deviceId, deviceId);
-    final h = await RequestSigning.headers(signer, 'post', Uri.parse('https://x.test/v1/ack?x=1'), utf8.encode('{}'), 1763750000, nonce: nonce);
-    expect(h, {'X-Device-Id': deviceId, 'X-Device-Time': '1763750000', 'X-Device-Nonce': nonce, 'X-Device-Signature': reqSig});
     expect((await RequestSigning.enrollmentProof(signer, 1763750000)).proof, enrollSig);
-    expect(await RequestSigning.input('GET', Uri.parse('https://X.test:443'), 5, nonce, const []),
-        'subetha-req-v1\nGET\nx.test\n/\n5\n$nonce\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
-    expect(await RequestSigning.input('GET', Uri.parse('http://127.0.0.1:8080/a%20b?q=1'), 5, nonce, const []),
-        startsWith('subetha-req-v1\nGET\n127.0.0.1:8080\n/a%20b?q=1\n'));
+    final v = jsonDecode(File('../../spec/vectors/requests.json').readAsStringSync()) as Map<String, dynamic>;
+    expect(v['nonce'], nonce);
+    for (final c in (v['cases'] as List).cast<Map<String, dynamic>>()) {
+      final name = c['name'] as String;
+      final headers = (c['headers'] as Map<String, dynamic>).cast<String, String>();
+      final url = Uri.parse(c['url'] as String);
+      final body = utf8.encode(c['body'] as String);
+      final time = c['time'] as int;
+      final h = await RequestSigning.headers(signer, c['method'] as String, url, body, time, nonce: nonce, headers: headers);
+      expect(h['X-Device-Signed-Headers'], c['signed_headers'], reason: name);
+      expect(h['X-Device-Signature'], c['signature'], reason: name);
+      expect(await RequestSigning.input(c['method'] as String, url, body, RequestSigning.headersToSign(deviceId, time, nonce, headers)), c['signing_input'], reason: name);
+    }
+    expect(await RequestSigning.input('GET', Uri.parse('https://X.test:443'), const [], const []),
+        'subetha-req-v2\nGET\nx.test\n/\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+    expect(await RequestSigning.input('GET', Uri.parse('http://127.0.0.1:8080/a%20b?q=1'), const [], const []),
+        startsWith('subetha-req-v2\nGET\n127.0.0.1:8080\n/a%20b?q=1\n'));
     expect(RequestSigning.newNonce(), hasLength(22));
     expect(RequestSigning.newNonce(), isNot(RequestSigning.newNonce()));
     expect(() => RequestSigning.headers(signer, 'GET', Uri.parse('https://x.test/'), const [], 1, nonce: 'short'), throwsArgumentError);
@@ -218,7 +229,10 @@ void main() {
     expect(h['X-Device-Time'], '1763750000');
     final n = h['X-Device-Nonce']!;
     expect(n, matches(RegExp(r'^[A-Za-z0-9_-]{16,64}$')));
-    final input = await RequestSigning.input('POST', r.request.url, 1763750000, n, utf8.encode(r.body));
+    // Verify the way the relay does: every listed header, with its value as sent.
+    final listed = h['X-Device-Signed-Headers']!.split(',');
+    expect(listed, ['x-device-id', 'x-device-time', 'x-device-nonce', 'content-type']);
+    final input = await RequestSigning.input('POST', r.request.url, utf8.encode(r.body), [for (final k in listed) (k, h[k]!)]);
     expect(await Ed25519DeviceSigner.verify(utf8.encode(input), Encoding.base64urlDecode(h['X-Device-Signature']!), signer.publicKey), isTrue);
   });
 

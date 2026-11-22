@@ -73,20 +73,54 @@ public enum RequestSigning {
         return Encoding.base64url(Data((0..<16).map { _ in UInt8.random(in: 0...255, using: &rng) }))
     }
 
-    /// `subetha-req-v1\nMETHOD\nhost\npath?query\ntime\nnonce\nhex(sha256(body))`.
-    public static func input(method: String, url: URL, time: Int64, nonce: String, body: Data) -> String {
+    /// Headers the SDKs don't sign (spec §8.1): credentials, and headers HTTP stacks set or rewrite.
+    public static let unsignedByConvention: Set<String> = [
+        "authorization", "host", "content-length", "connection", "transfer-encoding", "user-agent", "accept", "accept-encoding",
+    ]
+
+    /// The signing input (spec §8.1, `subetha-req-v2`):
+    /// `subetha-req-v2\nMETHOD\nhost\npath?query\nhex(sha256(body))`, then `\nname:value` for each
+    /// of `signedHeaders` in order (values trimmed of spaces and tabs).
+    public static func input(method: String, url: URL, body: Data, signedHeaders: [(String, String)]) -> String {
         let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
         var path = comps?.percentEncodedPath ?? "/"
         if path.isEmpty { path = "/" }
         let query = comps?.percentEncodedQuery.map { "?\($0)" } ?? ""
-        return "subetha-req-v1\n\(method.uppercased())\n\(host(comps))\n\(path)\(query)\n\(time)\n\(nonce)\n\(Encoding.hex(Encoding.sha256(body)))"
+        var s = "subetha-req-v2\n\(method.uppercased())\n\(host(comps))\n\(path)\(query)\n\(Encoding.hex(Encoding.sha256(body)))"
+        let ws = CharacterSet(charactersIn: " \t")
+        for (name, value) in signedHeaders {
+            s += "\n\(name.lowercased()):\(value.trimmingCharacters(in: ws))"
+        }
+        return s
     }
 
-    /// `X-Device-Id`, `X-Device-Time`, `X-Device-Nonce`, `X-Device-Signature`. Relays accept
-    /// each nonce once, so sign every request (and every retry) afresh.
-    public static func headers(signer: DeviceSigner, method: String, url: URL, body: Data, time: Int64, nonce: String = RequestSigning.newNonce()) throws -> [String: String] {
-        let sig = try signer.sign(Data(input(method: method, url: url, time: time, nonce: nonce, body: body).utf8))
+    /// The SDK convention for what to sign: X-Device-Id, -Time, -Nonce, then every other header
+    /// the request carries, lowercased and sorted, except `unsignedByConvention` and `x-device-*`.
+    public static func headersToSign(deviceId: String, time: Int64, nonce: String, headers: [String: String]) -> [(String, String)] {
+        var rest: [String: String] = [:]
+        for (k, v) in headers {
+            let n = k.lowercased()
+            if unsignedByConvention.contains(n) || n.hasPrefix("x-device-") { continue }
+            rest[n] = v
+        }
+        let sorted = rest.keys.sorted { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) }
+        return [("x-device-id", deviceId), ("x-device-time", String(time)), ("x-device-nonce", nonce)] + sorted.map { ($0, rest[$0]!) }
+    }
+
+    /// `X-Device-Id`, `X-Device-Time`, `X-Device-Nonce`, `X-Device-Signed-Headers`,
+    /// `X-Device-Signature`. `headers` are the headers the request will carry (content and
+    /// routing headers must be signed). Relays accept each nonce once, so sign every request
+    /// (and every retry) afresh.
+    public static func headers(signer: DeviceSigner, method: String, url: URL, body: Data, time: Int64,
+                               nonce: String = RequestSigning.newNonce(), headers: [String: String] = [:]) throws -> [String: String] {
+        guard (16...64).contains(nonce.count), nonce.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }) else {
+            throw SubEthaClientError.unsupported("nonce must be 16-64 base64url characters")
+        }
+        let signed = headersToSign(deviceId: signer.deviceId, time: time, nonce: nonce, headers: headers)
+        guard signed.count <= 32 else { throw SubEthaClientError.unsupported("at most 32 signed headers") }
+        let sig = try signer.sign(Data(input(method: method, url: url, body: body, signedHeaders: signed).utf8))
         return ["X-Device-Id": signer.deviceId, "X-Device-Time": String(time), "X-Device-Nonce": nonce,
+                "X-Device-Signed-Headers": signed.map { $0.0 }.joined(separator: ","),
                 "X-Device-Signature": Encoding.base64url(sig)]
     }
 

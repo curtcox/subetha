@@ -1017,13 +1017,13 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_subetha_core_fn_func_new_request_nonce(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_subetha_core_fn_func_request_signing_input(`method`: RustBuffer.ByValue,`host`: RustBuffer.ByValue,`pathAndQuery`: RustBuffer.ByValue,`time`: Long,`nonce`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_subetha_core_fn_func_request_signing_input(`method`: RustBuffer.ByValue,`host`: RustBuffer.ByValue,`pathAndQuery`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,`signedHeaders`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_subetha_core_fn_func_sign_bytes(`seed`: RustBuffer.ByValue,`message`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_subetha_core_fn_func_sign_envelope_json(`envelopeJson`: RustBuffer.ByValue,`seed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_subetha_core_fn_func_sign_request(`seed`: RustBuffer.ByValue,`method`: RustBuffer.ByValue,`host`: RustBuffer.ByValue,`pathAndQuery`: RustBuffer.ByValue,`time`: Long,`nonce`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_subetha_core_fn_func_sign_request(`seed`: RustBuffer.ByValue,`method`: RustBuffer.ByValue,`host`: RustBuffer.ByValue,`pathAndQuery`: RustBuffer.ByValue,`time`: Long,`nonce`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,`headers`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_subetha_core_fn_func_validate_envelope_json(`envelopeJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1343,7 +1343,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_subetha_core_checksum_func_new_request_nonce() != 15123.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_subetha_core_checksum_func_request_signing_input() != 42106.toShort()) {
+    if (lib.uniffi_subetha_core_checksum_func_request_signing_input() != 28779.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_subetha_core_checksum_func_sign_bytes() != 40005.toShort()) {
@@ -1352,7 +1352,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_subetha_core_checksum_func_sign_envelope_json() != 16092.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_subetha_core_checksum_func_sign_request() != 61337.toShort()) {
+    if (lib.uniffi_subetha_core_checksum_func_sign_request() != 14068.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_subetha_core_checksum_func_validate_envelope_json() != 42612.toShort()) {
@@ -4166,6 +4166,41 @@ public object FfiConverterTypeEnrollmentProofRecord: FfiConverterRustBuffer<Enro
 
 
 
+/**
+ * One HTTP header (name and value).
+ */
+data class HeaderRecord (
+    var `name`: kotlin.String, 
+    var `value`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeHeaderRecord: FfiConverterRustBuffer<HeaderRecord> {
+    override fun read(buf: ByteBuffer): HeaderRecord {
+        return HeaderRecord(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: HeaderRecord) = (
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`value`)
+    )
+
+    override fun write(value: HeaderRecord, buf: ByteBuffer) {
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`value`, buf)
+    }
+}
+
+
+
 data class LanBeaconRecord (
     var `node`: kotlin.String, 
     var `port`: kotlin.UShort
@@ -4312,13 +4347,14 @@ public object FfiConverterTypeOutboxItemRecord: FfiConverterRustBuffer<OutboxIte
 
 
 /**
- * Header values for a device-signed HTTP request (`X-Device-Id`, `X-Device-Time`,
- * `X-Device-Nonce`, `X-Device-Signature`).
+ * Header values for a device-signed HTTP request (spec §8.1): `X-Device-Id`, `X-Device-Time`,
+ * `X-Device-Nonce`, `X-Device-Signed-Headers`, `X-Device-Signature`.
  */
 data class SignedRequestRecord (
     var `deviceId`: kotlin.String, 
     var `time`: kotlin.ULong, 
     var `nonce`: kotlin.String, 
+    var `signedHeaders`: kotlin.String, 
     var `signature`: kotlin.String
 ) {
     
@@ -4335,6 +4371,7 @@ public object FfiConverterTypeSignedRequestRecord: FfiConverterRustBuffer<Signed
             FfiConverterULong.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
         )
     }
 
@@ -4342,6 +4379,7 @@ public object FfiConverterTypeSignedRequestRecord: FfiConverterRustBuffer<Signed
             FfiConverterString.allocationSize(value.`deviceId`) +
             FfiConverterULong.allocationSize(value.`time`) +
             FfiConverterString.allocationSize(value.`nonce`) +
+            FfiConverterString.allocationSize(value.`signedHeaders`) +
             FfiConverterString.allocationSize(value.`signature`)
     )
 
@@ -4349,6 +4387,7 @@ public object FfiConverterTypeSignedRequestRecord: FfiConverterRustBuffer<Signed
             FfiConverterString.write(value.`deviceId`, buf)
             FfiConverterULong.write(value.`time`, buf)
             FfiConverterString.write(value.`nonce`, buf)
+            FfiConverterString.write(value.`signedHeaders`, buf)
             FfiConverterString.write(value.`signature`, buf)
     }
 }
@@ -4665,6 +4704,34 @@ public object FfiConverterSequenceByteArray: FfiConverterRustBuffer<List<kotlin.
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeHeaderRecord: FfiConverterRustBuffer<List<HeaderRecord>> {
+    override fun read(buf: ByteBuffer): List<HeaderRecord> {
+        val len = buf.getInt()
+        return List<HeaderRecord>(len) {
+            FfiConverterTypeHeaderRecord.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<HeaderRecord>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeHeaderRecord.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<HeaderRecord>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeHeaderRecord.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeOutboxDroppedRecord: FfiConverterRustBuffer<List<OutboxDroppedRecord>> {
     override fun read(buf: ByteBuffer): List<OutboxDroppedRecord> {
         val len = buf.getInt()
@@ -4939,15 +5006,15 @@ public object FfiConverterSequenceTypeOutboxItemRecord: FfiConverterRustBuffer<L
     
 
         /**
-         * The string a device signs for an HTTP request (see workers/api/src/devices.ts):
-         * `subetha-req-v1\n METHOD \n host \n path?query \n time \n nonce \n hex(sha256(body))`
-         * (no spaces). `host` is what WHATWG `URL.host` gives: lowercase, with `:port` only when the
-         * port is not the scheme's default.
-         */ fun `requestSigningInput`(`method`: kotlin.String, `host`: kotlin.String, `pathAndQuery`: kotlin.String, `time`: kotlin.ULong, `nonce`: kotlin.String, `body`: kotlin.ByteArray): kotlin.String {
+         * The string a device signs for an HTTP request (spec §8.1, `subetha-req-v2`):
+         * `subetha-req-v2\nMETHOD\nhost\npath?query\nhex(sha256(body))`, then `\nname:value` for each
+         * of `signed_headers`, in order. `host` is what WHATWG `URL.host` gives: lowercase, with
+         * `:port` only when the port is not the scheme's default.
+         */ fun `requestSigningInput`(`method`: kotlin.String, `host`: kotlin.String, `pathAndQuery`: kotlin.String, `body`: kotlin.ByteArray, `signedHeaders`: List<HeaderRecord>): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_subetha_core_fn_func_request_signing_input(
-        FfiConverterString.lower(`method`),FfiConverterString.lower(`host`),FfiConverterString.lower(`pathAndQuery`),FfiConverterULong.lower(`time`),FfiConverterString.lower(`nonce`),FfiConverterByteArray.lower(`body`),_status)
+        FfiConverterString.lower(`method`),FfiConverterString.lower(`host`),FfiConverterString.lower(`pathAndQuery`),FfiConverterByteArray.lower(`body`),FfiConverterSequenceTypeHeaderRecord.lower(`signedHeaders`),_status)
 }
     )
     }
@@ -4980,14 +5047,16 @@ public object FfiConverterSequenceTypeOutboxItemRecord: FfiConverterRustBuffer<L
     
 
         /**
-         * Signs an HTTP request. `path_and_query` is the URL path plus `?query` if any. `nonce`
-         * `None` draws a fresh one ([`new_request_nonce`]); relays accept each nonce once.
+         * Signs an HTTP request. `path_and_query` is the URL path plus `?query` if any. `headers` are
+         * the headers the request will carry (content and routing headers must be signed;
+         * Authorization, User-Agent and the like are skipped). `nonce` `None` draws a fresh one ([`new_request_nonce`]); relays
+         * accept each nonce once.
          */
-    @Throws(FfiException::class) fun `signRequest`(`seed`: kotlin.ByteArray, `method`: kotlin.String, `host`: kotlin.String, `pathAndQuery`: kotlin.String, `time`: kotlin.ULong, `nonce`: kotlin.String?, `body`: kotlin.ByteArray): SignedRequestRecord {
+    @Throws(FfiException::class) fun `signRequest`(`seed`: kotlin.ByteArray, `method`: kotlin.String, `host`: kotlin.String, `pathAndQuery`: kotlin.String, `time`: kotlin.ULong, `nonce`: kotlin.String?, `body`: kotlin.ByteArray, `headers`: List<HeaderRecord>): SignedRequestRecord {
             return FfiConverterTypeSignedRequestRecord.lift(
     uniffiRustCallWithError(FfiException) { _status ->
     UniffiLib.INSTANCE.uniffi_subetha_core_fn_func_sign_request(
-        FfiConverterByteArray.lower(`seed`),FfiConverterString.lower(`method`),FfiConverterString.lower(`host`),FfiConverterString.lower(`pathAndQuery`),FfiConverterULong.lower(`time`),FfiConverterOptionalString.lower(`nonce`),FfiConverterByteArray.lower(`body`),_status)
+        FfiConverterByteArray.lower(`seed`),FfiConverterString.lower(`method`),FfiConverterString.lower(`host`),FfiConverterString.lower(`pathAndQuery`),FfiConverterULong.lower(`time`),FfiConverterOptionalString.lower(`nonce`),FfiConverterByteArray.lower(`body`),FfiConverterSequenceTypeHeaderRecord.lower(`headers`),_status)
 }
     )
     }

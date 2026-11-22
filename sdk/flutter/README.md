@@ -36,7 +36,7 @@ final signer = await Ed25519DeviceSigner.generate();   // persist signer.seed in
 final client = SubEtha(deviceSigner: signer);
 final code = await client.startEnrollment(name: 'Pixel 9'); // show code.userCode
 await client.awaitEnrollment(code);                         // after approval in the console
-final device = SubEtha(deviceSigner: signer, signRequests: true); // X-Device-Id/Time/Nonce/Signature
+final device = SubEtha(deviceSigner: signer, signRequests: true); // X-Device-* headers (spec §8.1)
 ```
 
 `Ed25519DeviceSigner` is deterministic (RFC 8032), so its signatures match the Rust core

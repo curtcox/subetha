@@ -199,13 +199,17 @@ final class SubEthaTests: XCTestCase {
 
     func testRequestSigningInput() {
         let nonce = "nonce_0123456789abcdef"
-        XCTAssertEqual(RequestSigning.input(method: "post", url: URL(string: "https://x.test/v1/ack?x=1")!, time: 1763750000, nonce: nonce, body: Data("{}".utf8)),
-                       "subetha-req-v1\nPOST\nx.test\n/v1/ack?x=1\n1763750000\n\(nonce)\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a")
+        let signed = RequestSigning.headersToSign(deviceId: deviceID, time: 1763750000, nonce: nonce,
+                                                  headers: ["X-Title": " Door ", "Authorization": "x", "User-Agent": "u", "Content-Type": "text/plain"])
+        XCTAssertEqual(signed.map { $0.0 }.joined(separator: ","), "x-device-id,x-device-time,x-device-nonce,content-type,x-title")
+        // Same string as the TypeScript reference (spec §8.1).
+        XCTAssertEqual(RequestSigning.input(method: "post", url: URL(string: "https://x.test/v1/ack?x=1")!, body: Data("{}".utf8), signedHeaders: signed),
+                       "subetha-req-v2\nPOST\nx.test\n/v1/ack?x=1\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\nx-device-id:\(deviceID)\nx-device-time:1763750000\nx-device-nonce:\(nonce)\ncontent-type:text/plain\nx-title:Door")
         // Host as WHATWG URL.host: lowercase, default port dropped, other ports kept.
-        XCTAssertEqual(RequestSigning.input(method: "GET", url: URL(string: "https://X.test:443")!, time: 5, nonce: nonce, body: Data()),
-                       "subetha-req-v1\nGET\nx.test\n/\n5\n\(nonce)\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
-        XCTAssertTrue(RequestSigning.input(method: "GET", url: URL(string: "http://127.0.0.1:8080/a%20b?q=1")!, time: 5, nonce: nonce, body: Data())
-            .hasPrefix("subetha-req-v1\nGET\n127.0.0.1:8080\n/a%20b?q=1\n"))
+        XCTAssertEqual(RequestSigning.input(method: "GET", url: URL(string: "https://X.test:443")!, body: Data(), signedHeaders: []),
+                       "subetha-req-v2\nGET\nx.test\n/\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        XCTAssertTrue(RequestSigning.input(method: "GET", url: URL(string: "http://127.0.0.1:8080/a%20b?q=1")!, body: Data(), signedHeaders: [])
+            .hasPrefix("subetha-req-v2\nGET\n127.0.0.1:8080\n/a%20b?q=1\n"))
         let a = RequestSigning.newNonce()
         XCTAssertEqual(a.count, 22)
         XCTAssertNotEqual(a, RequestSigning.newNonce())
@@ -233,7 +237,10 @@ final class SubEthaTests: XCTestCase {
         XCTAssertEqual(r.value(forHTTPHeaderField: "X-Device-Time"), "1763750000")
         let nonce = try XCTUnwrap(r.value(forHTTPHeaderField: "X-Device-Nonce"))
         XCTAssertEqual(nonce.count, 22)
-        let input = RequestSigning.input(method: "POST", url: r.url!, time: 1763750000, nonce: nonce, body: r.httpBody!)
+        // Verify the way the relay does: every listed header, with its value as sent.
+        let listed = try XCTUnwrap(r.value(forHTTPHeaderField: "X-Device-Signed-Headers")).split(separator: ",").map(String.init)
+        XCTAssertEqual(listed, ["x-device-id", "x-device-time", "x-device-nonce", "content-type"])
+        let input = RequestSigning.input(method: "POST", url: r.url!, body: r.httpBody!, signedHeaders: listed.map { ($0, r.value(forHTTPHeaderField: $0)!) })
         let pub = try Curve25519.Signing.PublicKey(rawRepresentation: signer.publicKey)
         let sig = Encoding.base64urlDecode(r.value(forHTTPHeaderField: "X-Device-Signature")!)!
         XCTAssertTrue(pub.isValidSignature(sig, for: Data(input.utf8)))

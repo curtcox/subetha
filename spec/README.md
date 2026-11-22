@@ -190,7 +190,9 @@ its ntfy aliases (`X-Title`/`Title`/`t`, `X-Priority`/`Priority`/`prio`/`p`,
 `X-Forwarded-For`, …) may be added in transit.
 
 **SDK convention.** SDKs sign `x-device-id`, `x-device-time`, `x-device-nonce`, then every other
-header they set, lowercased and sorted by name, skipping `Authorization`. The order doesn't
+header they set, lowercased and sorted by name, skipping `Authorization`, `Host`,
+`Content-Length`, `Connection`, `Transfer-Encoding`, `User-Agent`, `Accept` and
+`Accept-Encoding` (HTTP stacks set or rewrite these; none is covered). The order doesn't
 matter to the relay; the convention makes signatures reproducible (`vectors/requests.json`).
 
 The relay accepts each signature once, and only from an enrolled, unrevoked device. The host is

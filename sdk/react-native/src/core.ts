@@ -16,8 +16,9 @@ export interface SubEthaCore {
   decryptEnvelopeJson(envelopeJson: string, key: ArrayBuffer): string | undefined;
   signBytes(seed: ArrayBuffer, message: ArrayBuffer): ArrayBuffer;
   newRequestNonce(): string;
-  requestSigningInput(method: string, host: string, pathAndQuery: string, time: bigint, nonce: string, body: ArrayBuffer): string;
-  signRequest(seed: ArrayBuffer, method: string, host: string, pathAndQuery: string, time: bigint, nonce: string | undefined, body: ArrayBuffer): { deviceId: string; time: bigint; nonce: string; signature: string };
+  /** subetha-req-v2 (spec §8.1): `signedHeaders` in the order they are listed. */
+  requestSigningInput(method: string, host: string, pathAndQuery: string, body: ArrayBuffer, signedHeaders: { name: string; value: string }[]): string;
+  signRequest(seed: ArrayBuffer, method: string, host: string, pathAndQuery: string, time: bigint, nonce: string | undefined, body: ArrayBuffer, headers: { name: string; value: string }[]): { deviceId: string; time: bigint; nonce: string; signedHeaders: string; signature: string };
   enrollmentProof(seed: ArrayBuffer, time: bigint): { deviceId: string; time: bigint; proof: string };
 }
 
