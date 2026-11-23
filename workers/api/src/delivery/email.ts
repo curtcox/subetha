@@ -33,12 +33,12 @@ export async function sigv4(opts: { method: string; url: string; body: string; r
 
 function mime(from: string, to: string, subject: string, text: string): string {
   const enc = (s: string) => (/^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${btoa(String.fromCharCode(...utf8.encode(s)))}?=`);
-  return [`From: ${from}`, `To: ${to}`, `Subject: ${enc(subject)}`, `Message-ID: <${crypto.randomUUID()}@subetha.org>`, `Date: ${new Date().toUTCString()}`, "MIME-Version: 1.0", "Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: base64", "", btoa(String.fromCharCode(...utf8.encode(text))).replace(/.{76}/g, "$&\r\n")].join("\r\n");
+  return [`From: ${from}`, `To: ${to}`, `Subject: ${enc(subject)}`, `Message-ID: <${crypto.randomUUID()}@subetha.us>`, `Date: ${new Date().toUTCString()}`, "MIME-Version: 1.0", "Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: base64", "", btoa(String.fromCharCode(...utf8.encode(text))).replace(/.{76}/g, "$&\r\n")].join("\r\n");
 }
 
 export async function sendEmail(env: Env, msg: { to: string; subject: string; text: string }): Promise<{ id: string }> {
   if (!EMAIL_RE.test(msg.to)) throw new PermanentError("invalid email address");
-  const from = env.EMAIL_FROM ?? "SubEtha <notify@subetha.org>";
+  const from = env.EMAIL_FROM ?? "SubEtha <notify@subetha.us>";
   if (env.EMAIL) {
     const { EmailMessage } = await import("cloudflare:email");
     const fromAddr = /<([^>]+)>/.exec(from)?.[1] ?? from;

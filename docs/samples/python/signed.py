@@ -3,7 +3,7 @@ import os
 
 from subetha import Client, decrypt_envelope, device_key_from_seed, encrypt_envelope, generate_device_key, verify_envelope
 
-client = Client(os.environ.get("SUBETHA_URL", "https://subetha.org"), token=os.environ["SUBETHA_TOKEN"])
+client = Client(os.environ.get("SUBETHA_URL", "https://subetha.us"), token=os.environ["SUBETHA_TOKEN"])
 
 # A device key. Persist key.seed (32 bytes) and restore it with device_key_from_seed(seed).
 key = generate_device_key()

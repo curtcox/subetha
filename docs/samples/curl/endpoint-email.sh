@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deliver a topic by email: add the address, verify it with the emailed code, subscribe it.
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 AUTH=(-H "Authorization: Bearer $SUBETHA_TOKEN" -H "Content-Type: application/json")
 
 EP=$(curl -sS "${AUTH[@]}" -d '{"kind":"email","address":"me@example.com","name":"inbox"}' \

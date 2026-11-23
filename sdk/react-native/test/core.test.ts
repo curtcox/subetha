@@ -42,12 +42,12 @@ const SEED = sdk.hexDecode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703b
 describe("Rust core signer and verifier", () => {
   it("urlParts matches WHATWG URL host and path?query", () => {
     for (const u of [
-      "https://subetha.org/@me/door?since=all",
-      "https://Subetha.ORG:443/",
+      "https://subetha.us/@me/door?since=all",
+      "https://Subetha.US:443/",
       "http://localhost:8787/v1/device/code",
       "http://user:pw@Example.com:80",
       "https://x.test:8443/a/b%20c?q=1&r=%2F",
-      "wss://subetha.org:443/@me/door/ws",
+      "wss://subetha.us:443/@me/door/ws",
     ]) {
       const w = new URL(u);
       expect(rn.urlParts(u), u).toEqual({ host: w.host, pathAndQuery: w.pathname + w.search });
@@ -61,7 +61,7 @@ describe("Rust core signer and verifier", () => {
       calls.push({ url: String(input), init });
       return new Response(init.body as string);
     }) as typeof globalThis.fetch;
-    const client = rn.createClient({ baseUrl: "https://Subetha.org:443", fetch, token: "se_t", core: fakeCore, deviceSeed: SEED, signRequests: true });
+    const client = rn.createClient({ baseUrl: "https://Subetha.us:443", fetch, token: "se_t", core: fakeCore, deviceSeed: SEED, signRequests: true });
     const sent = await client.publish("@me/door", "ding", { title: "Front" });
     const webKey = await sdk.deviceKeyFromSeed(SEED);
     expect(sent.sender).toBe(webKey.deviceId);

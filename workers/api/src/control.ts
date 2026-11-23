@@ -36,7 +36,7 @@ export function assertPublicWebhook(address: string, baseUrl: string) {
   const host = new URL(address).hostname.toLowerCase().replace(/\.+$/, "");
   const own = new URL(baseUrl).hostname.toLowerCase();
   const ipLiteral = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":") || host.startsWith("[");
-  if (ipLiteral || host === own || host === "subetha.org" || host.endsWith(".subetha.org") || host === "localhost" || host.endsWith(".localhost") || !host.includes(".")) {
+  if (ipLiteral || host === own || host === "subetha.us" || host.endsWith(".subetha.us") || host === "localhost" || host.endsWith(".localhost") || !host.includes(".")) {
     throw new ApiError("bad_request", "webhooks must use a public DNS name (no IP literals, localhost, or the relay itself)");
   }
 }
@@ -318,7 +318,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     const params = await twilioParams(c);
     const from = params.From ?? "", body = (params.Body ?? "").trim();
     if (/^(help|info)$/i.test(body)) {
-      return twiml(c, "<Response><Message>SubEtha notifications. Manage at subetha.org/console. Reply STOP to opt out. Msg &amp; data rates may apply.</Message></Response>");
+      return twiml(c, "<Response><Message>SubEtha notifications. Manage at subetha.us/console. Reply STOP to opt out. Msg &amp; data rates may apply.</Message></Response>");
     }
     const ep = await c.env.DB.prepare("SELECT * FROM endpoints WHERE kind = 'sms' AND address = ? AND verified_at IS NOT NULL ORDER BY created_at LIMIT 1").bind(from).first<EndpointRecord>();
     if (!ep) return twiml(c);

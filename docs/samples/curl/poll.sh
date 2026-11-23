@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Poll: return cached messages and close. since= takes a message id, Unix seconds, a duration, or "all".
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 AUTH=(-H "Authorization: Bearer $SUBETHA_TOKEN")
 
 # Everything still retained:

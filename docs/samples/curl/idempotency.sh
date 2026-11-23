@@ -2,7 +2,7 @@
 # Safe retries: the same Idempotency-Key returns the original message (with X-Duplicate: 1)
 # instead of delivering and charging again.
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 
 for attempt in 1 2 3; do
   if curl -sS --fail-with-body --max-time 10 \

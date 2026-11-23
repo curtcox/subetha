@@ -63,7 +63,7 @@ export interface Env {
   LXMF_GATEWAY_SECRET?: string;
   SLACK_CLIENT_ID?: string;
   SLACK_CLIENT_SECRET?: string;
-  INBOUND_EMAIL_DOMAIN?: string; // in.subetha.org
+  INBOUND_EMAIL_DOMAIN?: string; // in.subetha.us
 }
 
 export interface TopicMeta {

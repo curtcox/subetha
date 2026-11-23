@@ -5,7 +5,7 @@
       "args": [
         "-y",
         "mcp-remote",
-        "https://subetha.org/mcp",
+        "https://subetha.us/mcp",
         "--header",
         "Authorization: Bearer ${SUBETHA_TOKEN}"
       ],

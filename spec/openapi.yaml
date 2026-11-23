@@ -34,11 +34,11 @@ info:
     url: https://github.com/curtcox/subetha
 externalDocs:
   description: Developer docs
-  url: https://subetha.org/docs/
+  url: https://subetha.us/docs/
 servers:
-  - url: https://subetha.org
+  - url: https://subetha.us
     description: Production
-  - url: https://staging.subetha.org
+  - url: https://staging.subetha.us
     description: Staging (providers in test mode)
   - url: http://localhost:8787
     description: Local (wrangler dev)
@@ -181,7 +181,7 @@ paths:
       operationId: publish
       summary: Publish (ntfy)
       description: |
-        `curl -d "Backup done" https://subetha.org/@me/backups`. ntfy headers, their short aliases,
+        `curl -d "Backup done" https://subetha.us/@me/backups`. ntfy headers, their short aliases,
         and query-string equivalents (`?title=…`) are accepted. The publisher pays for the publish;
         the topic owner pays for fan-out and delivery. Anonymous publishes need the topic policy
         `public_publish` and a funded owner (else `no_funded_owner`, HTTP 402).

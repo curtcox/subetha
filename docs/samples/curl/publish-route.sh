@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Control routing and cost per message.
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 
 # An alarm: every allowed transport at once, but never more than 5 cents, and never a phone call.
 curl -sS -H "Authorization: Bearer $SUBETHA_TOKEN" \

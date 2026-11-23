@@ -46,7 +46,7 @@ describe("QR encoder", () => {
 
   it("decodes with an independent decoder across versions, levels and masks", () => {
     const cases: [string, QrEcl][] = [
-      ["https://subetha.org/@alice/doorbell", "M"],
+      ["https://subetha.us/@alice/doorbell", "M"],
       ["HELLO WORLD", "H"],
       ["x".repeat(120), "L"], // v5
       ["y".repeat(150), "Q"], // v7+: version info

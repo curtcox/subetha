@@ -4,12 +4,12 @@
 #
 #   SUBETHA_TOKEN=se_... samples/cli/doorbell-curl.sh [@me/doorbell]
 #
-# Env: SUBETHA_TOKEN (required), SUBETHA_URL (default https://subetha.org).
+# Env: SUBETHA_TOKEN (required), SUBETHA_URL (default https://subetha.us).
 
 set -euo pipefail
 
 : "${SUBETHA_TOKEN:?set SUBETHA_TOKEN}"
-base="${SUBETHA_URL:-https://subetha.org}"
+base="${SUBETHA_URL:-https://subetha.us}"
 topic="${1:-@me/doorbell}"
 auth=(-H "Authorization: Bearer $SUBETHA_TOKEN")
 

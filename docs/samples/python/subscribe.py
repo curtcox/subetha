@@ -3,7 +3,7 @@ import os
 
 from subetha import Client
 
-client = Client(os.environ.get("SUBETHA_URL", "https://subetha.org"), token=os.environ["SUBETHA_TOKEN"])
+client = Client(os.environ.get("SUBETHA_URL", "https://subetha.us"), token=os.environ["SUBETHA_TOKEN"])
 
 # Cached messages from the last hour, from two topics:
 for msg in client.poll(["@me/doorbell", "@me/alarm"], since="1h"):

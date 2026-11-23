@@ -78,7 +78,7 @@ Acking needs read access to the topic. Acks are idempotent.
 
 ## ntfy apps
 
-The ntfy Android/iOS apps and CLI can subscribe to SubEtha: add `https://subetha.org` as a
+The ntfy Android/iOS apps and CLI can subscribe to SubEtha: add `https://subetha.us` as a
 server, use a token as the password (empty user name), and subscribe to a secret `t_…` topic
 (ntfy's apps only accept topic names without `@` or `/`, which secret topics satisfy). Signed and
 encrypted messages need a SubEtha SDK to verify or decrypt.

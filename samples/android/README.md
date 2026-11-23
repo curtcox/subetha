@@ -50,7 +50,7 @@ Two phones with the core library, the same topic on both Edge tabs:
    **Bridge to relay**.
 2. Phone B (airplane mode with Bluetooth turned back on): tap **Bluetooth on**. The button
    shows `1 peers` once the phones connect.
-3. `curl -H "Authorization: Bearer $SUBETHA_TOKEN" -d "ding" https://subetha.org/@me/doorbell`:
+3. `curl -H "Authorization: Bearer $SUBETHA_TOKEN" -d "ding" https://subetha.us/@me/doorbell`:
    A shows `relay: ding` and B shows `Bluetooth: ding`.
 4. On B, type a message and tap **Send by sound**: it also goes out over Bluetooth, A uplinks
    it, and it shows up in the console and on the Doorbell tab.

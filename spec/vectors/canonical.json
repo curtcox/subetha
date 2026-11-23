@@ -72,9 +72,9 @@
     {
       "name": "slash not escaped",
       "input": {
-        "u": "https://subetha.org/@a/b"
+        "u": "https://subetha.us/@a/b"
       },
-      "canonical": "{\"u\":\"https://subetha.org/@a/b\"}"
+      "canonical": "{\"u\":\"https://subetha.us/@a/b\"}"
     }
   ],
   "invalid": [

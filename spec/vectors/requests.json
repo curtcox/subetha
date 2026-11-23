@@ -7,20 +7,20 @@
     {
       "name": "GET poll, no content headers",
       "method": "GET",
-      "url": "https://subetha.org/@alice/doorbell/json?poll=1&since=all",
+      "url": "https://subetha.us/@alice/doorbell/json?poll=1&since=all",
       "body": "",
       "headers": {},
       "time": 1763750000,
-      "host": "subetha.org",
+      "host": "subetha.us",
       "path_and_query": "/@alice/doorbell/json?poll=1&since=all",
       "signed_headers": "x-device-id,x-device-time,x-device-nonce",
-      "signing_input": "subetha-req-v2\nGET\nsubetha.org\n/@alice/doorbell/json?poll=1&since=all\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nx-device-id:dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena\nx-device-time:1763750000\nx-device-nonce:nonce_0123456789abcdef",
-      "signature": "dvOLsJjekSI8GnHdUZGLi4POnUYYjlwlau3LqoPTLMt-l748HbmZtNigndUaRaUvMehXOOkhqMaBq1Cf3TsUDA"
+      "signing_input": "subetha-req-v2\nGET\nsubetha.us\n/@alice/doorbell/json?poll=1&since=all\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nx-device-id:dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena\nx-device-time:1763750000\nx-device-nonce:nonce_0123456789abcdef",
+      "signature": "KdGkL2M8awzZ6z76pSvnM_qP6iLrBMesd0k5wGnimn25m8_wHM9Tku-lCQjGGWXls6JvS6F4-xvCRF9A8RcoBA"
     },
     {
       "name": "publish with ntfy headers",
       "method": "post",
-      "url": "https://subetha.org/@alice/doorbell",
+      "url": "https://subetha.us/@alice/doorbell",
       "body": "Opened",
       "headers": {
         "X-Title": "Front door",
@@ -32,11 +32,11 @@
         "Accept": "application/json"
       },
       "time": 1763750001,
-      "host": "subetha.org",
+      "host": "subetha.us",
       "path_and_query": "/@alice/doorbell",
       "signed_headers": "x-device-id,x-device-time,x-device-nonce,content-type,x-priority,x-tags,x-title",
-      "signing_input": "subetha-req-v2\nPOST\nsubetha.org\n/@alice/doorbell\nb19fb8d1b395b333251f40be2909ca37a0b0a007b3c4c4b34b726be71f715daa\nx-device-id:dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena\nx-device-time:1763750001\nx-device-nonce:nonce_0123456789abcdef\ncontent-type:text/plain;charset=UTF-8\nx-priority:4\nx-tags:door,warning\nx-title:Front door",
-      "signature": "gkaViMI76QP9NBdat7Hy_tPXLkZ6qhpGomHhyUtr30U4osAfYtMS4Q7RihJqWYQN35oRFdLjx6tOT2n6re_mAA"
+      "signing_input": "subetha-req-v2\nPOST\nsubetha.us\n/@alice/doorbell\nb19fb8d1b395b333251f40be2909ca37a0b0a007b3c4c4b34b726be71f715daa\nx-device-id:dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena\nx-device-time:1763750001\nx-device-nonce:nonce_0123456789abcdef\ncontent-type:text/plain;charset=UTF-8\nx-priority:4\nx-tags:door,warning\nx-title:Front door",
+      "signature": "r0TRWR_3ns_3pRBctGnjFgUfbVPOCYm7Y-hc7dxTRsQ4sJI76W9CGP55PqASpgdo9yYaur_dxfqt7h9AFvs9Cg"
     },
     {
       "name": "JSON publish, port and routing",
@@ -59,17 +59,17 @@
     {
       "name": "percent-encoded path",
       "method": "PUT",
-      "url": "https://staging.subetha.org:443/@a/b%20c?x=%2F",
+      "url": "https://staging.subetha.us:443/@a/b%20c?x=%2F",
       "body": "",
       "headers": {
         "X-Dry-Run": "1"
       },
       "time": 1763750003,
-      "host": "staging.subetha.org",
+      "host": "staging.subetha.us",
       "path_and_query": "/@a/b%20c?x=%2F",
       "signed_headers": "x-device-id,x-device-time,x-device-nonce,x-dry-run",
-      "signing_input": "subetha-req-v2\nPUT\nstaging.subetha.org\n/@a/b%20c?x=%2F\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nx-device-id:dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena\nx-device-time:1763750003\nx-device-nonce:nonce_0123456789abcdef\nx-dry-run:1",
-      "signature": "12kFYKn-0j6AzgaLIbqZ3tSMha9a6wXo8Clm1_DleXO_8gZ9TIvV7TG1q7ckiba-vZSPppBS91rM75k0verNAA"
+      "signing_input": "subetha-req-v2\nPUT\nstaging.subetha.us\n/@a/b%20c?x=%2F\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nx-device-id:dev_25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkena\nx-device-time:1763750003\nx-device-nonce:nonce_0123456789abcdef\nx-dry-run:1",
+      "signature": "dQbcjq-_mOfm-_RpDHgUxVylq56FQCXJ1fj_NcF4vv_JWscCIRRBbC749zd45Dt9i3V432VPkhuXdROlrQeuDg"
     }
   ]
 }

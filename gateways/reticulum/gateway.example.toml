@@ -2,7 +2,7 @@
 # Run with:  subetha-reticulum --config gateway.toml
 
 # The relay to bridge to.
-relay_url = "https://subetha.org"
+relay_url = "https://subetha.us"
 
 # API token used to publish and subscribe. Prefer the environment variable named by
 # token_env (default SUBETHA_TOKEN) over writing the token here.

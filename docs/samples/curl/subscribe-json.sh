@@ -2,7 +2,7 @@
 # Stream messages as newline-delimited JSON (one envelope per line).
 # The first line is an "open" event; "keepalive" events arrive periodically.
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 
 curl -sSN -H "Authorization: Bearer $SUBETHA_TOKEN" \
   "$SUBETHA_URL/@me/doorbell/json"

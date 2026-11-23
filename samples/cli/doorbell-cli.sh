@@ -4,7 +4,7 @@
 #
 #   samples/cli/doorbell-cli.sh <token> [@me/doorbell]
 #
-# Env: SUBETHA_URL to target a local relay (wrangler dev) instead of https://subetha.org;
+# Env: SUBETHA_URL to target a local relay (wrangler dev) instead of https://subetha.us;
 #      SUBETHA_CLI to use another command (e.g. "node sdk/js/bin/subetha.js" in a checkout).
 
 set -euo pipefail

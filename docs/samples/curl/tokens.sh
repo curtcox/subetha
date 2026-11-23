@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Create, list, and revoke API tokens. Needs a token with the admin scope.
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 AUTH=(-H "Authorization: Bearer $SUBETHA_TOKEN" -H "Content-Type: application/json")
 
 # A token for a backup script: publish to one namespace, no telephony, $1/day.

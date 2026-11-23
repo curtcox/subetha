@@ -32,8 +32,8 @@
   "env": {
     "staging": {
       "name": "subetha-api-staging",
-      "routes": [{ "pattern": "staging.subetha.org", "custom_domain": true }],
-      "vars": { "ENVIRONMENT": "staging", "BASE_URL": "https://staging.subetha.org" },
+      "routes": [{ "pattern": "staging.subetha.us", "custom_domain": true }],
+      "vars": { "ENVIRONMENT": "staging", "BASE_URL": "https://staging.subetha.us" },
       "durable_objects": { "bindings": [{ "name": "TOPIC", "class_name": "TopicDO" }, { "name": "ACCOUNT", "class_name": "AccountDO" }] },
       "d1_databases": [{ "binding": "DB", "database_name": "subetha-staging", "database_id": "REPLACE_WITH_STAGING_D1_ID", "migrations_dir": "migrations" }],
       "kv_namespaces": [{ "binding": "CACHE", "id": "REPLACE_WITH_STAGING_KV_ID" }],
@@ -47,8 +47,8 @@
     },
     "production": {
       "name": "subetha-api-production",
-      "routes": [{ "pattern": "subetha.org", "custom_domain": true }, { "pattern": "mcp.subetha.org", "custom_domain": true }],
-      "vars": { "ENVIRONMENT": "production", "BASE_URL": "https://subetha.org" },
+      "routes": [{ "pattern": "subetha.us", "custom_domain": true }, { "pattern": "mcp.subetha.us", "custom_domain": true }],
+      "vars": { "ENVIRONMENT": "production", "BASE_URL": "https://subetha.us" },
       "durable_objects": { "bindings": [{ "name": "TOPIC", "class_name": "TopicDO" }, { "name": "ACCOUNT", "class_name": "AccountDO" }] },
       "d1_databases": [{ "binding": "DB", "database_name": "subetha-production", "database_id": "REPLACE_WITH_PRODUCTION_D1_ID", "migrations_dir": "migrations" }],
       "kv_namespaces": [{ "binding": "CACHE", "id": "REPLACE_WITH_PRODUCTION_KV_ID" }],

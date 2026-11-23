@@ -19,7 +19,7 @@ isn't registered as a cargo example.
 
 ## Conventions
 
-- Shell samples read `SUBETHA_TOKEN` and `SUBETHA_URL` (default `https://subetha.org`), and use
+- Shell samples read `SUBETHA_TOKEN` and `SUBETHA_URL` (default `https://subetha.us`), and use
   `@me/…` topics: replace `me` with your handle.
 - In TypeScript samples, the part shown in the docs sits between `// #region snippet` and
   `// #endregion snippet`; setup outside the region is for the test. `fetch` is passed in so CI
@@ -44,6 +44,6 @@ against any deployment over HTTP. The nightly workflow (`.github/workflows/night
 against staging.
 
 ```bash
-SUBETHA_URL=https://staging.subetha.org SUBETHA_TOKEN=se_… SUBETHA_TOPIC=@samples/nightly \
+SUBETHA_URL=https://staging.subetha.us SUBETHA_TOKEN=se_… SUBETHA_TOPIC=@samples/nightly \
   pnpm --filter @subetha/samples test:live
 ```

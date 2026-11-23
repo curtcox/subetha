@@ -12,7 +12,7 @@ EXAMPLE = Path(__file__).resolve().parents[1] / "gateway.example.toml"
 
 def test_example_config_loads():
     cfg = load_config(EXAMPLE, env={"SUBETHA_TOKEN": "tk_env"})
-    assert cfg.relay_url == "https://subetha.org"
+    assert cfg.relay_url == "https://subetha.us"
     assert cfg.token == "tk_env"
     assert cfg.data_dir.is_absolute()
     assert cfg.topics and cfg.topics[0].topic == "@alice/doorbell"

@@ -49,7 +49,7 @@ On startup it prints each topic's LXMF address:
 ```
 
 Add that address as a contact in your LXMF client, send `/subscribe`, and publish to the topic from
-anywhere else (`curl -d hi https://subetha.org/@alice/doorbell`).
+anywhere else (`curl -d hi https://subetha.us/@alice/doorbell`).
 
 Reticulum itself is configured as usual: by default `~/.reticulum/config`, or the directory named by
 `reticulum_config_dir`. The gateway needs at least one interface that reaches the mesh you want to
@@ -61,7 +61,7 @@ See [`gateway.example.toml`](gateway.example.toml). The main keys:
 
 | Key | Meaning |
 |---|---|
-| `relay_url` | Relay base URL. Default `https://subetha.org`. |
+| `relay_url` | Relay base URL. Default `https://subetha.us`. |
 | `token` / `token_env` | API token, or the environment variable holding it (default `SUBETHA_TOKEN`). |
 | `data_dir` | LXMF identities (one per topic), LXMF router storage, and `state.json` (subscribers, cursors). **Persist it**: losing it changes every topic's LXMF address. |
 | `reticulum_config_dir` | Reticulum config directory. |
@@ -111,7 +111,7 @@ A small VPS with a persistent disk is the simpler option.
 
 ## Bring your own gateway
 
-Anyone can run this gateway against `subetha.org` (or their own relay). It talks to the relay only
+Anyone can run this gateway against `subetha.us` (or their own relay). It talks to the relay only
 through the public ntfy-compatible HTTP API, so it needs no special access:
 
 1. Create (or pick) topics and an API token that can publish and subscribe to them. A token scoped

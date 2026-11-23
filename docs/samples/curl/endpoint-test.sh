@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Send one test message to an endpoint and see exactly what happened (charged as one delivery).
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 EP="${1:?usage: endpoint-test.sh ep_…}"
 
 curl -sS -H "Authorization: Bearer $SUBETHA_TOKEN" -H "Content-Type: application/json" \

@@ -22,7 +22,7 @@ A topic name is one of:
 | Namespaced | `@alice/doorbell` | `@handle/name`. Only Alice's account can create topics under `@alice/`. Names are `[A-Za-z0-9_-]{1,64}`. |
 | Secret | `t_mfrggzdfmztwq2lknnwg23tpoa` | `t_` + 26 base32 characters (128 random bits). Anyone who knows the name can read it, like an ntfy "secret URL". Stock ntfy clients accept these names unchanged. |
 
-Global names like `subetha.org/mytopic` are not accepted.
+Global names like `subetha.us/mytopic` are not accepted.
 
 A topic is created by its owner's first publish to it, or explicitly with
 `PUT /v1/topics/{topic}` (which also sets its [policy](tokens.md#topic-policies)). Subscribing to
@@ -48,7 +48,7 @@ A message is a superset of ntfy's message JSON:
   "priority": 4,
   "tags": ["door", "warning"],
   "click": "https://cam.example.com/front",
-  "attachment": { "name": "snap.jpg", "url": "https://subetha.org/file/01jd…/snap.jpg", "size": 81234, "type": "image/jpeg" },
+  "attachment": { "name": "snap.jpg", "url": "https://subetha.us/file/01jd…/snap.jpg", "size": 81234, "type": "image/jpeg" },
   "route": { "mode": "any", "max_cost_usd_micros": 20000, "deny": ["voice"] }
 }
 ```
@@ -110,5 +110,5 @@ sees that, in the [trace](pricing.md#traces).
   per-minute rate limit and a daily cap, charged to the owner. If the owner can't pay, the
   publish fails with `402 no_funded_owner`.
 
-So `curl -d hi subetha.org/@alice/doorbell` can be free for the person ringing the bell, while
+So `curl -d hi subetha.us/@alice/doorbell` can be free for the person ringing the bell, while
 Alice decides exactly how much ringing she's willing to pay for. Details: [Pricing & billing](pricing.md).

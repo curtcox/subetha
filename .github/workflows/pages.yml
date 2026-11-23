@@ -20,11 +20,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # PLAN open question 2: curtcox.github.io/subetha, or a custom domain such as dev.subetha.org.
-  # For a custom domain set the repository variables PAGES_BASE_PATH=/ and PAGES_URL=https://dev.subetha.org.
+  # PLAN open question 2: curtcox.github.io/subetha, or a custom domain such as dev.subetha.us.
+  # For a custom domain set the repository variables PAGES_BASE_PATH=/ and PAGES_URL=https://dev.subetha.us.
   PAGES_BASE_PATH: ${{ vars.PAGES_BASE_PATH || '/subetha/' }}
   PAGES_URL: ${{ vars.PAGES_URL || 'https://curtcox.github.io/subetha' }}
-  APP_URL: ${{ vars.APP_URL || 'https://subetha.org' }}
+  APP_URL: ${{ vars.APP_URL || 'https://subetha.us' }}
 
 jobs:
   build:

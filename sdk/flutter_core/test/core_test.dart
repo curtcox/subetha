@@ -84,9 +84,9 @@ void main() {
     expect(core.deviceId, dart.deviceId);
     final msg = utf8.encode('subetha');
     expect(await core.sign(msg), await dart.sign(msg));
-    final r = signRequest(seed: core.seed, method: 'POST', host: 'subetha.org', pathAndQuery: '/@me/x', time: BigInt.from(1763750000),
+    final r = signRequest(seed: core.seed, method: 'POST', host: 'subetha.us', pathAndQuery: '/@me/x', time: BigInt.from(1763750000),
         nonce: 'n' * 22, body: utf8.encode('hi'), headers: const [('X-Title', 'Door')]);
-    final d = await RequestSigning.headers(dart, 'POST', Uri.parse('https://subetha.org/@me/x'), utf8.encode('hi'), 1763750000,
+    final d = await RequestSigning.headers(dart, 'POST', Uri.parse('https://subetha.us/@me/x'), utf8.encode('hi'), 1763750000,
         nonce: 'n' * 22, headers: const {'X-Title': 'Door'});
     expect(r.deviceId, core.deviceId);
     expect(r.signedHeaders, d['X-Device-Signed-Headers']);

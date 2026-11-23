@@ -12,7 +12,7 @@ import FoundationNetworking
 /// for try await m in client.messages(["@me/doorbell"]) { print(m.message ?? "") }
 /// ```
 public final class SubEtha: @unchecked Sendable {
-    public static let defaultBaseURL = URL(string: "https://subetha.org")!
+    public static let defaultBaseURL = URL(string: "https://subetha.us")!
     public static let version = "0.1.0"
 
     public let baseURL: URL

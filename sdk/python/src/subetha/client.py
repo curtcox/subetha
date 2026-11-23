@@ -27,7 +27,7 @@ from .protocol import (
     wrap_topic_key,
 )
 
-DEFAULT_BASE_URL = "https://subetha.org"
+DEFAULT_BASE_URL = "https://subetha.us"
 
 
 class DeviceAuth(httpx.Auth):

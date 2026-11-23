@@ -1,4 +1,4 @@
-// Builds dist/ (ESM library + CLI) and the browser bundle served at subetha.org/sdk.js.
+// Builds dist/ (ESM library + CLI) and the browser bundle served at subetha.us/sdk.js.
 import { build } from "esbuild";
 import { copyFileSync, mkdirSync } from "node:fs";
 

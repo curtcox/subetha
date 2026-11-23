@@ -15,7 +15,7 @@ interface Io {
 }
 export interface Config { baseUrl?: string; token?: string }
 
-const HELP = `subetha — send and receive messages over any transport (https://subetha.org)
+const HELP = `subetha — send and receive messages over any transport (https://subetha.us)
 
 Usage:
   subetha pub <topic> [message] [-t title] [-p priority] [--tags a,b] [--mode any|fast|all|cheap]
@@ -25,7 +25,7 @@ Usage:
   subetha poll <topic> [--since all]
   subetha cost <topic> [message] [pub options]   dry-run: route plan + cost estimate
   subetha route …                alias for cost
-  subetha login <token> [--url https://subetha.org]
+  subetha login <token> [--url https://subetha.us]
   subetha lan <topic>[,<topic>…] [--send MESSAGE] [--hops 2] [--relay t1,t2] [--for SECONDS] [--json]
                                  offline: gossip with SubEtha peers on the local network (no relay, free)
   subetha balance | prices

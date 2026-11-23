@@ -85,9 +85,9 @@ h1{font-size:1.4rem;margin:0 0 .25rem}table{width:100%;border-collapse:collapse;
 td{padding:.4rem 0;border-bottom:1px solid #ddd;vertical-align:top}td:last-child{text-align:right;font-variant-numeric:tabular-nums;word-break:break-all}
 small{color:#555}@media print{button{display:none}}
 </style></head><body>
-<h1>SubEtha receipt</h1><small>subetha.org · prepaid balance, no subscription</small>
+<h1>SubEtha receipt</h1><small>subetha.us · prepaid balance, no subscription</small>
 <table>${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table>
-<small>Paid by card through Stripe. Balance credit is used for metered relay usage at the prices on subetha.org/docs/pricing.</small>
+<small>Paid by card through Stripe. Balance credit is used for metered relay usage at the prices on subetha.us/docs/pricing.</small>
 <p><button onclick="print()">Print</button></p>
 </body></html>`;
 }

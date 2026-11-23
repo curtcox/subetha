@@ -2,7 +2,7 @@
 # An escalation chain for alarms: push now, SMS after 60 s, a phone call after 180 s, each only
 # if nobody has acknowledged the message yet. US numbers only; each is verified with a code.
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 AUTH=(-H "Authorization: Bearer $SUBETHA_TOKEN" -H "Content-Type: application/json")
 TOPIC="@me/alarm"
 

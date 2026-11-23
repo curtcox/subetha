@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deliver a topic to your server as signed JSON. The secret is shown once.
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 AUTH=(-H "Authorization: Bearer $SUBETHA_TOKEN" -H "Content-Type: application/json")
 
 RESP=$(curl -sS "${AUTH[@]}" -d '{"kind":"webhook","address":"https://example.com/hooks/subetha"}' "$SUBETHA_URL/v1/endpoints")

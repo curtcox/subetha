@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Publish, look at the message's trace, and acknowledge it.
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 TOPIC="@me/alarm"
 
 ID=$(curl -sS -H "Authorization: Bearer $SUBETHA_TOKEN" -H "Priority: 5" -d "Water leak" \

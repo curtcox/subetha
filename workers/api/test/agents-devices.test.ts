@@ -53,10 +53,10 @@ describe("MCP server", () => {
 
 describe("inbound email", () => {
   it("maps addresses to topics", () => {
-    expect(topicFromAddress("alice.doorbell@in.subetha.org")).toBe("@alice/doorbell");
-    expect(topicFromAddress("alice.Door_Bell@in.subetha.org")).toBe("@alice/Door_Bell");
-    expect(topicFromAddress("t_abcdefghijklmnopqrstuvwxyz@in.subetha.org")).toBe("t_abcdefghijklmnopqrstuvwxyz");
-    expect(topicFromAddress("nodot@in.subetha.org")).toBeNull();
+    expect(topicFromAddress("alice.doorbell@in.subetha.us")).toBe("@alice/doorbell");
+    expect(topicFromAddress("alice.Door_Bell@in.subetha.us")).toBe("@alice/Door_Bell");
+    expect(topicFromAddress("t_abcdefghijklmnopqrstuvwxyz@in.subetha.us")).toBe("t_abcdefghijklmnopqrstuvwxyz");
+    expect(topicFromAddress("nodot@in.subetha.us")).toBeNull();
   });
 
   it("parses multipart, quoted-printable, and encoded subjects", () => {
@@ -75,7 +75,7 @@ describe("inbound email", () => {
       const raw = `From: ${from}\r\nSubject: Hi\r\nMessage-ID: <${from}-${Math.random()}>\r\n\r\nhello by mail`;
       let rejected: string | null = null;
       return {
-        msg: { from, to: "mailin.box@in.subetha.org", rawSize: raw.length, raw: new Response(raw).body!, headers: new Headers({ "message-id": `<${Math.random()}>` }), setReject: (r: string) => { rejected = r; }, forward: async () => ({}), reply: async () => ({}) } as unknown as ForwardableEmailMessage,
+        msg: { from, to: "mailin.box@in.subetha.us", rawSize: raw.length, raw: new Response(raw).body!, headers: new Headers({ "message-id": `<${Math.random()}>` }), setReject: (r: string) => { rejected = r; }, forward: async () => ({}), reply: async () => ({}) } as unknown as ForwardableEmailMessage,
         get rejected() { return rejected; },
       };
     };

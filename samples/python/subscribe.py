@@ -3,7 +3,7 @@
     pip install -e sdk/python
     SUBETHA_TOKEN=se_... python samples/python/subscribe.py [@me/doorbell] [--since 1h]
 
-Env: SUBETHA_TOKEN (required), SUBETHA_URL (default https://subetha.org).
+Env: SUBETHA_TOKEN (required), SUBETHA_URL (default https://subetha.us).
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def main() -> int:
     if not token:
         print("set SUBETHA_TOKEN", file=sys.stderr)
         return 2
-    with Client(os.environ.get("SUBETHA_URL", "https://subetha.org"), token=token) as c:
+    with Client(os.environ.get("SUBETHA_URL", "https://subetha.us"), token=token) as c:
         try:
             for msg in c.subscribe(args.topic, since=args.since):
                 when = datetime.fromtimestamp(msg.get("time", 0)).strftime("%H:%M:%S")

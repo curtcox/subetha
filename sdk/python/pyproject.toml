@@ -18,7 +18,7 @@ dependencies = [
 test = ["pytest>=8"]
 
 [project.urls]
-Homepage = "https://subetha.org"
+Homepage = "https://subetha.us"
 Source = "https://github.com/curtcox/subetha"
 
 [tool.hatch.build.targets.wheel]

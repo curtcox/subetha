@@ -6,7 +6,7 @@
 export const LANGUAGES = ["curl", "js", "python", "swift", "kotlin", "dart"];
 export const LANGUAGE_NAMES = { curl: "curl", js: "JavaScript", python: "Python", swift: "Swift", kotlin: "Kotlin", dart: "Dart" };
 
-const DEFAULT_BASE = "https://subetha.org";
+const DEFAULT_BASE = "https://subetha.us";
 const sq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`; // POSIX shell single quotes
 const dq = (s) => JSON.stringify(String(s)); // JS/Swift/Kotlin/Dart-safe double-quoted string
 const py = (s) => JSON.stringify(String(s)); // JSON strings are valid Python literals for BMP text

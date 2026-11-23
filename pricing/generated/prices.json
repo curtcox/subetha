@@ -216,7 +216,7 @@
       "floor_nanos": 200000
     },
     "inbound_email": {
-      "description": "Receive one email at topic@in.subetha.org",
+      "description": "Receive one email at topic@in.subetha.us",
       "unit": "email",
       "charge": "action",
       "transports": [],

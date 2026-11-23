@@ -34,7 +34,7 @@ Edge transports (BLE, audio, QR, LAN) never touch the relay and are free.
 |---|---:|
 | cloudflare_workers_paid | $5.00 |
 | cloudflare_containers_base | $5.00 |
-| domain_subetha_org | $1.25 |
+| domain_subetha_us | $1.25 |
 | clerk_pro | $25.00 |
 | twilio_number | $1.15 |
 | twilio_10dlc_campaign | $10.00 |

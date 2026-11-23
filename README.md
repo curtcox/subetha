@@ -4,15 +4,15 @@ Messaging platform: send and receive ntfy-style messages between any devices ove
 transport (IP, push, email, Slack, SMS/voice, MCP, Reticulum, Bluetooth, audio, QR/video),
 without devices needing to know about each other or how messages are relayed.
 
-Production: https://subetha.org · Docs: [`docs/`](docs/index.md) (published at
-https://subetha.org/docs/ and https://curtcox.github.io/subetha/) · Build info and pricing
+Production: https://subetha.us · Docs: [`docs/`](docs/index.md) (published at
+https://subetha.us/docs/ and https://curtcox.github.io/subetha/) · Build info and pricing
 report: https://curtcox.github.io/subetha/build-info.html
 
 See [PLAN.md](PLAN.md) for the project plan and open questions.
 
 ```bash
-curl -H "Authorization: Bearer $SUBETHA_TOKEN" -d "Backup done" https://subetha.org/@me/backups
-curl -H "Authorization: Bearer $SUBETHA_TOKEN" https://subetha.org/@me/backups/json   # stream
+curl -H "Authorization: Bearer $SUBETHA_TOKEN" -d "Backup done" https://subetha.us/@me/backups
+curl -H "Authorization: Bearer $SUBETHA_TOKEN" https://subetha.us/@me/backups/json   # stream
 ```
 
 ## What's implemented

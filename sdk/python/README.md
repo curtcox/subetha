@@ -1,6 +1,6 @@
 # subetha (Python SDK)
 
-Python SDK for [SubEtha](https://subetha.org), a transport-agnostic, ntfy-compatible pub/sub relay.
+Python SDK for [SubEtha](https://subetha.us), a transport-agnostic, ntfy-compatible pub/sub relay.
 It implements the protocol in [`spec/README.md`](../../spec/README.md) and passes every
 conformance vector in [`spec/vectors`](../../spec/vectors).
 
@@ -14,7 +14,7 @@ pytest sdk/python
 ```python
 from subetha import Client, SubEthaError
 
-c = Client("https://subetha.org", token="tk_...")
+c = Client("https://subetha.us", token="tk_...")
 c.publish("@alice/doorbell", "Opened", title="Front door", priority="high", tags=["door"])
 c.publish("@alice/doorbell", "Opened", route={"mode": "cheap", "deny": ["sms"]}, dry_run=True)
 

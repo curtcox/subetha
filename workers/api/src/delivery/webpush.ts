@@ -81,7 +81,7 @@ export async function vapidAuthorization(endpoint: string, env: Pick<Env, "VAPID
   const jwt = await signJwt("ES256", key, { typ: "JWT" }, {
     aud: new URL(endpoint).origin,
     exp: now + 12 * 3600,
-    sub: env.VAPID_SUBJECT || "mailto:ops@subetha.org",
+    sub: env.VAPID_SUBJECT || "mailto:ops@subetha.us",
   });
   return `vapid t=${jwt}, k=${env.VAPID_PUBLIC_KEY}`;
 }

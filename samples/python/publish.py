@@ -3,7 +3,7 @@
     pip install -e sdk/python
     SUBETHA_TOKEN=se_... python samples/python/publish.py [@me/doorbell]
 
-Env: SUBETHA_TOKEN (required), SUBETHA_URL (default https://subetha.org).
+Env: SUBETHA_TOKEN (required), SUBETHA_URL (default https://subetha.us).
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ def main() -> int:
     if not token:
         print("set SUBETHA_TOKEN", file=sys.stderr)
         return 2
-    with Client(os.environ.get("SUBETHA_URL", "https://subetha.org"), token=token) as c:
+    with Client(os.environ.get("SUBETHA_URL", "https://subetha.us"), token=token) as c:
         try:
             est = c.publish(topic, "ding", title="Doorbell", route={"mode": "all"}, dry_run=True)
             print(f"worst case ${est['estimate_usd_micros'] / 1e6:.6f}")

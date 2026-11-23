@@ -2,7 +2,7 @@
 # Dry run: the route plan and a worst-case cost estimate. Nothing is delivered;
 # you pay for one API request.
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 
 curl -sS -H "Authorization: Bearer $SUBETHA_TOKEN" \
   -H "X-Dry-Run: 1" \

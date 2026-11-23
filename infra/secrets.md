@@ -32,7 +32,7 @@ instance, a separate Firebase project) for staging.
 | Name | Values | Notes |
 |---|---|---|
 | `ENVIRONMENT` | `local`, `staging`, `production` | Set per environment in `wrangler.jsonc`. |
-| `BASE_URL` | `http://localhost:8787`, `https://staging.subetha.org`, `https://subetha.org` | Used in links, OAuth redirects, attachment URLs, and Twilio signature checks. |
+| `BASE_URL` | `http://localhost:8787`, `https://staging.subetha.us`, `https://subetha.us` | Used in links, OAuth redirects, attachment URLs, and Twilio signature checks. |
 | `DEV_BOOTSTRAP_SECRET` | `local-dev-only` | **Local only.** Enables `POST /v1/dev/bootstrap` when `ENVIRONMENT=local`. Never set it for staging or production. |
 
 ## Secrets
@@ -41,10 +41,10 @@ instance, a separate Firebase project) for staging.
 
 | Name | Where to get it |
 |---|---|
-| `CLERK_ISSUER` | Clerk dashboard → API Keys → "Frontend API URL" (e.g. `https://clerk.subetha.org`). Also advertised as the MCP authorization server. |
+| `CLERK_ISSUER` | Clerk dashboard → API Keys → "Frontend API URL" (e.g. `https://clerk.subetha.us`). Also advertised as the MCP authorization server. |
 | `CLERK_PUBLISHABLE_KEY` | Clerk dashboard → API Keys → Publishable key (`pk_live_…` / `pk_test_…`). Not secret; served by `GET /v1/config` to the console. |
 | `CLERK_JWKS_URL` | `<issuer>/.well-known/jwks.json`. |
-| `CLERK_AUTHORIZED_PARTIES` | Comma-separated origins allowed as the JWT `azp`, e.g. `https://subetha.org`. |
+| `CLERK_AUTHORIZED_PARTIES` | Comma-separated origins allowed as the JWT `azp`, e.g. `https://subetha.us`. |
 | `CLERK_JWKS` | Inline JWKS JSON. Tests and local development only. |
 | `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` | Optional. Credentials the relay uses to introspect **opaque** OAuth access tokens (RFC 7662) from MCP clients. Create them for the relay in Clerk (Configure → OAuth applications). Without them, only JWT access tokens are accepted. |
 | `OAUTH_INTROSPECTION_URL` | Optional. Defaults to `<CLERK_ISSUER>/oauth/token_info`. |
@@ -64,7 +64,7 @@ applications in the Clerk dashboard, so clients can register themselves.
 | Name | Where to get it |
 |---|---|
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | `node workers/api/scripts/vapid-keys.mjs`. Keep them stable: changing them invalidates every browser subscription. |
-| `VAPID_SUBJECT` | A contact URL for push services: `mailto:ops@subetha.org` or `https://subetha.org`. |
+| `VAPID_SUBJECT` | A contact URL for push services: `mailto:ops@subetha.us` or `https://subetha.us`. |
 
 ### FCM
 
@@ -80,7 +80,7 @@ applications in the Clerk dashboard, so clients can register themselves.
 | `APNS_KEY_ID` | The key's 10-character Key ID. |
 | `APNS_TEAM_ID` | Apple Developer → Membership → Team ID. |
 | `APNS_TOPIC` | The iOS app's bundle id. |
-| `APNS_ENDPOINT` | Optional. Default `https://api.push.apple.com`. APNs requires HTTP/2, which a Worker's `fetch()` may not negotiate: run [`gateways/apns-relay`](../gateways/apns-relay/README.md) and set this to its URL (e.g. `https://apns-relay.subetha.org`), or use FCM for iOS. |
+| `APNS_ENDPOINT` | Optional. Default `https://api.push.apple.com`. APNs requires HTTP/2, which a Worker's `fetch()` may not negotiate: run [`gateways/apns-relay`](../gateways/apns-relay/README.md) and set this to its URL (e.g. `https://apns-relay.subetha.us`), or use FCM for iOS. |
 | `APNS_RELAY_SECRET` | With the relay: the same random value as its `RELAY_SECRET` (at least 16 characters), sent as `x-relay-secret`. |
 
 ### Slack
@@ -103,10 +103,10 @@ applications in the Clerk dashboard, so clients can register themselves.
 
 | Name | Where to get it |
 |---|---|
-| `EMAIL_FROM` | Sender, e.g. `SubEtha <notify@subetha.org>`. The domain needs SPF/DKIM/DMARC for the sending provider. |
+| `EMAIL_FROM` | Sender, e.g. `SubEtha <notify@subetha.us>`. The domain needs SPF/DKIM/DMARC for the sending provider. |
 | `SES_ACCESS_KEY_ID`, `SES_SECRET_ACCESS_KEY` | AWS IAM user with `ses:SendEmail` only. Not needed when the `EMAIL` binding (Cloudflare Email Service) is configured. |
 | `SES_REGION` | The SES region with the verified domain (default `us-east-1`). |
-| `INBOUND_EMAIL_DOMAIN` | `in.subetha.org` (`in.staging.subetha.org` for staging); must match the Email Routing setup in `cloudflare-zone.md`. |
+| `INBOUND_EMAIL_DOMAIN` | `in.subetha.us` (`in.staging.subetha.us` for staging); must match the Email Routing setup in `cloudflare-zone.md`. |
 
 ### Reticulum / LXMF
 

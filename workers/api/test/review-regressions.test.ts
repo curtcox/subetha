@@ -131,7 +131,7 @@ describe("review regressions, batch 2", () => {
 
   it("rejects webhook IP literals and bare publishable scopes", async () => {
     const a = await bootstrap("hard");
-    for (const address of ["https://10.0.0.1/x", "https://[::1]/x", "https://subetha.org./x", "https://intranet/x"]) {
+    for (const address of ["https://10.0.0.1/x", "https://[::1]/x", "https://subetha.us./x", "https://intranet/x"]) {
       expect((await SELF.fetch(`${BASE}/v1/endpoints`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ kind: "webhook", address }) })).status, address).toBe(400);
     }
     const r = await SELF.fetch(`${BASE}/v1/tokens`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ scopes: ["publish"], origins: ["https://example.com"], daily_cap_usd: 1 }) });

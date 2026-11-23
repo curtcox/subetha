@@ -2,7 +2,7 @@
 # Register phone and browser push endpoints. Apps normally do this through the SDK; these are
 # the raw calls. Push endpoints need no verification code: the app owns the token.
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 AUTH=(-H "Authorization: Bearer $SUBETHA_TOKEN" -H "Content-Type: application/json")
 
 # iOS (APNs device token, hex):

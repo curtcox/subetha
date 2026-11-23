@@ -1,7 +1,7 @@
 name: subetha
 description: SubEtha client for Dart and Flutter. Publish and subscribe over any transport.
 version: 0.1.0
-homepage: https://subetha.org
+homepage: https://subetha.us
 repository: https://github.com/curtcox/subetha/tree/main/sdk/flutter
 
 environment:

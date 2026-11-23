@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Slack: install the app in a workspace, then bind a channel to a topic (both directions).
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 AUTH=(-H "Authorization: Bearer $SUBETHA_TOKEN" -H "Content-Type: application/json")
 
 # 1. Open the install URL in a browser and approve. You land back in the console.

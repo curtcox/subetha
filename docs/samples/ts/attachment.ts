@@ -15,7 +15,7 @@ export async function run({ baseUrl, token, topic, fetch = globalThis.fetch }: S
     body: csv,
   });
   const msg = (await r.json()) as { id: string; attachment: { name: string; url: string; size: number; type: string } };
-  console.log(msg.attachment); // { name: "energy.csv", url: "https://subetha.org/file/…/energy.csv", size: 53, type: "text/csv" }
+  console.log(msg.attachment); // { name: "energy.csv", url: "https://subetha.us/file/…/energy.csv", size: 53, type: "text/csv" }
 
   // Anyone with the URL can download it until the message expires (the topic owner pays per download).
   const file = await fetch(msg.attachment.url);

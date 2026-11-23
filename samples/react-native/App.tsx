@@ -34,7 +34,7 @@ function Doorbell({ fg, onClient }: { fg: string; onClient: (c: SubEtha | null) 
   const core = useCore();
   const [token, setToken] = useState("");
   const [topic, setTopic] = useState("@me/doorbell");
-  const [baseUrl, setBaseUrl] = useState("https://subetha.org");
+  const [baseUrl, setBaseUrl] = useState("https://subetha.us");
   const [client, setClientState] = useState<SubEtha | null>(null);
   const setClient = (c: SubEtha | null) => {
     setClientState(c);

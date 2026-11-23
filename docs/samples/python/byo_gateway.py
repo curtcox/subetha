@@ -10,7 +10,7 @@ import threading
 from subetha import Client
 
 TOPIC = os.environ.get("TOPIC", "@me/mesh")
-client = Client(os.environ.get("SUBETHA_URL", "https://subetha.org"), token=os.environ["SUBETHA_TOKEN"])
+client = Client(os.environ.get("SUBETHA_URL", "https://subetha.us"), token=os.environ["SUBETHA_TOKEN"])
 seen: set[str] = set()  # ids we published, so we don't echo them back
 
 

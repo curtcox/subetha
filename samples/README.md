@@ -16,7 +16,7 @@ Every platform sample implements the same **doorbell** flow (PLAN §14 track E e
 
 | Sample | Stack | SDK | Built in CI |
 |---|---|---|---|
-| [`web`](web) | one static HTML page, `<subetha-feed>` / `<subetha-send>` + the JS client from `https://subetha.org/sdk.js` | `sdk/js` | — |
+| [`web`](web) | one static HTML page, `<subetha-feed>` / `<subetha-send>` + the JS client from `https://subetha.us/sdk.js` | `sdk/js` | — |
 | [`cli`](cli) | shell scripts: `curl` and the `subetha` CLI | `sdk/js` CLI | — |
 | [`agent-mcp`](agent-mcp) | MCP config for Claude Desktop / Claude Code + a fetch-only Node script | remote MCP | — |
 | [`python`](python) | publish / subscribe scripts | `sdk/python` | — |

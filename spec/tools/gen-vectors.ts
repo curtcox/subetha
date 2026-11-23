@@ -22,7 +22,7 @@ const canonicalValid: { name: string; input: Json; canonical: string }[] = [
   { name: "escapes", input: { s: "quote\" backslash\\ nl\n cr\r tab\t bs\b ff\f nul\u0000 us\u001f del\u007f" }, canonical: "" },
   { name: "non-ascii raw", input: { s: "héllo 🚪 日本  " }, canonical: "" },
   { name: "integers", input: { a: 0, b: -1, c: 9007199254740991, d: -9007199254740991 }, canonical: "" },
-  { name: "slash not escaped", input: { u: "https://subetha.org/@a/b" }, canonical: "" },
+  { name: "slash not escaped", input: { u: "https://subetha.us/@a/b" }, canonical: "" },
 ];
 for (const v of canonicalValid) v.canonical = canonicalize(v.input);
 const canonicalInvalid = [
@@ -84,10 +84,10 @@ write("signatures.json", {
 {
   const NONCE = "nonce_0123456789abcdef";
   const reqCases: { name: string; method: string; url: string; body: string; headers: Record<string, string>; time: number }[] = [
-    { name: "GET poll, no content headers", method: "GET", url: "https://subetha.org/@alice/doorbell/json?poll=1&since=all", body: "", headers: {}, time: 1763750000 },
-    { name: "publish with ntfy headers", method: "post", url: "https://subetha.org/@alice/doorbell", body: "Opened", headers: { "X-Title": "Front door", "X-Priority": "4", "X-Tags": "door,warning", "Content-Type": "text/plain;charset=UTF-8", Authorization: "Bearer ignored", "User-Agent": "subetha-test/1", Accept: "application/json" }, time: 1763750001 },
+    { name: "GET poll, no content headers", method: "GET", url: "https://subetha.us/@alice/doorbell/json?poll=1&since=all", body: "", headers: {}, time: 1763750000 },
+    { name: "publish with ntfy headers", method: "post", url: "https://subetha.us/@alice/doorbell", body: "Opened", headers: { "X-Title": "Front door", "X-Priority": "4", "X-Tags": "door,warning", "Content-Type": "text/plain;charset=UTF-8", Authorization: "Bearer ignored", "User-Agent": "subetha-test/1", Accept: "application/json" }, time: 1763750001 },
     { name: "JSON publish, port and routing", method: "POST", url: "http://localhost:8787/", body: "{\"topic\":\"@a/b\",\"message\":\"héllo 🚪\"}", headers: { "content-type": "application/json", "idempotency-key": "k-1", "x-route-mode": "cheap", "x-max-cost": "  0.002\t" }, time: 1763750002 },
-    { name: "percent-encoded path", method: "PUT", url: "https://staging.subetha.org:443/@a/b%20c?x=%2F", body: "", headers: { "X-Dry-Run": "1" }, time: 1763750003 },
+    { name: "percent-encoded path", method: "PUT", url: "https://staging.subetha.us:443/@a/b%20c?x=%2F", body: "", headers: { "X-Dry-Run": "1" }, time: 1763750003 },
   ];
   const key = await deviceKeyFromSeed(hexDecode(seeds[0]!));
   const cases = [];

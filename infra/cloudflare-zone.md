@@ -1,43 +1,43 @@
-# Cloudflare zone: subetha.org
+# Cloudflare zone: subetha.us
 
 Short enough to apply by hand; codify in Terraform (`cloudflare` provider) once it stabilizes.
-Open question 5 in PLAN.md (is `subetha.org` on Cloudflare yet?) must be settled first.
+Open question 5 in PLAN.md (is `subetha.us` on Cloudflare yet?) must be settled first.
 
 ## Hostnames
 
 | Hostname | Points at | Created by |
 |---|---|---|
-| `subetha.org` | Worker `subetha-api-production` (custom domain) | `wrangler deploy --env production` |
-| `mcp.subetha.org` | Worker `subetha-api-production` (custom domain; same Worker serves `/mcp`) | `wrangler deploy --env production` |
-| `staging.subetha.org` | Worker `subetha-api-staging` | `wrangler deploy --env staging` |
-| `in.subetha.org` | Email Routing (MX records added by the dashboard) | Email Routing setup, below |
-| `dev.subetha.org` (optional) | `CNAME curtcox.github.io` for GitHub Pages | DNS + Pages settings (PLAN open question 2) |
+| `subetha.us` | Worker `subetha-api-production` (custom domain) | `wrangler deploy --env production` |
+| `mcp.subetha.us` | Worker `subetha-api-production` (custom domain; same Worker serves `/mcp`) | `wrangler deploy --env production` |
+| `staging.subetha.us` | Worker `subetha-api-staging` | `wrangler deploy --env staging` |
+| `in.subetha.us` | Email Routing (MX records added by the dashboard) | Email Routing setup, below |
+| `dev.subetha.us` (optional) | `CNAME curtcox.github.io` for GitHub Pages | DNS + Pages settings (PLAN open question 2) |
 
 Custom domains create their own proxied DNS records and certificates; don't add A/AAAA records
 for them by hand.
 
 ## Email Routing (inbound email → topics)
 
-1. Dashboard → `subetha.org` → Email → Email Routing → enable for the subdomain `in.subetha.org`
+1. Dashboard → `subetha.us` → Email → Email Routing → enable for the subdomain `in.subetha.us`
    (it adds the MX and SPF records).
 2. Routing rules → **Catch-all** → action **Send to a Worker** → `subetha-api-production`.
-   (Staging: `in.staging.subetha.org` → `subetha-api-staging`.)
+   (Staging: `in.staging.subetha.us` → `subetha-api-staging`.)
 3. Set `INBOUND_EMAIL_DOMAIN` to match (see `secrets.md`).
 
-Mail to `<handle>.<name>@in.subetha.org` or `t_…@in.subetha.org` then reaches the Worker's
+Mail to `<handle>.<name>@in.subetha.us` or `t_…@in.subetha.us` then reaches the Worker's
 `email()` handler.
 
 ## Outbound email
 
 Either:
 
-- **Cloudflare Email Service**: enable sending for `subetha.org`, then add to each environment in
+- **Cloudflare Email Service**: enable sending for `subetha.us`, then add to each environment in
   `wrangler.jsonc`: `"send_email": [{ "name": "EMAIL" }]`; or
-- **Amazon SES**: verify `subetha.org` in SES, publish its DKIM CNAMEs here, and set the `SES_*`
+- **Amazon SES**: verify `subetha.us` in SES, publish its DKIM CNAMEs here, and set the `SES_*`
   secrets.
 
 Either way, publish SPF (`v=spf1 include:… ~all`), DKIM, and
-`_dmarc.subetha.org TXT "v=DMARC1; p=quarantine; rua=mailto:dmarc@subetha.org"`.
+`_dmarc.subetha.us TXT "v=DMARC1; p=quarantine; rua=mailto:dmarc@subetha.us"`.
 
 ## Zone settings
 

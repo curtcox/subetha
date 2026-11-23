@@ -7,7 +7,7 @@ prepaid, capped billing as everything else.
 ## The MCP server
 
 SubEtha runs a remote [Model Context Protocol](https://modelcontextprotocol.io) server at
-**`https://subetha.org/mcp`** (Streamable HTTP, JSON responses). Authenticate with a bearer token.
+**`https://subetha.us/mcp`** (Streamable HTTP, JSON responses). Authenticate with a bearer token.
 
 | Tool | What it does |
 |---|---|
@@ -52,7 +52,7 @@ An OAuth-connected client is deliberately limited:
 - Each client has its own **daily spend cap**: $1 by default. Change it, or set it to 0 to turn
   OAuth access off, with `PATCH /v1/account {"oauth_daily_cap_micros": 5000000}` or in the
   console's Billing tab.
-- A token that names an audience must name this server (`https://subetha.org/mcp`); one issued
+- A token that names an audience must name this server (`https://subetha.us/mcp`); one issued
   for another resource gets `401` with `error="invalid_token"`, as does an expired one.
 
 ### On the wire
@@ -74,11 +74,11 @@ What an MCP client sends, as raw JSON-RPC:
 
 Machine-readable docs for agents that read the web:
 
-- [`/llms.txt`](https://subetha.org/llms.txt): a summary and links in the
+- [`/llms.txt`](https://subetha.us/llms.txt): a summary and links in the
   [llmstxt.org](https://llmstxt.org) format.
-- [`/llms-full.txt`](https://subetha.org/llms-full.txt): every docs page in one file.
+- [`/llms-full.txt`](https://subetha.us/llms-full.txt): every docs page in one file.
 - Every docs page is also available as Markdown: replace `.html` with `.md`.
-- [`/openapi.yaml`](https://subetha.org/openapi.yaml): the complete HTTP API (OpenAPI 3.1).
+- [`/openapi.yaml`](https://subetha.us/openapi.yaml): the complete HTTP API (OpenAPI 3.1).
 
 ## Agent-friendly API details
 

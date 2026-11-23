@@ -3,7 +3,7 @@
 monthly:
   cloudflare_workers_paid: 5.00
   cloudflare_containers_base: 5.00
-  domain_subetha_org: 1.25          # ~$15/yr
+  domain_subetha_us: 1.25          # ~$15/yr
   clerk_pro: 25.00
   twilio_number: 1.15
   twilio_10dlc_campaign: 10.00       # ~$1.50–$10/mo + one-time vetting, amortized

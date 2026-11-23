@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     env:
-      SUBETHA_URL: ${{ vars.STAGING_URL || 'https://staging.subetha.org' }}
+      SUBETHA_URL: ${{ vars.STAGING_URL || 'https://staging.subetha.us' }}
       SUBETHA_TOKEN: ${{ secrets.SAMPLES_TOKEN }}
       SUBETHA_TOPIC: ${{ vars.SAMPLES_TOPIC || '@samples/nightly' }}
     steps:

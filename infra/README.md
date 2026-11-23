@@ -9,7 +9,7 @@ environments (PLAN §7, §13).
 | File | What |
 |---|---|
 | [`secrets.md`](secrets.md) | Every binding, variable, and secret the Worker reads, and where to get each |
-| [`cloudflare-zone.md`](cloudflare-zone.md) | DNS, custom domains, Email Routing, and zone settings for `subetha.org` |
+| [`cloudflare-zone.md`](cloudflare-zone.md) | DNS, custom domains, Email Routing, and zone settings for `subetha.us` |
 | [`../.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) | Staging on push to `main`, production on `v*` tags |
 | [`../.github/workflows/pages.yml`](../.github/workflows/pages.yml) | GitHub Pages: docs, build info, pricing report |
 
@@ -19,7 +19,7 @@ from `cloudflare-zone.md`.
 ## One-time setup per environment
 
 You need a Cloudflare account on the Workers Paid plan (Durable Objects with SQLite, Queues), the
-`subetha.org` zone on that account, and `wrangler` (`pnpm install` provides it; run the commands
+`subetha.us` zone on that account, and `wrangler` (`pnpm install` provides it; run the commands
 below from `workers/api`, e.g. `pnpm --filter @subetha/api exec wrangler …`, after
 `wrangler login`).
 
@@ -63,7 +63,7 @@ Other bindings need no creation step:
   so change them if another Worker already uses them.
 - **Cron**: `17 3 * * *` (daily rent metering, freeze/cleanup, Stripe reconciliation, Twilio price
   check, expired-attachment cleanup).
-- **Custom domains** (`staging.subetha.org`; `subetha.org` and `mcp.subetha.org` for production)
+- **Custom domains** (`staging.subetha.us`; `subetha.us` and `mcp.subetha.us` for production)
   are attached by `wrangler deploy` because the routes use `custom_domain: true`.
 - **Outbound email**: to use Cloudflare Email Service instead of SES, add a `send_email` binding
   named `EMAIL` to the environment (see `cloudflare-zone.md`).
@@ -75,8 +75,8 @@ Apply the database schema and deploy once by hand, or let the workflow do it:
 npx wrangler d1 migrations apply DB --env staging --remote
 pnpm --filter @subetha/sdk build && pnpm --filter @subetha/site build   # static assets
 npx wrangler deploy --env staging
-curl https://staging.subetha.org/v1/health
-curl https://staging.subetha.org/v1/status   # which transports are configured
+curl https://staging.subetha.us/v1/health
+curl https://staging.subetha.us/v1/status   # which transports are configured
 ```
 
 ## GitHub configuration
@@ -88,12 +88,12 @@ curl https://staging.subetha.org/v1/status   # which transports are configured
    - `CLOUDFLARE_API_TOKEN`: My Profile → API Tokens → Create Token → "Edit Cloudflare Workers"
      template, plus **Account › D1 › Edit**, **Account › Queues › Edit**,
      **Account › Workers R2 Storage › Edit**, **Account › Workers KV Storage › Edit**, and
-     **Zone › Workers Routes › Edit** and **Zone › DNS › Edit** for `subetha.org` (custom domains).
+     **Zone › Workers Routes › Edit** and **Zone › DNS › Edit** for `subetha.us` (custom domains).
 3. Add whichever Worker secrets from [`secrets.md`](secrets.md) the environment should have.
    The deploy job pushes every one that is set with `wrangler secret bulk`; unset ones are left
    alone (so secrets put by hand with `wrangler secret put` survive).
 4. For Pages: Settings → Pages → Source: **GitHub Actions**. For a custom domain (PLAN open
-   question 2), set the repository variables `PAGES_BASE_PATH=/` and `PAGES_URL=https://dev.subetha.org`
+   question 2), set the repository variables `PAGES_BASE_PATH=/` and `PAGES_URL=https://dev.subetha.us`
    and add the CNAME in Pages settings.
 
 ## Deploying
@@ -165,5 +165,5 @@ Local baseline (`wrangler dev` on one machine, November 2026), all deliveries re
 Run the same against staging before launch (PLAN §14 Phase 3):
 
 ```bash
-SUBETHA_URL=https://staging.subetha.org SUBETHA_TOKEN=se_… node scripts/loadtest.mjs --topic @me/load --subscribers 100 --publishers 10 --messages 30
+SUBETHA_URL=https://staging.subetha.us SUBETHA_TOKEN=se_… node scripts/loadtest.mjs --topic @me/load --subscribers 100 --publishers 10 --messages 30
 ```

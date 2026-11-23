@@ -1,4 +1,4 @@
-// Drop-in web SDK: <script src="https://subetha.org/sdk.js"></script>
+// Drop-in web SDK: <script src="https://subetha.us/sdk.js"></script>
 //   <subetha-feed topic="@me/doorbell" token="se_…"></subetha-feed>
 //   <subetha-send topic="@me/doorbell" token="se_…"></subetha-send>
 // Use publishable (origin-bound, single-topic, capped) tokens on public pages.
@@ -9,9 +9,9 @@ import { subscribeWebPush } from "./webpush.ts";
 const scriptOrigin = (() => {
   try {
     const src = (document.currentScript as HTMLScriptElement | null)?.src;
-    return src ? new URL(src).origin : "https://subetha.org";
+    return src ? new URL(src).origin : "https://subetha.us";
   } catch {
-    return "https://subetha.org";
+    return "https://subetha.us";
   }
 })();
 

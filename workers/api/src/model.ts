@@ -21,7 +21,7 @@ export interface TopicPolicy {
   paused?: boolean;
   /** Minimum message priority for a transport, e.g. { sms: 4 }. */
   min_priority?: Partial<Record<Transport, number>>;
-  /** Inbound email senders allowed to publish via topic@in.subetha.org ("*" = anyone). */
+  /** Inbound email senders allowed to publish via topic@in.subetha.us ("*" = anyone). */
   email_senders?: string[];
   /** UTC "HH:MM"–"HH:MM": paid transports are suppressed (downgrade to free ones). */
   quiet_hours?: { start: string; end: string };

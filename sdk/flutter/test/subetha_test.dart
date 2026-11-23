@@ -137,7 +137,7 @@ void main() {
     final relay = Relay((_, __) => Relay.lines(['{"id":"01A","topic":"@a/b c","message":"one"}', '{"id":"01B","topic":"@a/b c","message":"two"}']));
     final got = await SubEtha(httpClient: relay.client).poll(['@a/b c', '@a/d'], priority: [4, 5]);
     expect(got.map((m) => m.message), ['one', 'two']);
-    expect(relay.requests.single.request.url.toString(), 'https://subetha.org/@a/b%20c,@a/d/json?poll=1&since=all&priority=4,5');
+    expect(relay.requests.single.request.url.toString(), 'https://subetha.us/@a/b%20c,@a/d/json?poll=1&since=all&priority=4,5');
   });
 
   test('subscribe dedupes, resumes from the last id, and acks', () async {

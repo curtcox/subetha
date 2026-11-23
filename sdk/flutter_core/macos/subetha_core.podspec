@@ -9,7 +9,7 @@ Pod::Spec.new do |s|
   s.description      = <<-DESC
 Envelope signatures, E2EE, and edge transports from the SubEtha Rust core, built by cargokit.
                        DESC
-  s.homepage         = 'https://subetha.org'
+  s.homepage         = 'https://subetha.us'
   s.license          = { :type => 'MIT' }
   s.author           = { 'SubEtha' => 'https://github.com/curtcox/subetha' }
   s.module_name      = 'subetha_core'

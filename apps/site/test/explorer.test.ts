@@ -34,10 +34,10 @@ describe("API explorer", () => {
   });
 
   it("builds requests with literal topics and curl", () => {
-    const req = buildRequest("https://subetha.org/", op("publish"), { path: { topic: "@me/door bell" }, header: { "X-Dry-Run": "1", "X-Title": "" }, body: "hi" });
-    expect(req.url).toBe("https://subetha.org/@me/door%20bell");
+    const req = buildRequest("https://subetha.us/", op("publish"), { path: { topic: "@me/door bell" }, header: { "X-Dry-Run": "1", "X-Title": "" }, body: "hi" });
+    expect(req.url).toBe("https://subetha.us/@me/door%20bell");
     expect(req.headers).toEqual({ "X-Dry-Run": "1", "Content-Type": "text/plain" });
-    expect(toCurl(req)).toBe(`curl \\\n  -X POST \\\n  -H "Authorization: Bearer $SUBETHA_TOKEN" \\\n  -H 'X-Dry-Run: 1' \\\n  -H 'Content-Type: text/plain' \\\n  --data-binary 'hi' \\\n  'https://subetha.org/@me/door%20bell'`);
+    expect(toCurl(req)).toBe(`curl \\\n  -X POST \\\n  -H "Authorization: Bearer $SUBETHA_TOKEN" \\\n  -H 'X-Dry-Run: 1' \\\n  -H 'Content-Type: text/plain' \\\n  --data-binary 'hi' \\\n  'https://subetha.us/@me/door%20bell'`);
     const sub = buildRequest("http://x", ops.find((o: { path: string }) => o.path === "/{topics}/json"), { path: { topics: "@a/b,t_x" }, query: { poll: "1" } });
     expect(sub.url).toBe("http://x/@a/b,t_x/json?poll=1");
     expect(() => buildRequest("http://x", op("publish"), {})).toThrow(/topic is required/);

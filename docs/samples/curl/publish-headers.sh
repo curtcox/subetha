@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Publish with ntfy headers: title, priority, tags, click URL, action buttons, Markdown.
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 
 curl -sS -H "Authorization: Bearer $SUBETHA_TOKEN" \
   -H "Title: Front door" \

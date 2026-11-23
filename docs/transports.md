@@ -129,7 +129,7 @@ link.
 <!-- include: samples/curl/endpoint-email.sh -->
 
 **Inbound:** mail sent to a topic's address publishes to the topic, charged to the topic owner.
-The address is `<handle>.<name>@in.subetha.org` for `@handle/name`, or `t_…@in.subetha.org` for
+The address is `<handle>.<name>@in.subetha.us` for `@handle/name`, or `t_…@in.subetha.us` for
 a secret topic. The subject becomes the title and the plain-text body (quoted replies and
 signatures removed) the message, tagged `email`. Only senders allowed by the topic's
 `email_senders` policy get through: exact addresses, `@example.com` for a whole domain, or `*`.
@@ -137,8 +137,8 @@ Messages over 512 KB are rejected.
 
 **Operator setup:** outbound uses the Cloudflare Email Service `send_email` binding `EMAIL` when
 bound, otherwise Amazon SES (`SES_ACCESS_KEY_ID`, `SES_SECRET_ACCESS_KEY`, `SES_REGION`). Set
-`EMAIL_FROM` (default `SubEtha <notify@subetha.org>`) and authenticate the sending domain (SPF,
-DKIM, DMARC). Inbound needs Cloudflare Email Routing on `in.subetha.org` with a catch-all rule
+`EMAIL_FROM` (default `SubEtha <notify@subetha.us>`) and authenticate the sending domain (SPF,
+DKIM, DMARC). Inbound needs Cloudflare Email Routing on `in.subetha.us` with a catch-all rule
 that sends to the Worker (`INBOUND_EMAIL_DOMAIN`).
 
 ## Slack
@@ -152,9 +152,9 @@ workspaces you installed it in (their `team_id`s):
 <!-- include: samples/curl/slack.sh -->
 
 **Operator setup:** create a Slack app with the bot scopes `chat:write`, `channels:history`,
-`groups:history`, and `channels:read`, the OAuth redirect URL `https://subetha.org/v1/slack/oauth`,
+`groups:history`, and `channels:read`, the OAuth redirect URL `https://subetha.us/v1/slack/oauth`,
 and Event Subscriptions (`message.channels`, `message.groups`) sent to
-`https://subetha.org/v1/hooks/slack/events`. Set `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and
+`https://subetha.us/v1/hooks/slack/events`. Set `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and
 `SLACK_SIGNING_SECRET`.
 
 ## SMS and voice
@@ -183,8 +183,8 @@ Enable each country you want to reach on the account, then add numbers there as 
 
 ```bash
 curl -X PATCH -H "Authorization: Bearer $SUBETHA_TOKEN" -d '{"telephony_countries":["CA","GB"]}' \
-  https://subetha.org/v1/account
-curl https://subetha.org/v1/prices/destinations   # today's per-country prices (public)
+  https://subetha.us/v1/account
+curl https://subetha.us/v1/prices/destinations   # today's per-country prices (public)
 ```
 
 - Countries on offer: CA, GB, IE, DE, FR, NL, BE, ES, IT, PT, AT, CH, SE, NO, DK, FI, PL, AU, NZ,
@@ -207,7 +207,7 @@ curl https://subetha.org/v1/prices/destinations   # today's per-country prices (
 
 **Operator setup:** a Twilio account with a US number registered for A2P 10DLC. Set
 `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM`, and point the number's incoming
-message webhook at `https://subetha.org/v1/hooks/twilio/sms` (HTTP POST). Voice acks call back to
+message webhook at `https://subetha.us/v1/hooks/twilio/sms` (HTTP POST). Voice acks call back to
 `/v1/hooks/twilio/voice-ack` automatically. The SMS consent, STOP, and HELP language is in the
 [Acceptable Use Policy](legal/aup.md).
 

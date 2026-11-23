@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Create or configure a topic. PUT replaces the whole policy.
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 
 curl -sS -X PUT -H "Authorization: Bearer $SUBETHA_TOKEN" -H "Content-Type: application/json" -d '{
   "policy": {

@@ -1,6 +1,6 @@
 # Agents: SubEtha over MCP
 
-SubEtha runs a remote MCP server at `https://subetha.org/mcp` (Streamable HTTP, JSON-RPC). Its
+SubEtha runs a remote MCP server at `https://subetha.us/mcp` (Streamable HTTP, JSON-RPC). Its
 tools are `publish`, `poll`, `wait_for_message` (long-poll), `list_topics`, `create_topic` and
 `estimate_cost`. Use a token scoped to the topics the agent may touch, with a daily cap:
 
@@ -11,7 +11,7 @@ subetha token create --scopes publish:@me/agent,subscribe:@me/agent --daily-cap 
 ## Claude Code
 
 ```bash
-claude mcp add --transport http subetha https://subetha.org/mcp --header "Authorization: Bearer $TOKEN"
+claude mcp add --transport http subetha https://subetha.us/mcp --header "Authorization: Bearer $TOKEN"
 ```
 
 Then ask, for example, "publish 'build finished' to @me/agent, then wait for my reply on it".
@@ -20,7 +20,7 @@ Then ask, for example, "publish 'build finished' to @me/agent, then wait for my 
 
 Add [`claude_desktop_config.json`](claude_desktop_config.json) to your Claude Desktop config. It
 bridges the remote server with `mcp-remote` and passes the bearer header. Desktop builds that
-support remote connectors natively can add `https://subetha.org/mcp` under Settings →
+support remote connectors natively can add `https://subetha.us/mcp` under Settings →
 Connectors instead.
 
 ## Any client: plain fetch

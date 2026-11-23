@@ -35,7 +35,7 @@ SDKs interoperate.
 
 `@subetha/sdk/edge` has the protocol logic and runs anywhere (browser, Node, Workers). The
 browser shims (`playAudioFrame`, `listenAudio`, `showAnimatedQr`, `scanAnimatedQr`,
-`connectBlePeer`) are in the same module. The script-tag bundle is `https://subetha.org/edge.js`,
+`connectBlePeer`) are in the same module. The script-tag bundle is `https://subetha.us/edge.js`,
 which sets `window.SubEthaEdge`.
 
 <!-- include: samples/ts/edge.ts#snippet -->

@@ -4,9 +4,9 @@
 //
 //   SUBETHA_TOKEN=se_... node samples/agent-mcp/call-mcp.mjs [@me/doorbell]
 //
-// Env: SUBETHA_URL (default https://subetha.org).
+// Env: SUBETHA_URL (default https://subetha.us).
 
-const base = (process.env.SUBETHA_URL ?? "https://subetha.org").replace(/\/+$/, "");
+const base = (process.env.SUBETHA_URL ?? "https://subetha.us").replace(/\/+$/, "");
 const token = process.env.SUBETHA_TOKEN;
 const topic = process.argv[2] ?? "@me/doorbell";
 if (!token) {

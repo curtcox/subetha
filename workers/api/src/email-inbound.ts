@@ -1,4 +1,4 @@
-// Inbound email: <handle>.<name>@in.subetha.org or t_…@in.subetha.org → publish (PLAN §6).
+// Inbound email: <handle>.<name>@in.subetha.us or t_…@in.subetha.us → publish (PLAN §6).
 // Charged to the topic owner as inbound_email + publish; senders must be allowed by the topic's
 // email_senders policy.
 import { isTopic, utf8 } from "@subetha/sdk/protocol";

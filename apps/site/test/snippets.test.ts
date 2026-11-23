@@ -14,7 +14,7 @@ const has = (cmd: string) => {
 };
 
 const tricky = { baseUrl: "http://localhost:8787/", topic: "@me/door", message: `It's "open" $HOME \\ ok\nline2`, title: "Front's $door", priority: 5, tags: ["door", "warn"], mode: "all", maxCostUsd: 0.05, deny: ["sms"] };
-const plain = { baseUrl: "https://subetha.org", topic: "@me/door", message: "hi", priority: 3, mode: "any" };
+const plain = { baseUrl: "https://subetha.us", topic: "@me/door", message: "hi", priority: 3, mode: "any" };
 
 describe("copy as …", () => {
   it("covers every language and omits defaults", () => {

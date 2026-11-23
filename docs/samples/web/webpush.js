@@ -1,8 +1,8 @@
 // Register this browser for Web Push and subscribe it to topics, from a page that loads
-// https://subetha.org/sdk.js and serves the service worker at /sw.js (copy apps/site/public/sw.js).
+// https://subetha.us/sdk.js and serves the service worker at /sw.js (copy apps/site/public/sw.js).
 // Run it from a click handler so the browser can ask for notification permission. Use a token
 // that can manage endpoints (your own console session, not a public page).
-async function enableWebPush({ baseUrl = "https://subetha.org", token, topics }) {
+async function enableWebPush({ baseUrl = "https://subetha.us", token, topics }) {
   const api = async (path, body) => {
     const r = await fetch(`${baseUrl}${path}`, {
       method: body ? "POST" : "GET",

@@ -243,7 +243,7 @@ describe("security review: rent freeze", () => {
 describe("security review: web push endpoints", () => {
   it("rejects push subscriptions pointing at the relay, IPs or localhost", async () => {
     const a = await bootstrap("wpssrf");
-    for (const endpoint of ["https://127.0.0.1/x", "https://localhost/x", "https://subetha.org/x"]) {
+    for (const endpoint of ["https://127.0.0.1/x", "https://localhost/x", "https://subetha.us/x"]) {
       const address = JSON.stringify({ endpoint, keys: { p256dh: "x", auth: "y" } });
       const r = await SELF.fetch(`${BASE}/v1/endpoints`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ kind: "webpush", address }) });
       expect(r.status, endpoint).toBe(400);

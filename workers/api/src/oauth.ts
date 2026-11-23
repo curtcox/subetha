@@ -28,7 +28,7 @@ export interface OAuthToken {
 
 /**
  * Resource identifiers this server answers to (RFC 8707 / MCP): the MCP endpoint and the API
- * origin, for BASE_URL and for the origin the request arrived on (mcp.subetha.org routes here too).
+ * origin, for BASE_URL and for the origin the request arrived on (mcp.subetha.us routes here too).
  */
 export function resourceIds(env: Env, requestOrigin?: string): string[] {
   const origins = [...new Set([env.BASE_URL.replace(/\/+$/, ""), ...(requestOrigin ? [requestOrigin] : [])])];

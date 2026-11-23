@@ -2,7 +2,7 @@
 # The owner's side of device enrollment. (The device's side, which signs a proof with its
 # Ed25519 key, is easiest with an SDK: see samples/ts/devices.ts.)
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 AUTH=(-H "Authorization: Bearer $SUBETHA_TOKEN" -H "Content-Type: application/json")
 
 # Approve the code a device is showing (the console's "Devices" page does the same):

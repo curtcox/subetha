@@ -362,7 +362,7 @@ public class SubEtha @JvmOverloads constructor(
     public suspend fun trace(topic: String, id: String): JsonObject = requestObject("GET", "/v1/traces/${enc(id)}?topic=${enc(topic)}")
 
     public companion object {
-        public const val DEFAULT_BASE_URL: String = "https://subetha.org"
+        public const val DEFAULT_BASE_URL: String = "https://subetha.us"
         public const val VERSION: String = "0.1.0"
         private const val USER_AGENT = "subetha-kotlin/$VERSION"
 

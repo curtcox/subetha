@@ -1,7 +1,7 @@
 name: subetha_core
 description: The SubEtha Rust core for Flutter (flutter_rust_bridge) - envelope signatures, E2EE, and edge transports (sound, animated QR, Bluetooth LE gossip).
 version: 0.1.0
-homepage: https://subetha.org
+homepage: https://subetha.us
 repository: https://github.com/curtcox/subetha/tree/main/sdk/flutter_core
 publish_to: none
 

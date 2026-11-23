@@ -2,7 +2,7 @@
   "mcpServers": {
     "subetha": {
       "type": "http",
-      "url": "https://subetha.org/mcp",
+      "url": "https://subetha.us/mcp",
       "headers": { "Authorization": "Bearer ${SUBETHA_TOKEN}" }
     }
   }

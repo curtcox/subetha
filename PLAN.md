@@ -1,6 +1,6 @@
 # SubEtha — Project Plan
 
-> **subetha.org**: send and receive ntfy-style messages between any devices, over any transport,
+> **subetha.us**: send and receive ntfy-style messages between any devices, over any transport,
 > without either side knowing how (or to whom) the message is being delivered.
 
 Status: **DRAFT v0.2**. Decisions made so far are in [§15](#15-decisions-and-open-questions), along with the remaining open questions. Assumptions are marked **(A)**.
@@ -24,8 +24,8 @@ Guiding principles:
 3. **The owner stays in control.** Account owners can restrict, cap, prioritize, and audit every
    transport, device, token, and topic. Every message has a trace showing the route it took and
    what it cost.
-4. **ntfy compatible on the wire.** `curl -d "hi" subetha.org/mytopic` works, and existing ntfy
-   clients can point at subetha.org.
+4. **ntfy compatible on the wire.** `curl -d "hi" subetha.us/mytopic` works, and existing ntfy
+   clients can point at subetha.us.
 5. **No user can cost the service money.** Every metered action is prepaid from a balance, priced
    above its marginal cost, and checked against the balance *before* it runs.
 6. **Profit grows with volume.** Every SKU has a strictly positive per-unit margin, and fixed costs
@@ -37,7 +37,7 @@ Guiding principles:
 
 ## 2. Like hashbin / unlike hashbin
 
-| | hashbin.org | subetha.org |
+| | hashbin.org | subetha.us |
 |---|---|---|
 | Hosting | Cloudflare | Cloudflare (Workers, Durable Objects, D1, R2, Queues, KV, Email Routing, Containers) |
 | Payments | Stripe, prepaid account balance, no subscription | Same |
@@ -67,7 +67,7 @@ Guiding principles:
 ### Who pays?
 - **Publish** is charged to the **publisher's** token or account.
 - **Fan-out and delivery** is charged to the **topic owner** by default. That keeps
-  `curl -d hi subetha.org/@alice/doorbell` simple: Alice can allow anonymous or public publishing
+  `curl -d hi subetha.us/@alice/doorbell` simple: Alice can allow anonymous or public publishing
   with a rate limit and a daily spend cap. *(Decided.)*
 - Anonymous publishes to topics with no funded owner are rejected (HTTP 402).
 
@@ -90,7 +90,7 @@ A superset of the ntfy JSON message:
   "tags": ["door", "warning"],
   "click": "https://…",
   "actions": [ … ],            // ntfy action buttons
-  "attachment": { "name": "snap.jpg", "url": "https://subetha.org/file/…", "size": 81234, "type": "image/jpeg" },
+  "attachment": { "name": "snap.jpg", "url": "https://subetha.us/file/…", "size": 81234, "type": "image/jpeg" },
 
   // SubEtha extensions (all optional)
   "content_type": "text/plain",          // or application/json, application/octet-stream (base64)
@@ -146,11 +146,11 @@ owner sees this only in the trace.
 | Web Push | relay | out | VAPID from Worker | browsers, PWAs |
 | APNs / FCM | relay | out | Worker → Apple/Google | sample apps; BYO credentials option |
 | Webhook | relay | in/out | Worker + Queue, HMAC-signed | |
-| Email | relay | in/out | In: Cloudflare Email Routing → Email Worker (`topic@in.subetha.org`). Out: Cloudflare Email Service (fallback Amazon SES) | outbound only to verified addresses |
+| Email | relay | in/out | In: Cloudflare Email Routing → Email Worker (`topic@in.subetha.us`). Out: Cloudflare Email Service (fallback Amazon SES) | outbound only to verified addresses |
 | Slack | relay | in/out | Slack app (OAuth install), Events API in, `chat.postMessage` out | bind channel ↔ topic |
 | Twilio SMS / MMS / WhatsApp | relay | in/out | Twilio REST + inbound webhook | US A2P 10DLC registration needed (started in Phase 0); verified numbers only |
 | Twilio Voice | relay | out (+DTMF ack) | TwiML `<Say>` | escalation target for alarms |
-| MCP | relay | in/out | Remote MCP server at `mcp.subetha.org` (Streamable HTTP, OAuth via Clerk). Tools: `publish`, `poll`, `wait_for_message`, `list_topics`, `create_topic`, `estimate_cost` | agents are devices too |
+| MCP | relay | in/out | Remote MCP server at `mcp.subetha.us` (Streamable HTTP, OAuth via Clerk). Tools: `publish`, `poll`, `wait_for_message`, `list_topics`, `create_topic`, `estimate_cost` | agents are devices too |
 | Reticulum / LXMF | gateway | in/out | Python RNS + LXMF daemon in Cloudflare Containers (or a small VPS), linked to the relay by WebSocket. Each topic can be given an LXMF destination | BYO gateway supported |
 | Bluetooth LE | edge | in/out | SDK: GATT service plus advertising; store-and-forward mesh; Web Bluetooth where supported | iOS background limits apply |
 | Audio | edge | in/out | SDK data-over-sound modem (ggwave-style FSK, MIT-licensed lib or own) | short payloads, ids, wake-ups |
@@ -166,7 +166,7 @@ Each transport is a module that implements one interface (`capabilities()`, `sen
 ## 7. Architecture (Cloudflare)
 
 ```
-             ┌──────────── subetha.org (Workers static assets: site, docs, console) ────────────┐
+             ┌──────────── subetha.us (Workers static assets: site, docs, console) ────────────┐
  clients ───▶│ api Worker (Hono): REST + ntfy-compat, auth (Clerk JWT | API token | device sig) │
              └──────┬──────────────┬─────────────────┬──────────────────┬──────────────────────┘
                     │              │                 │                  │
@@ -189,7 +189,7 @@ Each transport is a module that implements one interface (`capabilities()`, `sen
   `settle`, `release`, `refund`, `adjust`) and journaled to D1, with nightly reconciliation against
   Stripe.
 - **Environments:** `local` (wrangler dev + Miniflare, Stripe test, Clerk dev), `staging`
-  (`staging.subetha.org`, all providers in test mode), `production` (`subetha.org`).
+  (`staging.subetha.us`, all providers in test mode), `production` (`subetha.us`).
 
 ---
 
@@ -281,10 +281,10 @@ the route plan and cost estimate without charging.
 
 ## 10. Developer and agent experience
 
-- `curl -d "Backup done" subetha.org/@me/backups`, ntfy-compatible.
+- `curl -d "Backup done" subetha.us/@me/backups`, ntfy-compatible.
 - **SDKs:** TypeScript (browser, Node, Deno, Bun, Workers), Swift, Kotlin, Dart/Flutter,
   React Native, and Python (also used by the Reticulum gateway). Go is a later option.
-- **Drop-in web:** `<script src="https://subetha.org/sdk.js">` and `<subetha-feed topic="…">` /
+- **Drop-in web:** `<script src="https://subetha.us/sdk.js">` and `<subetha-feed topic="…">` /
   `<subetha-send topic="…">` web components.
 - **CLI:** `npx subetha pub|sub|tail|route|cost|login`.
 - **Agents:** remote MCP server, `llms.txt` / `llms-full.txt`, OpenAPI 3.1, stable machine-readable
@@ -311,7 +311,7 @@ the route plan and cost estimate without charging.
 
 ---
 
-## 11. Web console (subetha.org/console)
+## 11. Web console (subetha.us/console)
 
 - **Send / receive:** pick or create topics, compose (all ntfy fields + attachments), live inbox,
   and filter by tag or priority.
@@ -359,14 +359,14 @@ runners (iOS) and Linux (Android / Flutter / RN).
 
 ## 13. Publishing: GitHub Pages and production
 
-**GitHub Pages** (`curtcox.github.io/subetha`, optionally CNAME `dev.subetha.org`, see open question 2) holds:
+**GitHub Pages** (`curtcox.github.io/subetha`, optionally CNAME `dev.subetha.us`, see open question 2) holds:
 - **Build info:** commit, version, CI status per package, test and coverage summaries, the
   **pricing invariant report** (every SKU's cost vs. price vs. margin), SDK versions, and a changelog.
-- **Docs:** a versioned static docs build, mirroring what's on subetha.org.
+- **Docs:** a versioned static docs build, mirroring what's on subetha.us.
 - **Sample apps:** the live web sample, Flutter web and Expo web builds, Android APK downloads,
   iOS build instructions plus a TestFlight link, and source links.
 
-**Production** (`subetha.org`) uses Cloudflare Workers with static assets, deployed by GitHub
+**Production** (`subetha.us`) uses Cloudflare Workers with static assets, deployed by GitHub
 Actions with `wrangler deploy` on tagged releases (staging deploys on every merge to `main`). D1
 migrations run in the deploy job. Secrets live in GitHub Environments and are pushed with
 `wrangler secret`.
@@ -412,7 +412,7 @@ from becoming the long pole.
 ### Phase 3: Launch hardening
 Load tests, abuse/rate tuning, ToS / privacy / AUP (including SMS consent language), status page,
 backups, security review, pricing review against real bills, then the production launch on
-subetha.org.
+subetha.us.
 
 ## 15. Decisions and open questions
 
@@ -428,14 +428,14 @@ subetha.org.
 1. **devicebasedauth.org:** what is its exact flow and API? (I couldn't reach it from the build
    sandbox.) Is it a device-keypair registry, an RFC 8628-style device-code flow, or both? Does it
    replace Clerk for devices, or link devices to Clerk users?
-2. **GitHub Pages domain:** `curtcox.github.io/subetha`, or a subdomain such as `dev.subetha.org`?
+2. **GitHub Pages domain:** `curtcox.github.io/subetha`, or a subdomain such as `dev.subetha.us`?
 3. **Refunds:** can unused balance be refunded (minus processing fees), or is it non-refundable
    credit? This affects how Stripe fees are passed through.
 4. **Code sharing with hashbin:** should SubEtha reuse hashbin.org's stack/modules (billing ledger,
    Clerk integration, docs tooling)? If so, please grant read access to `curtcox/hashbin.org` so
    the plan can match it.
-5. **Entity and accounts:** is `subetha.org` already on Cloudflare? Is there a business entity for
+5. **Entity and accounts:** is `subetha.us` already on Cloudflare? Is there a business entity for
    Twilio A2P 10DLC registration? Do Stripe, Clerk, Twilio, Apple, and Google developer accounts
    exist?
-6. **Topic namespace:** global ntfy-style names (`subetha.org/anything`) in addition to
+6. **Topic namespace:** global ntfy-style names (`subetha.us/anything`) in addition to
    `@handle/…` and `t_<random>`? Global names are friendlier but invite squatting and collisions.

@@ -22,7 +22,7 @@ test = ["pytest>=8"]
 subetha-reticulum = "subetha_reticulum.cli:main"
 
 [project.urls]
-Homepage = "https://subetha.org"
+Homepage = "https://subetha.us"
 Source = "https://github.com/curtcox/subetha"
 
 [tool.hatch.build.targets.wheel]

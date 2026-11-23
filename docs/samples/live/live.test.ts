@@ -1,7 +1,7 @@
 // The TypeScript docs samples, run against a real deployment (PLAN §10: "nightly against
 // staging"). Skipped unless SUBETHA_URL and SUBETHA_TOKEN are set:
 //
-//   SUBETHA_URL=https://staging.subetha.org SUBETHA_TOKEN=se_… SUBETHA_TOPIC=@samples/nightly \
+//   SUBETHA_URL=https://staging.subetha.us SUBETHA_TOKEN=se_… SUBETHA_TOPIC=@samples/nightly \
 //     pnpm --filter @subetha/samples test:live
 //
 // The token must be an admin token for an account with a small balance that owns the topic's

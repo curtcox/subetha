@@ -31,17 +31,17 @@ Consent language shown when a number is verified:
 
 > By entering this code, you agree to receive automated notification texts and calls from SubEtha
 > for the topics you've subscribed to. Message frequency varies. Msg & data rates may apply. Reply
-> STOP to opt out, HELP for help. See subetha.org/terms and subetha.org/privacy.
+> STOP to opt out, HELP for help. See subetha.us/terms and subetha.us/privacy.
 
 HELP reply text:
 
-> SubEtha notifications. Manage at subetha.org/console. Reply STOP to opt out. Support: [CONTACT EMAIL].
+> SubEtha notifications. Manage at subetha.us/console. Reply STOP to opt out. Support: [CONTACT EMAIL].
 
 International SMS and voice are disabled by default and enabled per country only after review.
 
 ## Email
 Outbound email goes only to addresses verified by their owner. Every message identifies the topic
-and links to the console to stop delivery. Inbound email to `…@in.subetha.org` is accepted only
+and links to the console to stop delivery. Inbound email to `…@in.subetha.us` is accepted only
 from senders the topic owner allows.
 
 ## Enforcement

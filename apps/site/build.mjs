@@ -8,8 +8,8 @@
 //                                          the production app)
 //
 // Options (or env): --out (SITE_OUT), --base (SITE_BASE, default "/"), --site-url (SITE_URL, the
-// public URL of this build, default https://subetha.org), --app-url (APP_URL, where the console
-// and API live, default https://subetha.org), --pages, --test-results DIR.
+// public URL of this build, default https://subetha.us), --app-url (APP_URL, where the console
+// and API live, default https://subetha.us), --pages, --test-results DIR.
 //
 // Markdown extensions:
 //   <!-- include: samples/x.sh -->            fenced code from a file (paths relative to docs/)
@@ -37,8 +37,8 @@ const opt = (name, env, dflt) => {
 };
 const out = join(process.cwd(), opt("out", "SITE_OUT", relative(process.cwd(), publicDir)));
 const base = opt("base", "SITE_BASE", "/").replace(/\/?$/, "/");
-const siteUrl = opt("site-url", "SITE_URL", "https://subetha.org").replace(/\/$/, "");
-const appUrl = opt("app-url", "APP_URL", "https://subetha.org").replace(/\/$/, "");
+const siteUrl = opt("site-url", "SITE_URL", "https://subetha.us").replace(/\/$/, "");
+const appUrl = opt("app-url", "APP_URL", "https://subetha.us").replace(/\/$/, "");
 const pages = argv.includes("--pages");
 const testResults = opt("test-results", "TEST_RESULTS", "");
 // Built sample apps to publish on Pages (PLAN §13): expo/ (the React Native sample's web export)
@@ -265,8 +265,8 @@ if (pages) {
 function samplesPage() {
   // The web sample, loading the Pages copy of sdk.js and defaulting to the live relay.
   const web = readFileSync(join(repo, "samples/web/index.html"), "utf8")
-    .replace('src="https://subetha.org/sdk.js"', `src="${base}sdk.js"`)
-    .replaceAll("https://subetha.org", appUrl);
+    .replace('src="https://subetha.us/sdk.js"', `src="${base}sdk.js"`)
+    .replaceAll("https://subetha.us", appUrl);
   write("samples/web/index.html", web);
 
   const builds = sampleBuilds && existsSync(sampleBuilds) ? sampleBuilds : null;

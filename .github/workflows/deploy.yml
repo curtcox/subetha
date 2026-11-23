@@ -40,10 +40,10 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging' }}
-      url: ${{ startsWith(github.ref, 'refs/tags/v') && 'https://subetha.org' || 'https://staging.subetha.org' }}
+      url: ${{ startsWith(github.ref, 'refs/tags/v') && 'https://subetha.us' || 'https://staging.subetha.us' }}
     env:
       TARGET: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging' }}
-      BASE_URL: ${{ startsWith(github.ref, 'refs/tags/v') && 'https://subetha.org' || 'https://staging.subetha.org' }}
+      BASE_URL: ${{ startsWith(github.ref, 'refs/tags/v') && 'https://subetha.us' || 'https://staging.subetha.us' }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:

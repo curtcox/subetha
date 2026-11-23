@@ -4,7 +4,7 @@ You need an account with a little credit, and a token. Then publishing is one HT
 
 ## 1. Get a token
 
-1. Sign in at [subetha.org/console](https://subetha.org/console/) and pick a **handle**. Your
+1. Sign in at [subetha.us/console](https://subetha.us/console/) and pick a **handle**. Your
    topics live under `@handle/…`.
 2. Top up your balance (minimum $5). See [Pricing & billing](pricing.md).
 3. Create a token under **Tokens**. For scripts, scope it narrowly and give it a daily cap (see
@@ -36,7 +36,7 @@ In another terminal:
 <!-- include: samples/curl/subscribe-json.sh -->
 
 Publish again and the message appears on the stream immediately. Or open
-`https://subetha.org/@me/backups` in a browser: topic URLs open in the web console.
+`https://subetha.us/@me/backups` in a browser: topic URLs open in the web console.
 
 ## 4. Use an SDK
 
@@ -55,7 +55,7 @@ There are also a [Python SDK, a Rust core, a CLI, and drop-in web components](sd
   relay charges from, and the top-up that covers it.
 - [Route simulator](/tools/simulator.html): which transports a message would use, in what order,
   and at what cost. It runs the relay's planner in your browser, so it needs no account.
-- In the [console](https://subetha.org/console/): **Copy as** curl, JavaScript, Python, Swift,
+- In the [console](https://subetha.us/console/): **Copy as** curl, JavaScript, Python, Swift,
   Kotlin, or Dart for any message you compose; **Simulate route & cost** (a dry run against your
   real topic); a token builder; a trace viewer; and an **API explorer** that sends any operation
   in the [OpenAPI document](/openapi.yaml) with your credential.

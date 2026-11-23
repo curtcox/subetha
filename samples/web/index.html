@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SubEtha Doorbell</title>
   <!-- Defines <subetha-feed>, <subetha-send> and window.SubEtha (the JS client). -->
-  <script src="https://subetha.org/sdk.js" defer></script>
+  <script src="https://subetha.us/sdk.js" defer></script>
   <style>
     :root { --bg: #fafaf9; --fg: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #4f46e5; --card: #fff; }
     @media (prefers-color-scheme: dark) {
@@ -44,7 +44,7 @@
         <input id="topic" value="@me/doorbell" required>
       </label>
       <label>Base URL
-        <input id="base" value="https://subetha.org">
+        <input id="base" value="https://subetha.us">
       </label>
       <button>Subscribe</button>
     </form>
@@ -94,7 +94,7 @@
     e.preventDefault();
     const token = $("token").value.trim();
     const topic = $("topic").value.trim();
-    const base = $("base").value.trim() || "https://subetha.org";
+    const base = $("base").value.trim() || "https://subetha.us";
     try {
       sessionStorage.setItem("doorbell.token", token);
       sessionStorage.setItem("doorbell.topic", topic);

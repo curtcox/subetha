@@ -82,7 +82,7 @@ skus:
     components: { provider: 0.0001, queue_ops: 0.0000012, overhead: 0.00002 }
     floor_usd: 0.0002
   inbound_email:
-    description: Receive one email at topic@in.subetha.org
+    description: Receive one email at topic@in.subetha.us
     unit: email
     charge: action
     components: { email_worker: 0.000003, parse_cpu: 0.000003, overhead: 0.000004 }

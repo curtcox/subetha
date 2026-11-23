@@ -2,7 +2,7 @@
 
 _Last updated: [DATE]. Draft for legal review._
 
-These Terms govern your use of subetha.org, its APIs, SDKs, gateways, and related services
+These Terms govern your use of subetha.us, its APIs, SDKs, gateways, and related services
 (the "Service"), operated by [ENTITY] ("we"). By creating an account or using the API you agree
 to these Terms and to the [Acceptable Use Policy](aup.md).
 

@@ -1,5 +1,5 @@
 # Default config baked into the container image. Mount your own at /config/gateway.toml.
-relay_url = "https://subetha.org"
+relay_url = "https://subetha.us"
 token_env = "SUBETHA_TOKEN"
 data_dir = "/data"
 reticulum_config_dir = "/config/reticulum"

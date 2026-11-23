@@ -143,7 +143,7 @@ export function mcpChallenge(origin: string, error?: string): string {
 }
 
 export function registerMcp(app: App) {
-  // The resource is the URL the client used (subetha.org/mcp or mcp.subetha.org/mcp); access
+  // The resource is the URL the client used (subetha.us/mcp or mcp.subetha.us/mcp); access
   // tokens that name an audience must name it (oauth.ts).
   app.get("/.well-known/oauth-protected-resource", (c) => c.json({
     resource: `${new URL(c.req.url).origin}/mcp`,

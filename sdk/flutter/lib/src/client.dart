@@ -16,7 +16,7 @@ import 'signer.dart';
 /// client.subscribe(['@me/doorbell']).listen((m) => print(m.message));
 /// ```
 class SubEtha {
-  static const defaultBaseUrl = 'https://subetha.org';
+  static const defaultBaseUrl = 'https://subetha.us';
   static const version = '0.1.0';
 
   final String baseUrl;

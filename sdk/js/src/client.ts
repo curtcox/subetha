@@ -147,7 +147,7 @@ export class SubEtha {
   private readonly signRequests: boolean;
 
   constructor(opts: ClientOptions = {}) {
-    this.baseUrl = (opts.baseUrl ?? "https://subetha.org").replace(/\/+$/, "");
+    this.baseUrl = (opts.baseUrl ?? "https://subetha.us").replace(/\/+$/, "");
     this.token = opts.token;
     this.f = opts.fetch ?? ((...a) => fetch(...a));
     this.signer = opts.signer ?? (opts.deviceKey ? webCryptoSigner(opts.deviceKey) : undefined);

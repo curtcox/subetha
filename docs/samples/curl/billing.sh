@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Balance, ledger, prices, and a Stripe Checkout top-up.
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 AUTH=(-H "Authorization: Bearer $SUBETHA_TOKEN")
 
 curl -sS "${AUTH[@]}" "$SUBETHA_URL/v1/balance"

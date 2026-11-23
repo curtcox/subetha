@@ -3,7 +3,7 @@ import os
 
 from subetha import Client, SubEthaError
 
-client = Client(os.environ.get("SUBETHA_URL", "https://subetha.org"), token=os.environ["SUBETHA_TOKEN"])
+client = Client(os.environ.get("SUBETHA_URL", "https://subetha.us"), token=os.environ["SUBETHA_TOKEN"])
 
 msg = client.publish(
     "@me/backups",

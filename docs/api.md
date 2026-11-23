@@ -6,7 +6,7 @@ The complete HTTP API is described in OpenAPI 3.1:
 into any OpenAPI viewer or client generator. A test fails the build if a route the relay serves
 is missing from it.
 
-Base URLs: `https://subetha.org` (production), `https://staging.subetha.org` (staging, providers
+Base URLs: `https://subetha.us` (production), `https://staging.subetha.us` (staging, providers
 in test mode), `http://localhost:8787` (`wrangler dev`).
 
 ## Routes at a glance

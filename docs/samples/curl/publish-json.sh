@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Publish a JSON envelope to POST / (ntfy JSON publishing, plus every SubEtha field).
 set -euo pipefail
-SUBETHA_URL="${SUBETHA_URL:-https://subetha.org}"
+SUBETHA_URL="${SUBETHA_URL:-https://subetha.us}"
 
 curl -sS -H "Authorization: Bearer $SUBETHA_TOKEN" \
   -H "Content-Type: application/json" \
