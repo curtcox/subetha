@@ -503,6 +503,10 @@ export class SubEtha {
   revokeToken(id: string) { return this.request("DELETE", `/v1/tokens/${encodeURIComponent(id)}`); }
   topics() { return this.request<{ topics: { name: string; policy: Record<string, unknown> }[] }>("GET", "/v1/topics"); }
   configureTopic(topic: string, policy: Record<string, unknown>) { return this.request("PUT", `/v1/topics/${topic}`, { policy }); }
+  deleteTopic(topic: string) { return this.request<{ deleted: true }>("DELETE", `/v1/topics/${topic}`); }
+  updateSubscription(id: string, body: { filter?: { priority?: number[]; tags?: string[] }; after_s?: number; min_priority?: number | null; paused?: boolean }) {
+    return this.request<Record<string, unknown>>("PATCH", `/v1/subscriptions/${encodeURIComponent(id)}`, body);
+  }
   listPushCredentials() { return this.request<{ credentials: Record<string, unknown>[] }>("GET", "/v1/push/credentials"); }
   createPushCredential(body: { kind: "apns" | "fcm"; name?: string; is_default?: boolean; key_p8?: string; key_id?: string; team_id?: string; topic?: string; sandbox?: boolean; service_account?: string | Record<string, unknown>; project_id?: string; client_email?: string; private_key?: string; private_key_id?: string }) {
     return this.request<Record<string, unknown>>("POST", "/v1/push/credentials", body);

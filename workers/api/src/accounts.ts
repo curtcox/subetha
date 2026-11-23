@@ -73,18 +73,33 @@ export async function audit(env: Env, accountId: string, actor: string, action: 
 
 const TRANSPORT_LIST = (v: unknown) => v === undefined || (Array.isArray(v) && v.every((x) => typeof x === "string"));
 const NUM = (v: unknown) => v === undefined || (typeof v === "number" && Number.isSafeInteger(v) && v >= 0);
+const POS = (v: unknown) => v === undefined || (typeof v === "number" && Number.isSafeInteger(v) && v >= 1);
 const BOOL = (v: unknown) => v === undefined || typeof v === "boolean";
 const STRS = TRANSPORT_LIST;
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function validQuietHours(v: unknown): boolean {
+  if (v === undefined) return true;
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const q = v as { start?: unknown; end?: unknown; tz?: unknown };
+  if (typeof q.start !== "string" || !HHMM.test(q.start) || typeof q.end !== "string" || !HHMM.test(q.end)) return false;
+  if (q.tz !== undefined) {
+    if (typeof q.tz !== "string" || !q.tz || q.tz.length > 64) return false;
+    try { new Intl.DateTimeFormat("en-US", { timeZone: q.tz }); } catch { return false; }
+  }
+  return true;
+}
 
 export function validatePolicy(p: unknown): TopicPolicy {
   if (typeof p !== "object" || p === null || Array.isArray(p)) throw new ApiError("bad_request", "policy must be an object");
   const x = p as Record<string, unknown>;
   const checks: [string, (v: unknown) => boolean][] = [
     ["public_publish", BOOL], ["public_read", BOOL], ["require_signature", BOOL], ["paused", BOOL],
-    ["anon_rate_per_min", NUM], ["anon_daily_cap_micros", NUM], ["max_cost_per_message_micros", NUM], ["daily_cap_micros", NUM], ["monthly_cap_micros", NUM], ["retention_s", NUM],
+    ["anon_rate_per_min", NUM], ["anon_daily_cap_micros", NUM], ["rate_per_min", POS], ["burst", POS],
+    ["max_cost_per_message_micros", NUM], ["daily_cap_micros", NUM], ["monthly_cap_micros", NUM], ["retention_s", NUM],
     ["allowed_publishers", STRS], ["email_senders", STRS], ["allowed_readers", STRS], ["allow_transports", TRANSPORT_LIST], ["deny_transports", TRANSPORT_LIST],
     ["min_priority", (v) => v === undefined || (typeof v === "object" && v !== null)],
-    ["quiet_hours", (v) => v === undefined || (typeof v === "object" && v !== null && /^\d\d:\d\d$/.test((v as { start: string }).start) && /^\d\d:\d\d$/.test((v as { end: string }).end))],
+    ["quiet_hours", validQuietHours],
   ];
   for (const [k, ok] of checks) if (!ok(x[k])) throw new ApiError("bad_request", `invalid policy field: ${k}`);
   const known = new Set(checks.map(([k]) => k));

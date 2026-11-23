@@ -171,4 +171,79 @@ describe("account and topic policies", () => {
     expect(r2.status).toBe(200);
     expect(((await r2.json()) as { plan: { transport: string }[] }).plan.map((d) => d.transport)).toEqual(["webhook"]);
   });
+
+  it("enforces topic rate_per_min and burst limits and validates quiet_hours timezone", async () => {
+    const a = await bootstrap("ratelim", 5);
+    const badTz = await SELF.fetch(`${BASE}/v1/topics/@ratelim/fast`, {
+      method: "PUT", headers: auth(a.token),
+      body: JSON.stringify({ policy: { quiet_hours: { start: "22:00", end: "07:00", tz: "Not/A_Zone" } } }),
+    });
+    expect(badTz.status).toBe(400);
+
+    const put = await SELF.fetch(`${BASE}/v1/topics/@ratelim/fast`, {
+      method: "PUT", headers: auth(a.token),
+      body: JSON.stringify({ policy: { rate_per_min: 1, burst: 2, quiet_hours: { start: "22:00", end: "07:00", tz: "America/Chicago" } } }),
+    });
+    expect(put.status).toBe(201);
+
+    // Burst of 2 succeeds; 3rd publish immediately gets 429 rate_limited.
+    expect((await publish("@ratelim/fast", "1", auth(a.token))).status).toBe(200);
+    expect((await publish("@ratelim/fast", "2", auth(a.token))).status).toBe(200);
+    const r3 = await publish("@ratelim/fast", "3", auth(a.token));
+    expect(r3.status).toBe(429);
+    expect(await r3.json()).toMatchObject({ error: "rate_limited" });
+
+    // Dry runs are still allowed while rate-limited.
+    expect((await publish("@ratelim/fast", "dry", auth(a.token, { "X-Dry-Run": "1" }))).status).toBe(200);
+  });
+
+  it("updates and pauses subscriptions via PATCH /v1/subscriptions/:id and deletes topics via DELETE /v1/topics/:topic", async () => {
+    const a = await bootstrap("subdel", 5);
+    const b = await bootstrap("subdel2", 5);
+    await publish("@subdel/alerts", "init", auth(a.token));
+
+    const ep = (await (await SELF.fetch(`${BASE}/v1/endpoints`, {
+      method: "POST", headers: auth(a.token),
+      body: JSON.stringify({ kind: "webhook", address: "https://hooks.example.com/subdel" }),
+    })).json()) as { id: string };
+    const sub = (await (await SELF.fetch(`${BASE}/v1/subscriptions`, {
+      method: "POST", headers: auth(a.token),
+      body: JSON.stringify({ topic: "@subdel/alerts", endpoint_id: ep.id, after_s: 0 }),
+    })).json()) as { id: string; paused: boolean };
+    expect(sub.paused).toBe(false);
+
+    // Pause subscription -> excluded from delivery plan & topic subscriber count.
+    const paused = await SELF.fetch(`${BASE}/v1/subscriptions/${sub.id}`, {
+      method: "PATCH", headers: auth(a.token),
+      body: JSON.stringify({ paused: true }),
+    });
+    expect(paused.status).toBe(200);
+    expect(await paused.json()).toMatchObject({ id: sub.id, paused: true });
+    const dryPaused = (await (await publish("@subdel/alerts", "hi", auth(a.token, { "X-Dry-Run": "1" }))).json()) as { plan: unknown[] };
+    expect(dryPaused.plan).toHaveLength(0);
+
+    // Resume with min_priority: 4, after_s: 30, and tag filter.
+    const resumed = await SELF.fetch(`${BASE}/v1/subscriptions/${sub.id}`, {
+      method: "PATCH", headers: auth(a.token),
+      body: JSON.stringify({ paused: false, min_priority: 4, after_s: 30, filter: { tags: ["urgent"] } }),
+    });
+    expect(resumed.status).toBe(200);
+    expect(await resumed.json()).toMatchObject({ paused: false, min_priority: 4, after_s: 30, filter: { tags: ["urgent"] } });
+
+    const dryLow = (await (await publish("@subdel/alerts", "low", auth(a.token, { "X-Dry-Run": "1", "X-Tags": "urgent" }))).json()) as { plan: unknown[] };
+    expect(dryLow.plan).toHaveLength(0);
+    const dryHigh = (await (await publish("@subdel/alerts", "high", auth(a.token, { "X-Dry-Run": "1", "X-Priority": "4", "X-Tags": "urgent" }))).json()) as { plan: { transport: string; after_s: number }[] };
+    expect(dryHigh.plan).toEqual([expect.objectContaining({ transport: "webhook", after_s: 30 })]);
+
+    // Another account cannot delete the topic.
+    expect((await SELF.fetch(`${BASE}/v1/topics/@subdel/alerts`, { method: "DELETE", headers: auth(b.token) })).status).toBe(404);
+
+    // Owner deletes the topic -> gone from topics, subscriptions, and DO.
+    const del = await SELF.fetch(`${BASE}/v1/topics/@subdel/alerts`, { method: "DELETE", headers: auth(a.token) });
+    expect(del.status).toBe(200);
+    expect(await del.json()).toEqual({ deleted: true });
+    expect((await SELF.fetch(`${BASE}/v1/topics/@subdel/alerts`, { headers: auth(a.token) })).status).toBe(404);
+    const subsAfter = (await (await SELF.fetch(`${BASE}/v1/subscriptions`, { headers: auth(a.token) })).json()) as { subscriptions: unknown[] };
+    expect(subsAfter.subscriptions).toHaveLength(0);
+  });
 });

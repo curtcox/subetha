@@ -61,6 +61,7 @@ export class TopicDO extends DurableObject<Env> {
   private readonly streams = new Map<string, Stream>();
   private keepalive: ReturnType<typeof setInterval> | null = null;
   private anonWindow = { minute: 0, count: 0 };
+  private rateBucket: { tokens: number; at: number } | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -103,6 +104,9 @@ export class TopicDO extends DurableObject<Env> {
 
   // ---------- configuration ----------
   async configure(meta: TopicMeta, accountTransports?: { allow: Transport[] | null; deny: Transport[] | null }): Promise<void> {
+    if (this.meta?.policy.rate_per_min !== meta.policy.rate_per_min || this.meta?.policy.burst !== meta.policy.burst) {
+      this.rateBucket = null;
+    }
     this.meta = meta;
     this.kvPut("meta", meta);
     if (accountTransports) {
@@ -110,6 +114,21 @@ export class TopicDO extends DurableObject<Env> {
       this.kvPut("account_transports", accountTransports);
     }
     if (meta.policy.paused) this.closeAll(4403, "topic paused");
+  }
+
+  /** Tears down a deleted topic: closes live connections, returns credit leases, wipes state. */
+  async destroy(): Promise<void> {
+    this.closeAll(4404, "topic deleted");
+    await this.returnLeases(true);
+    this.meta = null;
+    this.rateBucket = null;
+    this.nanoDebt = 0;
+    this.ctx.storage.transactionSync(() => {
+      for (const tbl of ["messages", "idem", "acks", "subs", "traces", "kv", "sent", "seen"]) {
+        this.sql.exec(`DELETE FROM ${tbl}`);
+      }
+    });
+    await this.ctx.storage.deleteAlarm();
   }
 
   async setAccountTransports(allow: Transport[] | null, deny: Transport[] | null): Promise<void> {
@@ -413,6 +432,7 @@ export class TopicDO extends DurableObject<Env> {
     // Owner-side spend: live deliveries (+ the publish when anonymous), queued reservations,
     // and retention. Both daily counters are checked and incremented with no await in between,
     // so concurrent publishes can't all pass the same check; failures below roll them back.
+    this.topicRateLimit(nowMs);
     const ownerCost = liveCost + (anonymous ? publishPrice : 0);
     const ownerTotal = ownerCost + queued.reduce((n, d) => n + d.cost_micros, 0);
     const ownerAll = ownerTotal + Math.ceil(retentionNanos / 1000);
@@ -504,6 +524,17 @@ export class TopicDO extends DurableObject<Env> {
     this.trace(env.id!, { published: nowMs, plan: plan.deliveries, dropped: plan.dropped, cost_micros: { publish: publishPrice, live: liveCost, queued: queued.reduce((n, d) => n + d.cost_micros, 0), retention_nanos: retentionNanos }, publisher: caller.tokenId ?? caller.deviceId ?? caller.accountId ?? "anonymous" }, storeUntil);
     await this.ensureAlarm();
     return { message: env, created_topic: created, duplicate: false, cost_micros: callerCost, plan: caller.accountId === meta.owner ? plan.deliveries : [], dry_run: false };
+  }
+
+  private topicRateLimit(nowMs: number) {
+    const rate = this.meta?.policy.rate_per_min;
+    if (!rate) return;
+    const burst = this.meta?.policy.burst ?? rate;
+    if (!this.rateBucket) this.rateBucket = { tokens: burst, at: nowMs };
+    const elapsed = Math.max(0, nowMs - this.rateBucket.at);
+    const tokens = Math.min(burst, this.rateBucket.tokens + (elapsed / 60_000) * rate);
+    if (tokens < 1) throw rpcError("rate_limited", "topic rate limit exceeded");
+    this.rateBucket = { tokens: tokens - 1, at: nowMs };
   }
 
   private anonRateLimit(nowMs: number) {
@@ -759,7 +790,7 @@ export class TopicDO extends DurableObject<Env> {
 }
 
 /** Typed RPC surface (Envelope's index signature defeats the generated Rpc types). */
-export type TopicRpc = Pick<TopicDO, "configure" | "setAccountTransports" | "getMeta" | "subscriberCounts" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases">;
+export type TopicRpc = Pick<TopicDO, "configure" | "destroy" | "setAccountTransports" | "getMeta" | "subscriberCounts" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases">;
 
 export function topicStub(env: Env, topic: string): TopicRpc {
   return env.TOPIC.get(env.TOPIC.idFromName(topic)) as unknown as TopicRpc;

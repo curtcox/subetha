@@ -151,7 +151,7 @@ export async function syncTopicSubscriptions(env: Env, topic: string) {
   const { results } = await env.DB.prepare(
     `SELECT s.id, s.filter, s.after_s, s.min_priority, e.id AS endpoint_id, e.kind, e.address, a.telephony_countries
      FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id JOIN accounts a ON a.id = e.account_id
-     WHERE s.topic = ? AND e.verified_at IS NOT NULL AND a.frozen_since IS NULL`).bind(topic).all<{ id: string; filter: string; after_s: number; min_priority: number | null; endpoint_id: string; kind: Transport; address: string; telephony_countries: string | null }>();
+     WHERE s.topic = ? AND s.paused = 0 AND e.verified_at IS NOT NULL AND a.frozen_since IS NULL`).bind(topic).all<{ id: string; filter: string; after_s: number; min_priority: number | null; endpoint_id: string; kind: Transport; address: string; telephony_countries: string | null }>();
   const subs: QueuedSubscription[] = [];
   for (const r of results) {
     // Numbers outside the US deliver only while the owner keeps their country enabled.
@@ -296,18 +296,34 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
   });
 
   // ---------------- subscriptions ----------------
+  const validateSubFilter = (f: unknown): SubscriptionFilter => {
+    if (f === undefined) return {};
+    if (typeof f !== "object" || f === null || Array.isArray(f)) throw new ApiError("bad_request", "filter must be an object");
+    const obj = f as { priority?: unknown; tags?: unknown };
+    const out: SubscriptionFilter = {};
+    if (obj.priority !== undefined) {
+      if (!Array.isArray(obj.priority) || !obj.priority.every((n) => Number.isInteger(n) && n >= 1 && n <= 5)) throw new ApiError("bad_request", "filter.priority must be an array of integers 1..5");
+      if (obj.priority.length) out.priority = obj.priority;
+    }
+    if (obj.tags !== undefined) {
+      if (!Array.isArray(obj.tags) || obj.tags.length > 32 || !obj.tags.every((t) => typeof t === "string" && t.length > 0 && t.length <= 64)) throw new ApiError("bad_request", "filter.tags must be an array of up to 32 strings");
+      if (obj.tags.length) out.tags = obj.tags;
+    }
+    return out;
+  };
+
   app.get("/v1/subscriptions", async (c) => {
     const accountId = requireAdmin(await principal(c));
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.topic, s.endpoint_id, s.filter, s.after_s, s.min_priority, s.created_at, e.kind FROM subscriptions s
+      `SELECT s.id, s.topic, s.endpoint_id, s.filter, s.after_s, s.min_priority, s.paused, s.created_at, e.kind FROM subscriptions s
        JOIN endpoints e ON e.id = s.endpoint_id WHERE e.account_id = ? ORDER BY s.created_at DESC`).bind(accountId).all();
-    return c.json({ subscriptions: results.map((r) => ({ ...r, filter: JSON.parse(r.filter as string) })) });
+    return c.json({ subscriptions: results.map((r) => ({ ...r, filter: JSON.parse(r.filter as string), paused: !!r.paused })) });
   });
 
   app.post("/v1/subscriptions", async (c) => {
     const p = await principal(c);
     const accountId = requireAdmin(p);
-    const body = (await c.req.json()) as { topic?: string; endpoint_id?: string; filter?: SubscriptionFilter; after_s?: number; min_priority?: number };
+    const body = (await c.req.json()) as { topic?: string; endpoint_id?: string; filter?: SubscriptionFilter; after_s?: number; min_priority?: number; paused?: boolean };
     if (!body.topic || !isTopic(body.topic)) throw new ApiError("invalid_topic");
     const meta = await topicStub(c.env, body.topic).getMeta();
     if (!meta) throw new ApiError("not_found", "no such topic");
@@ -317,12 +333,53 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     const after = body.after_s ?? 0;
     if (!Number.isInteger(after) || after < 0 || after > 3600) throw new ApiError("bad_request", "after_s must be 0..3600");
     if (body.min_priority !== undefined && !(Number.isInteger(body.min_priority) && body.min_priority >= 1 && body.min_priority <= 5)) throw new ApiError("bad_request", "min_priority must be 1..5");
+    if (body.paused !== undefined && typeof body.paused !== "boolean") throw new ApiError("bad_request", "paused must be a boolean");
+    const filter = validateSubFilter(body.filter);
+    const paused = !!body.paused;
     const id = `sub_${ulid()}`;
-    await c.env.DB.prepare("INSERT INTO subscriptions (id, topic, endpoint_id, filter, after_s, min_priority, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(id, body.topic, body.endpoint_id, JSON.stringify(body.filter ?? {}), after, body.min_priority ?? null, Date.now()).run();
+    await c.env.DB.prepare("INSERT INTO subscriptions (id, topic, endpoint_id, filter, after_s, min_priority, paused, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, body.topic, body.endpoint_id, JSON.stringify(filter), after, body.min_priority ?? null, paused ? 1 : 0, Date.now()).run();
     await syncTopicSubscriptions(c.env, body.topic);
     await audit(c.env, accountId, p.kind, "subscription.create", { id, topic: body.topic });
-    return c.json({ id, topic: body.topic, endpoint_id: body.endpoint_id, after_s: after, min_priority: body.min_priority ?? null }, 201);
+    return c.json({ id, topic: body.topic, endpoint_id: body.endpoint_id, filter, after_s: after, min_priority: body.min_priority ?? null, paused }, 201);
+  });
+
+  app.patch("/v1/subscriptions/:id", async (c) => {
+    const p = await principal(c);
+    const accountId = requireAdmin(p);
+    const id = c.req.param("id");
+    const row = await c.env.DB.prepare(
+      `SELECT s.id, s.topic, s.endpoint_id, s.filter, s.after_s, s.min_priority, s.paused, s.created_at, e.kind
+         FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id
+        WHERE s.id = ? AND e.account_id = ?`,
+    ).bind(id, accountId).first<{ id: string; topic: string; endpoint_id: string; filter: string; after_s: number; min_priority: number | null; paused: number; created_at: number; kind: Transport }>();
+    if (!row) throw new ApiError("not_found");
+    const body = (await c.req.json()) as { filter?: unknown; after_s?: unknown; min_priority?: unknown; paused?: unknown };
+    let filter = JSON.parse(row.filter) as SubscriptionFilter;
+    let after = row.after_s;
+    let minPriority = row.min_priority;
+    let paused = !!row.paused;
+    if (body.filter !== undefined) filter = validateSubFilter(body.filter);
+    if (body.after_s !== undefined) {
+      if (typeof body.after_s !== "number" || !Number.isInteger(body.after_s) || body.after_s < 0 || body.after_s > 3600) {
+        throw new ApiError("bad_request", "after_s must be 0..3600");
+      }
+      after = body.after_s;
+    }
+    if (body.min_priority !== undefined) {
+      if (body.min_priority === null) minPriority = null;
+      else if (typeof body.min_priority === "number" && Number.isInteger(body.min_priority) && body.min_priority >= 1 && body.min_priority <= 5) minPriority = body.min_priority;
+      else throw new ApiError("bad_request", "min_priority must be 1..5 or null");
+    }
+    if (body.paused !== undefined) {
+      if (typeof body.paused !== "boolean") throw new ApiError("bad_request", "paused must be a boolean");
+      paused = body.paused;
+    }
+    await c.env.DB.prepare("UPDATE subscriptions SET filter = ?, after_s = ?, min_priority = ?, paused = ? WHERE id = ?")
+      .bind(JSON.stringify(filter), after, minPriority, paused ? 1 : 0, id).run();
+    await syncTopicSubscriptions(c.env, row.topic);
+    await audit(c.env, accountId, p.kind, "subscription.update", { id, topic: row.topic, after_s: after, min_priority: minPriority, paused });
+    return c.json({ id: row.id, topic: row.topic, endpoint_id: row.endpoint_id, kind: row.kind, filter, after_s: after, min_priority: minPriority, paused, created_at: row.created_at });
   });
 
   app.delete("/v1/subscriptions/:id", async (c) => {

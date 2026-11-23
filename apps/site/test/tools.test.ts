@@ -83,6 +83,11 @@ describe("route simulator", () => {
     expect(simulate({ ...base, priority: 5, tokenTransports: ["ws", "webpush"], subscriptions: subs }).plan.dropped[0]!.reason).toBe("transport denied by policy");
     const quiet = simulate({ ...base, policy: { quiet_hours: { start: "11:00", end: "13:00" } }, subscriptions: subs });
     expect(quiet.plan.dropped.every((d) => d.reason === "quiet hours")).toBe(true);
+    // 12:00 UTC on Jan 1 is 06:00 in America/Chicago (CST, UTC-6): inside 22:00–07:00 local, outside 08:00–10:00 local.
+    const quietTzIn = simulate({ ...base, policy: { quiet_hours: { start: "22:00", end: "07:00", tz: "America/Chicago" } }, subscriptions: subs });
+    expect(quietTzIn.plan.dropped.every((d) => d.reason === "quiet hours")).toBe(true);
+    const quietTzOut = simulate({ ...base, policy: { quiet_hours: { start: "08:00", end: "10:00", tz: "America/Chicago" } }, subscriptions: subs });
+    expect(quietTzOut.steps.some((s) => s.transport === "webpush")).toBe(true);
     const capped = simulate({ ...base, priority: 5, maxCostUsd: 0.001, subscriptions: subs });
     expect(capped.plan.dropped.map((d) => d.reason)).toEqual(["max cost"]);
     const all = simulate({ ...base, mode: "all", priority: 5, subscriptions: subs });

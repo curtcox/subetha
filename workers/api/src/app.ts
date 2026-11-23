@@ -394,7 +394,7 @@ app.get("/v1/topics", async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT t.name, t.policy, t.created_at,
             (SELECT COUNT(*) FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id
-              WHERE s.topic = t.name AND e.verified_at IS NOT NULL) AS endpoint_subscriptions
+              WHERE s.topic = t.name AND e.verified_at IS NOT NULL AND s.paused = 0) AS endpoint_subscriptions
        FROM topics t WHERE t.owner_account_id = ? ORDER BY t.name`,
   ).bind(id).all();
   return c.json({ topics: results.map((r) => ({ name: r.name, policy: JSON.parse(r.policy as string), endpoint_subscriptions: Number(r.endpoint_subscriptions ?? 0), created_at: r.created_at })) });
@@ -427,6 +427,25 @@ app.put("/v1/topics/:topic{.+}", async (c) => {
   await recordTopic(c.env, meta);
   await audit(c.env, id, actorOf(p), existing ? "topic.update" : "topic.create", { name, policy });
   return c.json(meta, existing ? 200 : 201);
+});
+
+app.delete("/v1/topics/:topic{.+}", async (c) => {
+  const p = await principal(c);
+  const id = requireAdmin(p);
+  const name = c.req.param("topic");
+  if (!isTopic(name)) throw new ApiError("invalid_topic");
+  const stub = topicStub(c.env, name);
+  const existing = await stub.getMeta();
+  if (!existing || existing.owner !== id) throw new ApiError("not_found");
+  await stub.destroy();
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM subscriptions WHERE topic = ?").bind(name),
+    c.env.DB.prepare("DELETE FROM slack_bindings WHERE topic = ? AND account_id = ?").bind(name, id),
+    c.env.DB.prepare("DELETE FROM topic_keys WHERE topic = ?").bind(name),
+    c.env.DB.prepare("DELETE FROM topics WHERE name = ? AND owner_account_id = ?").bind(name, id),
+  ]);
+  await audit(c.env, id, actorOf(p), "topic.delete", { name });
+  return c.json({ deleted: true });
 });
 
 app.get("/v1/traces/:id", async (c) => {

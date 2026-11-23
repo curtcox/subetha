@@ -35,14 +35,22 @@ export interface Plan {
   costMicros: number;
 }
 
+function minutesOfDay(nowMs: number, tz?: string): number {
+  const d = new Date(nowMs);
+  if (!tz || tz === "UTC") return d.getUTCHours() * 60 + d.getUTCMinutes();
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", hour: "2-digit", minute: "2-digit" }).formatToParts(d);
+  const h = Number(parts.find((p) => p.type === "hour")?.value ?? 0) % 24;
+  const m = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+  return h * 60 + m;
+}
+
 export function inQuietHours(q: TopicPolicy["quiet_hours"], nowMs: number): boolean {
   if (!q) return false;
   const toMin = (s: string) => {
     const [h, m] = s.split(":").map(Number);
     return (h ?? 0) * 60 + (m ?? 0);
   };
-  const d = new Date(nowMs);
-  const now = d.getUTCHours() * 60 + d.getUTCMinutes();
+  const now = minutesOfDay(nowMs, q.tz);
   const a = toMin(q.start), b = toMin(q.end);
   return a <= b ? now >= a && now < b : now >= a || now < b;
 }

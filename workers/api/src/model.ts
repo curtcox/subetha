@@ -9,6 +9,9 @@ export interface TopicPolicy {
   public_read?: boolean;
   anon_rate_per_min?: number;
   anon_daily_cap_micros?: number;
+  /** Topic-wide publish rate limit (messages per minute) and optional burst size. */
+  rate_per_min?: number;
+  burst?: number;
   require_signature?: boolean;
   /** Account ids, token ids, or device ids allowed to publish besides the owner. */
   allowed_publishers?: string[];
@@ -24,8 +27,8 @@ export interface TopicPolicy {
   min_priority?: Partial<Record<Transport, number>>;
   /** Inbound email senders allowed to publish via topic@in.subetha.us ("*" = anyone). */
   email_senders?: string[];
-  /** UTC "HH:MM"–"HH:MM": paid transports are suppressed (downgrade to free ones). */
-  quiet_hours?: { start: string; end: string };
+  /** "HH:MM"–"HH:MM" (optional IANA tz, default UTC): paid transports are suppressed. */
+  quiet_hours?: { start: string; end: string; tz?: string };
 }
 
 export interface SubscriptionFilter {
