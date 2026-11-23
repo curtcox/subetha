@@ -376,7 +376,7 @@ export class SubEtha {
   balance() { return this.request<{ available_usd_micros: number; reserved_usd_micros: number }>("GET", "/v1/balance"); }
   ledger(after = 0) { return this.request<{ entries: unknown[] }>("GET", `/v1/ledger?after=${after}`); }
   prices() { return this.request<Record<string, unknown>>("GET", "/v1/prices"); }
-  createToken(body: { name?: string; scopes: string[]; transports?: Transport[]; daily_cap_usd?: number; total_cap_usd?: number; origins?: string[]; expires_in_s?: number }) {
+  createToken(body: { name?: string; scopes: string[]; transports?: Transport[]; daily_cap_usd?: number; total_cap_usd?: number; origins?: string[]; ips?: string[]; expires_in_s?: number }) {
     return this.request<{ id: string; token: string; scopes: string[] }>("POST", "/v1/tokens", body);
   }
   listTokens() { return this.request<{ tokens: unknown[] }>("GET", "/v1/tokens"); }

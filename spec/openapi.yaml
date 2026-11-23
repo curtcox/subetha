@@ -677,6 +677,11 @@ paths:
                 origins:
                   type: array
                   items: { type: string, pattern: "^https?://[^/]+$" }
+                ips:
+                  type: array
+                  maxItems: 32
+                  items: { type: string, examples: ["203.0.113.0/24", "2001:db8::/32"] }
+                  description: IPv4/IPv6 addresses or CIDR ranges the token may be used from (matched against the client address).
                 expires_in_s: { type: integer }
       responses:
         "201":
@@ -1896,6 +1901,7 @@ components:
         daily_cap_micros: { type: [integer, "null"] }
         total_cap_micros: { type: [integer, "null"] }
         origins: { type: [array, "null"], items: { type: string } }
+        ips: { type: [array, "null"], items: { type: string } }
         expires_at: { type: [integer, "null"] }
         created_at: { type: integer }
         revoked_at: { type: [integer, "null"] }

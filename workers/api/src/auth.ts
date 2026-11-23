@@ -5,6 +5,7 @@ import { fromJwt, introspect, introspectionConfigured, oauthPrincipal } from "./
 import { authenticateDevice } from "./devices.ts";
 import { randomBase32, sha256Hex, timingSafeEqual } from "./crypto.ts";
 import { ApiError } from "./errors.ts";
+import { ipAllowed } from "./ip.ts";
 import type { Caller, Env, Principal } from "./types.ts";
 
 export const TOKEN_RE = /^se_([a-z2-7]{16})_([a-z2-7]{32})$/;
@@ -19,6 +20,7 @@ export interface TokenRow {
   daily_cap_micros: number | null;
   total_cap_micros: number | null;
   origins: string | null;
+  ips?: string | null;
   expires_at: number | null;
   revoked_at: number | null;
 }
@@ -89,6 +91,9 @@ export async function authenticate(req: Request, env: Env): Promise<Principal> {
       const origins = JSON.parse(row.origins) as string[];
       const origin = req.headers.get("origin");
       if (!origin || !origins.includes(origin)) throw new ApiError("forbidden", "token not valid for this origin");
+    }
+    if (row.ips && !ipAllowed(req.headers.get("cf-connecting-ip"), JSON.parse(row.ips) as string[])) {
+      throw new ApiError("forbidden", "token not valid from this IP address");
     }
     return {
       kind: "token",

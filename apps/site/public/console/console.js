@@ -213,6 +213,7 @@ $("tokCreate").onclick = async () => {
       daily_cap_usd: $("tokDaily").value ? Number($("tokDaily").value) : undefined,
       transports: $("tokTransports").value ? list($("tokTransports").value) : undefined,
       origins: $("tokOrigins").value ? list($("tokOrigins").value) : undefined,
+      ips: $("tokIps").value ? list($("tokIps").value) : undefined,
     });
     out.textContent = `${t.token}\n\nShown once. Example:\ncurl -H "Authorization: Bearer ${t.token}" -d hi ${location.origin}/<topic>`;
     loadTokens();

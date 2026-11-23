@@ -26,6 +26,7 @@ Over the limit you get `429 rate_limited` with `Retry-After`.
 | `transports` | Allow-list of transports its publishes may use, e.g. no `sms`/`voice`. |
 | `daily_cap_usd`, `total_cap_usd` | Spend caps for everything charged to the token. |
 | `origins` | Makes it a [publishable token](#publishable-tokens). |
+| `ips` | Client addresses or CIDR ranges it works from, e.g. `["203.0.113.0/24", "2001:db8::/32"]` (up to 32). Requests from anywhere else get `403 forbidden`. |
 | `expires_in_s` | Lifetime. |
 | `name` | For your own bookkeeping. |
 
