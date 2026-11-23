@@ -426,9 +426,14 @@ export class SubEtha {
   }
 
   // ---- control plane ----
-  account() { return this.request<{ id: string; handle: string | null; balance_usd_micros: number; reserved_usd_micros?: number; tier: string; has_saved_card?: boolean; auto_recharge?: { threshold_micros: number; amount_micros: number } | null }>("GET", "/v1/account"); }
+  account() { return this.request<{ id: string; handle: string | null; balance_usd_micros: number; reserved_usd_micros?: number; tier: string; has_saved_card?: boolean; auto_recharge?: { threshold_micros: number; amount_micros: number } | null; daily_cap_micros?: number | null; monthly_cap_micros?: number | null; allow_transports?: Transport[] | null; deny_transports?: Transport[] | null; paused?: boolean; telephony_countries?: string[]; telephony_circuit?: string | null }>("GET", "/v1/account"); }
+  updateAccount(body: { handle?: string; paused?: boolean; daily_cap_usd?: number | null; monthly_cap_usd?: number | null; allow_transports?: Transport[] | null; deny_transports?: Transport[] | null; oauth_daily_cap_usd?: number | null; telephony_countries?: string[]; auto_recharge?: { threshold_usd: number; amount_usd: number } | null }) {
+    return this.request<Record<string, unknown>>("PATCH", "/v1/account", body);
+  }
   balance() { return this.request<{ available_usd_micros: number; reserved_usd_micros: number }>("GET", "/v1/balance"); }
   ledger(after = 0) { return this.request<{ entries: unknown[] }>("GET", `/v1/ledger?after=${after}`); }
+  usage(days = 30) { return this.request<Record<string, unknown>>("GET", `/v1/usage?days=${days}`); }
+  audit(limit = 50) { return this.request<{ entries: Record<string, unknown>[] }>("GET", `/v1/audit?limit=${limit}`); }
   /**
    * Wraps a topic key for each device (spec §5.1) and uploads the wrapped keys (PUT /v1/keys).
    * The relay stores them but can't read them. Needs an admin token for a topic you own.
@@ -496,16 +501,53 @@ export class SubEtha {
   }
   payments(limit = 50) { return this.request<{ payments: { id: string; kind: "checkout" | "auto_recharge"; amount_micros: number; fee_micros: number; credit_micros: number; refunded_micros: number; disputed: boolean; created_at: number }[] }>("GET", `/v1/payments?limit=${limit}`); }
   prices() { return this.request<Record<string, unknown>>("GET", "/v1/prices"); }
-  createToken(body: { name?: string; scopes: string[]; transports?: Transport[]; daily_cap_usd?: number; total_cap_usd?: number; origins?: string[]; ips?: string[]; expires_in_s?: number }) {
+  createToken(body: { name?: string; scopes: string[]; transports?: Transport[]; deny_transports?: Transport[]; daily_cap_usd?: number; total_cap_usd?: number; origins?: string[]; ips?: string[]; expires_in_s?: number }) {
     return this.request<{ id: string; token: string; scopes: string[] }>("POST", "/v1/tokens", body);
   }
   listTokens() { return this.request<{ tokens: unknown[] }>("GET", "/v1/tokens"); }
   revokeToken(id: string) { return this.request("DELETE", `/v1/tokens/${encodeURIComponent(id)}`); }
-  topics() { return this.request<{ topics: { name: string; policy: Record<string, unknown> }[] }>("GET", "/v1/topics"); }
+  topics() { return this.request<{ topics: { name: string; policy: Record<string, unknown>; endpoint_subscriptions?: number; created_at?: number }[] }>("GET", "/v1/topics"); }
+  topic(topic: string) { return this.request<Record<string, unknown>>("GET", `/v1/topics/${topic}`); }
   configureTopic(topic: string, policy: Record<string, unknown>) { return this.request("PUT", `/v1/topics/${topic}`, { policy }); }
   deleteTopic(topic: string) { return this.request<{ deleted: true }>("DELETE", `/v1/topics/${topic}`); }
+  listDevices() { return this.request<{ devices: Record<string, unknown>[] }>("GET", "/v1/devices"); }
+  updateDevice(id: string, body: { name?: string; capabilities?: string[]; paused?: boolean; allow_transports?: Transport[] | null; deny_transports?: Transport[] | null }) {
+    return this.request<Record<string, unknown>>("PATCH", `/v1/devices/${encodeURIComponent(id)}`, body);
+  }
+  revokeDevice(id: string) { return this.request<{ revoked: true }>("DELETE", `/v1/devices/${encodeURIComponent(id)}`); }
+  startDeviceCode(body: { device_id: string; time: number; proof: string; name?: string; capabilities?: string[] }) {
+    return this.request<{ device_code: string; user_code: string; verification_uri: string; verification_uri_complete?: string; expires_in?: number; interval?: number }>("POST", "/v1/device/code", body);
+  }
+  approveDevice(userCode: string) { return this.request<Record<string, unknown>>("POST", "/v1/device/approve", { user_code: userCode }); }
+  async pollDeviceToken(deviceCode: string): Promise<{ ok: boolean; status: number; data: { device_id?: string; account_id?: string; error?: string } }> {
+    const r = await this.f(`${this.baseUrl}/v1/device/token`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ device_code: deviceCode }) });
+    const data = (await r.json().catch(() => ({}))) as { device_id?: string; account_id?: string; error?: string };
+    return { ok: r.ok, status: r.status, data };
+  }
+  listEndpoints() { return this.request<{ endpoints: Record<string, unknown>[] }>("GET", "/v1/endpoints"); }
+  createEndpoint(body: { kind: string; address: string; config?: Record<string, unknown>; inbound_topic?: string | null }) {
+    return this.request<Record<string, unknown>>("POST", "/v1/endpoints", body);
+  }
+  verifyEndpoint(id: string, code: string) { return this.request<Record<string, unknown>>("POST", `/v1/endpoints/${encodeURIComponent(id)}/verify`, { code }); }
+  updateEndpoint(id: string, body: { inbound_topic?: string | null }) { return this.request<Record<string, unknown>>("PATCH", `/v1/endpoints/${encodeURIComponent(id)}`, body); }
+  testEndpoint(id: string, body: { topic?: string; title?: string; message?: string; priority?: number; tags?: string[] } = {}) {
+    return this.request<Record<string, unknown>>("POST", `/v1/endpoints/${encodeURIComponent(id)}/test`, body);
+  }
+  deleteEndpoint(id: string) { return this.request<{ deleted: true }>("DELETE", `/v1/endpoints/${encodeURIComponent(id)}`); }
+  listSubscriptions() { return this.request<{ subscriptions: Record<string, unknown>[] }>("GET", "/v1/subscriptions"); }
+  createSubscription(body: { topic: string; endpoint_id: string; after_s?: number; min_priority?: number | null; filter?: { priority?: number[]; tags?: string[] } }) {
+    return this.request<Record<string, unknown>>("POST", "/v1/subscriptions", body);
+  }
   updateSubscription(id: string, body: { filter?: { priority?: number[]; tags?: string[] }; after_s?: number; min_priority?: number | null; paused?: boolean }) {
     return this.request<Record<string, unknown>>("PATCH", `/v1/subscriptions/${encodeURIComponent(id)}`, body);
+  }
+  deleteSubscription(id: string) { return this.request<{ deleted: true }>("DELETE", `/v1/subscriptions/${encodeURIComponent(id)}`); }
+  listSlackBindings() { return this.request<{ bindings: Record<string, unknown>[] }>("GET", "/v1/slack/bindings"); }
+  createSlackBinding(body: { team_id: string; channel: string; topic: string; inbound?: boolean; outbound?: boolean }) {
+    return this.request<Record<string, unknown>>("POST", "/v1/slack/bindings", body);
+  }
+  deleteSlackBinding(teamId: string, channel: string) {
+    return this.request<{ deleted: true }>("DELETE", `/v1/slack/bindings?team_id=${encodeURIComponent(teamId)}&channel=${encodeURIComponent(channel)}`);
   }
   listPushCredentials() { return this.request<{ credentials: Record<string, unknown>[] }>("GET", "/v1/push/credentials"); }
   createPushCredential(body: { kind: "apns" | "fcm"; name?: string; is_default?: boolean; key_p8?: string; key_id?: string; team_id?: string; topic?: string; sandbox?: boolean; service_account?: string | Record<string, unknown>; project_id?: string; client_email?: string; private_key?: string; private_key_id?: string }) {

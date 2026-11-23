@@ -3,7 +3,9 @@
 //   <subetha-send topic="@me/doorbell" token="se_…"></subetha-send>
 // Use publishable (origin-bound, single-topic, capped) tokens on public pages.
 import { enrollmentProof, SubEtha } from "./client.ts";
+import { Outbox } from "./outbox.ts";
 import * as protocol from "./protocol/index.ts";
+import { intersectPolicies, planDelivery, planForEnvelope } from "./routing.ts";
 import { subscribeWebPush } from "./webpush.ts";
 
 const scriptOrigin = (() => {
@@ -36,16 +38,33 @@ function listAttr(el: HTMLElement, name: string): string[] | undefined {
 }
 
 class SubEthaFeed extends HTMLElement {
+  static observedAttributes = ["topic", "token", "base-url", "since", "priority", "tags", "max"];
   private sub?: { close(): void };
+  private mounted = false;
+
   connectedCallback() {
+    this.mounted = true;
+    this.start();
+  }
+
+  attributeChangedCallback(_name: string, prev: string | null, next: string | null) {
+    if (this.mounted && prev !== next) this.start();
+  }
+
+  private start() {
+    this.sub?.close();
+    this.sub = undefined;
     const topic = this.getAttribute("topic");
-    if (!topic) return;
+    const root = this.shadowRoot ?? this.attachShadow({ mode: "open" });
+    if (!topic) { root.replaceChildren(); return; }
     const max = Number(this.getAttribute("max") ?? 50);
     const priority = listAttr(this, "priority")?.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 5);
     const tags = listAttr(this, "tags");
+    const style = document.createElement("style");
+    style.textContent = ":host{display:block}";
     const list = document.createElement("ul");
     list.setAttribute("part", "list");
-    this.replaceChildren(list);
+    root.replaceChildren(style, list);
     this.sub = clientFor(this).subscribe(topic.split(","), (m) => {
       const li = document.createElement("li");
       li.setAttribute("part", "item");
@@ -66,10 +85,18 @@ class SubEthaFeed extends HTMLElement {
       list.prepend(li);
       while (list.children.length > max) list.lastElementChild?.remove();
       this.dispatchEvent(new CustomEvent("message", { detail: m }));
-    }, { since: this.getAttribute("since") ?? undefined, ...(priority?.length ? { priority } : {}), ...(tags?.length ? { tags } : {}) });
+    }, {
+      since: this.getAttribute("since") ?? undefined,
+      ...(priority?.length ? { priority } : {}),
+      ...(tags?.length ? { tags } : {}),
+      onError: (err) => this.dispatchEvent(new CustomEvent("error", { detail: err })),
+    });
   }
+
   disconnectedCallback() {
+    this.mounted = false;
     this.sub?.close();
+    this.sub = undefined;
   }
 }
 
@@ -77,6 +104,9 @@ class SubEthaSend extends HTMLElement {
   connectedCallback() {
     const topic = this.getAttribute("topic");
     if (!topic) return;
+    const root = this.shadowRoot ?? this.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = ":host{display:inline-block}";
     const form = document.createElement("form");
     const input = document.createElement("input");
     input.placeholder = this.getAttribute("placeholder") ?? "Message";
@@ -105,11 +135,15 @@ class SubEthaSend extends HTMLElement {
         button.disabled = false;
       }
     });
-    this.replaceChildren(form);
+    root.replaceChildren(style, form);
   }
 }
 
-if (!customElements.get("subetha-feed")) customElements.define("subetha-feed", SubEthaFeed);
-if (!customElements.get("subetha-send")) customElements.define("subetha-send", SubEthaSend);
+if (typeof customElements !== "undefined") {
+  if (!customElements.get("subetha-feed")) customElements.define("subetha-feed", SubEthaFeed);
+  if (!customElements.get("subetha-send")) customElements.define("subetha-send", SubEthaSend);
+}
 
-(globalThis as Record<string, unknown>).SubEtha = Object.assign(SubEtha, { protocol, subscribeWebPush, enrollmentProof });
+export { SubEthaFeed, SubEthaSend };
+
+(globalThis as Record<string, unknown>).SubEtha = Object.assign(SubEtha, { protocol, subscribeWebPush, enrollmentProof, Outbox, planDelivery, planForEnvelope, intersectPolicies });
