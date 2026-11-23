@@ -256,10 +256,16 @@ protected:
   jsi::Value cpp_uniffi_subetha_core_fn_func_sign_request(
       jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
       size_t count);
+  jsi::Value cpp_uniffi_subetha_core_fn_func_unwrap_topic_key_json(
+      jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
+      size_t count);
   jsi::Value cpp_uniffi_subetha_core_fn_func_validate_envelope_json(
       jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
       size_t count);
   jsi::Value cpp_uniffi_subetha_core_fn_func_verify_envelope_json(
+      jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
+      size_t count);
+  jsi::Value cpp_uniffi_subetha_core_fn_func_wrap_topic_key_json(
       jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
       size_t count);
   jsi::Value cpp_uniffi_subetha_core_checksum_func_audio_demodulate(
@@ -331,10 +337,16 @@ protected:
   jsi::Value cpp_uniffi_subetha_core_checksum_func_sign_request(
       jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
       size_t count);
+  jsi::Value cpp_uniffi_subetha_core_checksum_func_unwrap_topic_key_json(
+      jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
+      size_t count);
   jsi::Value cpp_uniffi_subetha_core_checksum_func_validate_envelope_json(
       jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
       size_t count);
   jsi::Value cpp_uniffi_subetha_core_checksum_func_verify_envelope_json(
+      jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
+      size_t count);
+  jsi::Value cpp_uniffi_subetha_core_checksum_func_wrap_topic_key_json(
       jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
       size_t count);
   jsi::Value cpp_uniffi_subetha_core_checksum_method_corededuper_accept(

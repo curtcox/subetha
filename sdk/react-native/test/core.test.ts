@@ -90,3 +90,32 @@ describe("Rust core signer and verifier", () => {
     expect(() => rn.createClient({ deviceSeed: SEED })).toThrow(/core/);
   });
 });
+
+describe("coreKeyUnwrapper", () => {
+  it("opens wrapped keys through the core for client.loadTopicKeys", async () => {
+    const dev = await sdk.deviceKeyFromSeed(SEED);
+    const topicKey = new Uint8Array(32).fill(5);
+    const wrapped = await sdk.wrapTopicKey(topicKey, { topic: "@a/vault", kid: "k1", to: dev.deviceId });
+    const seen: string[] = [];
+    // Stands in for the core's unwrap_topic_key_json: open with the JS reference, synchronously
+    // from a precomputed answer, recording what it was handed.
+    const opened = await sdk.unwrapTopicKey(wrapped, SEED);
+    const core = {
+      ...fakeCore,
+      unwrapTopicKeyJson(json: string, seed: ArrayBuffer) {
+        seen.push(json);
+        const w = JSON.parse(json);
+        return w.ct === wrapped.ct && Buffer.from(seed).equals(Buffer.from(SEED)) ? (opened!.slice().buffer as ArrayBuffer) : undefined;
+      },
+    } as unknown as SubEthaCore;
+    const u = rn.coreKeyUnwrapper(core, SEED);
+    expect(u.deviceId).toBe(dev.deviceId);
+
+    const fetch = (async () => Response.json({ keys: [{ ...wrapped, created_at: 1 }, { ...wrapped, ct: "x".repeat(64), kid: "bad", created_at: 2 }] })) as typeof globalThis.fetch;
+    const client = new sdk.SubEtha({ baseUrl: "https://relay.test", token: "t", fetch });
+    const loaded = await client.loadTopicKeys({ unwrapper: u });
+    expect(loaded).toEqual({ "@a/vault": { kid: "k1", key: topicKey } });
+    expect(JSON.parse(seen[0]!)).toEqual(wrapped); // created_at stripped
+    expect(seen).toHaveLength(2);
+  });
+});

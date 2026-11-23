@@ -27,9 +27,12 @@ export interface SubEthaCore {
   requestSigningInput(method: string, host: string, pathAndQuery: string, body: ArrayBuffer, signedHeaders: { name: string; value: string }[]): string;
   signRequest(seed: ArrayBuffer, method: string, host: string, pathAndQuery: string, time: bigint, nonce: string | undefined, body: ArrayBuffer, headers: { name: string; value: string }[]): { deviceId: string; time: bigint; nonce: string; signedHeaders: string; signature: string };
   enrollmentProof(seed: ArrayBuffer, time: bigint): { deviceId: string; time: bigint; proof: string };
+  /** Wrapped topic keys (spec §5.1). */
+  wrapTopicKeyJson(key: ArrayBuffer, topic: string, kid: string, to: string): string;
+  unwrapTopicKeyJson(wrappedJson: string, seed: ArrayBuffer): ArrayBuffer | undefined;
 }
 
-import type { DeviceSigner, Envelope } from "@subetha/sdk";
+import type { DeviceSigner, Envelope, KeyUnwrapper } from "@subetha/sdk";
 
 /** The name the ubrn-generated package is published under. */
 export const CORE_PACKAGE = "@subetha/react-native-core";
@@ -103,4 +106,24 @@ export function coreSigner(core: SubEthaCore, seed: Uint8Array | ArrayBuffer): D
 /** An envelope signature check (for `createClient({ verifyEnvelope })`) by the Rust core. */
 export function coreVerifier(core: SubEthaCore): (env: Envelope) => boolean {
   return (env) => core.verifyEnvelopeJson(JSON.stringify(env));
+}
+
+/**
+ * Opens wrapped topic keys with the Rust core, for `client.loadTopicKeys({ unwrapper })`
+ * (Hermes has no WebCrypto X25519).
+ */
+export function coreKeyUnwrapper(core: SubEthaCore, seed: Uint8Array | ArrayBuffer): KeyUnwrapper {
+  const seedBuf = toArrayBuffer(seed);
+  const { deviceId } = core.deviceKeyFromSeed(seedBuf);
+  return {
+    deviceId,
+    unwrap: (w) => {
+      try {
+        const k = core.unwrapTopicKeyJson(JSON.stringify(w), seedBuf);
+        return k ? new Uint8Array(k) : null;
+      } catch {
+        return null;
+      }
+    },
+  };
 }

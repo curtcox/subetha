@@ -407,6 +407,23 @@ export function signRequest(seed: ArrayBuffer, method: string, host: string, pat
     ));
     }
 /**
+ * Opens a wrapped key (one entry of `GET /v1/keys`; `created_at` is ignored) with the device
+ * seed. `None` if it isn't for this device, isn't a wrapped key, or was tampered with.
+ */
+export function unwrapTopicKeyJson(wrappedJson: string, seed: ArrayBuffer): ArrayBuffer | undefined /*throws*/ {
+    return FfiConverterOptionalArrayBuffer.lift(
+        uniffiCaller.rustCallWithError(
+            /*liftError:*/ FfiConverterTypeFfiError.lift.bind(FfiConverterTypeFfiError),
+            /*caller:*/ (callStatus) => {
+                return nativeModule().ubrn_uniffi_subetha_core_fn_func_unwrap_topic_key_json(
+        FfiConverterString.lower(wrappedJson),
+        FfiConverterArrayBuffer.lower(seed),
+                callStatus);
+            },
+            /*liftString:*/ FfiConverterString.lift,
+    ));
+    }
+/**
  * Validation problems for an envelope (empty = valid).
  */
 export function validateEnvelopeJson(envelopeJson: string): Array<string> {
@@ -427,6 +444,25 @@ export function verifyEnvelopeJson(envelopeJson: string): boolean {
             /*caller:*/ (callStatus) => {
                 return nativeModule().ubrn_uniffi_subetha_core_fn_func_verify_envelope_json(
         FfiConverterString.lower(envelopeJson),
+                callStatus);
+            },
+            /*liftString:*/ FfiConverterString.lift,
+    ));
+    }
+/**
+ * Wraps a 32-byte topic key for device `to` (spec §5.1); returns the wrapped-key JSON for
+ * `PUT /v1/keys`.
+ */
+export function wrapTopicKeyJson(key: ArrayBuffer, topic: string, kid: string, to: string): string /*throws*/ {
+    return FfiConverterString.lift(
+        uniffiCaller.rustCallWithError(
+            /*liftError:*/ FfiConverterTypeFfiError.lift.bind(FfiConverterTypeFfiError),
+            /*caller:*/ (callStatus) => {
+                return nativeModule().ubrn_uniffi_subetha_core_fn_func_wrap_topic_key_json(
+        FfiConverterArrayBuffer.lower(key),
+        FfiConverterString.lower(topic),
+        FfiConverterString.lower(kid),
+        FfiConverterString.lower(to),
                 callStatus);
             },
             /*liftString:*/ FfiConverterString.lift,
@@ -2619,11 +2655,17 @@ function uniffiEnsureInitialized() {
     if (nativeModule().ubrn_uniffi_subetha_core_checksum_func_sign_request() !== 14068) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_subetha_core_checksum_func_sign_request");
     }
+    if (nativeModule().ubrn_uniffi_subetha_core_checksum_func_unwrap_topic_key_json() !== 33719) {
+        throw new UniffiInternalError.ApiChecksumMismatch("uniffi_subetha_core_checksum_func_unwrap_topic_key_json");
+    }
     if (nativeModule().ubrn_uniffi_subetha_core_checksum_func_validate_envelope_json() !== 42612) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_subetha_core_checksum_func_validate_envelope_json");
     }
     if (nativeModule().ubrn_uniffi_subetha_core_checksum_func_verify_envelope_json() !== 59783) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_subetha_core_checksum_func_verify_envelope_json");
+    }
+    if (nativeModule().ubrn_uniffi_subetha_core_checksum_func_wrap_topic_key_json() !== 21017) {
+        throw new UniffiInternalError.ApiChecksumMismatch("uniffi_subetha_core_checksum_func_wrap_topic_key_json");
     }
     if (nativeModule().ubrn_uniffi_subetha_core_checksum_method_corededuper_accept() !== 9973) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_subetha_core_checksum_method_corededuper_accept");

@@ -90,8 +90,10 @@ interface NativeModuleInterface {
     ubrn_uniffi_subetha_core_fn_func_sign_bytes(seed: Uint8Array, message: Uint8Array, uniffi_out_err: UniffiRustCallStatus): Uint8Array;
     ubrn_uniffi_subetha_core_fn_func_sign_envelope_json(envelopeJson: Uint8Array, seed: Uint8Array, uniffi_out_err: UniffiRustCallStatus): Uint8Array;
     ubrn_uniffi_subetha_core_fn_func_sign_request(seed: Uint8Array, method: Uint8Array, host: Uint8Array, pathAndQuery: Uint8Array, time: bigint, nonce: Uint8Array, body: Uint8Array, headers: Uint8Array, uniffi_out_err: UniffiRustCallStatus): Uint8Array;
+    ubrn_uniffi_subetha_core_fn_func_unwrap_topic_key_json(wrappedJson: Uint8Array, seed: Uint8Array, uniffi_out_err: UniffiRustCallStatus): Uint8Array;
     ubrn_uniffi_subetha_core_fn_func_validate_envelope_json(envelopeJson: Uint8Array, uniffi_out_err: UniffiRustCallStatus): Uint8Array;
     ubrn_uniffi_subetha_core_fn_func_verify_envelope_json(envelopeJson: Uint8Array, uniffi_out_err: UniffiRustCallStatus): number;
+    ubrn_uniffi_subetha_core_fn_func_wrap_topic_key_json(key: Uint8Array, topic: Uint8Array, kid: Uint8Array, to: Uint8Array, uniffi_out_err: UniffiRustCallStatus): Uint8Array;
     ubrn_uniffi_subetha_core_checksum_func_audio_demodulate(): number;
     ubrn_uniffi_subetha_core_checksum_func_audio_modulate(): number;
     ubrn_uniffi_subetha_core_checksum_func_audio_resample(): number;
@@ -115,8 +117,10 @@ interface NativeModuleInterface {
     ubrn_uniffi_subetha_core_checksum_func_sign_bytes(): number;
     ubrn_uniffi_subetha_core_checksum_func_sign_envelope_json(): number;
     ubrn_uniffi_subetha_core_checksum_func_sign_request(): number;
+    ubrn_uniffi_subetha_core_checksum_func_unwrap_topic_key_json(): number;
     ubrn_uniffi_subetha_core_checksum_func_validate_envelope_json(): number;
     ubrn_uniffi_subetha_core_checksum_func_verify_envelope_json(): number;
+    ubrn_uniffi_subetha_core_checksum_func_wrap_topic_key_json(): number;
     ubrn_uniffi_subetha_core_checksum_method_corededuper_accept(): number;
     ubrn_uniffi_subetha_core_checksum_method_corededuper_accept_envelope(): number;
     ubrn_uniffi_subetha_core_checksum_method_corededuper_has(): number;

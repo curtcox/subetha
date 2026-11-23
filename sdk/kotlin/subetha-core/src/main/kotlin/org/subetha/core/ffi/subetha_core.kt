@@ -854,6 +854,10 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -1025,10 +1029,14 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_subetha_core_fn_func_sign_request(`seed`: RustBuffer.ByValue,`method`: RustBuffer.ByValue,`host`: RustBuffer.ByValue,`pathAndQuery`: RustBuffer.ByValue,`time`: Long,`nonce`: RustBuffer.ByValue,`body`: RustBuffer.ByValue,`headers`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_subetha_core_fn_func_unwrap_topic_key_json(`wrappedJson`: RustBuffer.ByValue,`seed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_subetha_core_fn_func_validate_envelope_json(`envelopeJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_subetha_core_fn_func_verify_envelope_json(`envelopeJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    fun uniffi_subetha_core_fn_func_wrap_topic_key_json(`key`: RustBuffer.ByValue,`topic`: RustBuffer.ByValue,`kid`: RustBuffer.ByValue,`to`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun ffi_subetha_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_subetha_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1187,9 +1195,13 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_subetha_core_checksum_func_sign_request(
     ): Short
+    fun uniffi_subetha_core_checksum_func_unwrap_topic_key_json(
+    ): Short
     fun uniffi_subetha_core_checksum_func_validate_envelope_json(
     ): Short
     fun uniffi_subetha_core_checksum_func_verify_envelope_json(
+    ): Short
+    fun uniffi_subetha_core_checksum_func_wrap_topic_key_json(
     ): Short
     fun uniffi_subetha_core_checksum_method_corededuper_accept(
     ): Short
@@ -1355,10 +1367,16 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_subetha_core_checksum_func_sign_request() != 14068.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_subetha_core_checksum_func_unwrap_topic_key_json() != 33719.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_subetha_core_checksum_func_validate_envelope_json() != 42612.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_subetha_core_checksum_func_verify_envelope_json() != 59783.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_subetha_core_checksum_func_wrap_topic_key_json() != 21017.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_subetha_core_checksum_method_corededuper_accept() != 9973.toShort()) {
@@ -5063,6 +5081,20 @@ public object FfiConverterSequenceTypeOutboxItemRecord: FfiConverterRustBuffer<L
     
 
         /**
+         * Opens a wrapped key (one entry of `GET /v1/keys`; `created_at` is ignored) with the device
+         * seed. `None` if it isn't for this device, isn't a wrapped key, or was tampered with.
+         */
+    @Throws(FfiException::class) fun `unwrapTopicKeyJson`(`wrappedJson`: kotlin.String, `seed`: kotlin.ByteArray): kotlin.ByteArray? {
+            return FfiConverterOptionalByteArray.lift(
+    uniffiRustCallWithError(FfiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_subetha_core_fn_func_unwrap_topic_key_json(
+        FfiConverterString.lower(`wrappedJson`),FfiConverterByteArray.lower(`seed`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Validation problems for an envelope (empty = valid).
          */ fun `validateEnvelopeJson`(`envelopeJson`: kotlin.String): List<kotlin.String> {
             return FfiConverterSequenceString.lift(
@@ -5081,6 +5113,20 @@ public object FfiConverterSequenceTypeOutboxItemRecord: FfiConverterRustBuffer<L
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_subetha_core_fn_func_verify_envelope_json(
         FfiConverterString.lower(`envelopeJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Wraps a 32-byte topic key for device `to` (spec §5.1); returns the wrapped-key JSON for
+         * `PUT /v1/keys`.
+         */
+    @Throws(FfiException::class) fun `wrapTopicKeyJson`(`key`: kotlin.ByteArray, `topic`: kotlin.String, `kid`: kotlin.String, `to`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(FfiException) { _status ->
+    UniffiLib.INSTANCE.uniffi_subetha_core_fn_func_wrap_topic_key_json(
+        FfiConverterByteArray.lower(`key`),FfiConverterString.lower(`topic`),FfiConverterString.lower(`kid`),FfiConverterString.lower(`to`),_status)
 }
     )
     }

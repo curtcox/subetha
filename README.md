@@ -21,10 +21,10 @@ curl -H "Authorization: Bearer $SUBETHA_TOKEN" https://subetha.org/@me/backups/j
   string, JSON, `X-Filename` attachments to R2) and subscribe (NDJSON, SSE, raw, WebSocket, poll,
   `since`, filters, several topics), a `TopicDO` per topic (fan-out, buffer, traces, acks) and an
   `AccountDO` per account (prepaid ledger, credit leases, caps, new-funds hold), D1, KV, Queues,
-  rate limits, and a daily cron for rent metering, freezing, reconciliation, and Twilio price checks.
+  rate limits, and a daily cron for rent metering, freezing (with freeze, deletion-warning, and deletion emails), reconciliation, and Twilio price checks.
 - **Control plane** (`/v1/*`): accounts (Clerk), Stripe Checkout top-ups (and opt-in auto-recharge) and webhooks, scoped and
-  capped API tokens (including origin-bound publishable tokens), topic policies, traces, dry runs,
-  idempotency keys, endpoints with verification codes, subscriptions with escalation, device
+  capped API tokens (including origin-bound publishable tokens and IP allow-lists), topic policies, traces, dry runs,
+  idempotency keys, payment history and receipts, wrapped E2EE topic keys for enrolled devices (`/v1/keys`), endpoints with verification codes, subscriptions with escalation, device
   enrollment (device-code flow and request signatures), an audit log, `/v1/status`.
 - **Transports**: live WS/SSE/poll; Web Push, FCM, APNs; HMAC-signed webhooks; email out
   (Cloudflare Email Service or SES) and in (Email Routing); Slack (OAuth install, both

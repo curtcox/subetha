@@ -27,6 +27,8 @@ without custom type mapping. Envelopes cross the boundary as JSON text.
 | `verify_envelope_json(json) -> bool` | Never throws |
 | `encrypt_envelope_json(json, key, kid) -> String` | Spec §5, random nonce |
 | `decrypt_envelope_json(json, key) -> Option<String>` | `None` = wrong key or tampered |
+| `wrap_topic_key_json(key, topic, kid, to) -> String` | Spec §5.1: seal a 32-byte topic key to device `to`, for `PUT /v1/keys` |
+| `unwrap_topic_key_json(json, seed) -> Option<Vec<u8>>` | Open a wrapped key (an entry of `GET /v1/keys`); `None` = not for this device or tampered |
 | `sign_bytes(seed, message) -> Vec<u8>` | Raw Ed25519 signature |
 | `new_request_nonce() -> String` | base64url(16 random bytes), for `X-Device-Nonce` |
 | `request_signing_input(method, host, path_and_query, body, signed_headers) -> String` | `subetha-req-v2\nMETHOD\nhost\npath?query\nhex(sha256(body))` + `\nname:value` per signed header (spec §8.1) |

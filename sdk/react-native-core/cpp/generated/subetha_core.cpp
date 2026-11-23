@@ -287,10 +287,15 @@ RustBuffer uniffi_subetha_core_fn_func_sign_request(
     RustBuffer seed, RustBuffer method, RustBuffer host,
     RustBuffer path_and_query, uint64_t time, RustBuffer nonce, RustBuffer body,
     RustBuffer headers, RustCallStatus *uniffi_out_err);
+RustBuffer uniffi_subetha_core_fn_func_unwrap_topic_key_json(
+    RustBuffer wrapped_json, RustBuffer seed, RustCallStatus *uniffi_out_err);
 RustBuffer uniffi_subetha_core_fn_func_validate_envelope_json(
     RustBuffer envelope_json, RustCallStatus *uniffi_out_err);
 int8_t uniffi_subetha_core_fn_func_verify_envelope_json(
     RustBuffer envelope_json, RustCallStatus *uniffi_out_err);
+RustBuffer uniffi_subetha_core_fn_func_wrap_topic_key_json(
+    RustBuffer key, RustBuffer topic, RustBuffer kid, RustBuffer to,
+    RustCallStatus *uniffi_out_err);
 RustBuffer ffi_subetha_core_rustbuffer_alloc(uint64_t size,
                                              RustCallStatus *uniffi_out_err);
 RustBuffer
@@ -441,8 +446,10 @@ uint16_t uniffi_subetha_core_checksum_func_request_signing_input();
 uint16_t uniffi_subetha_core_checksum_func_sign_bytes();
 uint16_t uniffi_subetha_core_checksum_func_sign_envelope_json();
 uint16_t uniffi_subetha_core_checksum_func_sign_request();
+uint16_t uniffi_subetha_core_checksum_func_unwrap_topic_key_json();
 uint16_t uniffi_subetha_core_checksum_func_validate_envelope_json();
 uint16_t uniffi_subetha_core_checksum_func_verify_envelope_json();
+uint16_t uniffi_subetha_core_checksum_func_wrap_topic_key_json();
 uint16_t uniffi_subetha_core_checksum_method_corededuper_accept();
 uint16_t uniffi_subetha_core_checksum_method_corededuper_accept_envelope();
 uint16_t uniffi_subetha_core_checksum_method_corededuper_has();
@@ -2776,6 +2783,17 @@ NativeSubethaCore::NativeSubethaCore(
             return this->cpp_uniffi_subetha_core_fn_func_sign_request(
                 rt, thisVal, args, count);
           });
+  props["ubrn_uniffi_subetha_core_fn_func_unwrap_topic_key_json"] =
+      jsi::Function::createFromHostFunction(
+          rt,
+          jsi::PropNameID::forAscii(
+              rt, "ubrn_uniffi_subetha_core_fn_func_unwrap_topic_key_json"),
+          2,
+          [this](jsi::Runtime &rt, const jsi::Value &thisVal,
+                 const jsi::Value *args, size_t count) -> jsi::Value {
+            return this->cpp_uniffi_subetha_core_fn_func_unwrap_topic_key_json(
+                rt, thisVal, args, count);
+          });
   props["ubrn_uniffi_subetha_core_fn_func_validate_envelope_json"] =
       jsi::Function::createFromHostFunction(
           rt,
@@ -2796,6 +2814,17 @@ NativeSubethaCore::NativeSubethaCore(
           [this](jsi::Runtime &rt, const jsi::Value &thisVal,
                  const jsi::Value *args, size_t count) -> jsi::Value {
             return this->cpp_uniffi_subetha_core_fn_func_verify_envelope_json(
+                rt, thisVal, args, count);
+          });
+  props["ubrn_uniffi_subetha_core_fn_func_wrap_topic_key_json"] =
+      jsi::Function::createFromHostFunction(
+          rt,
+          jsi::PropNameID::forAscii(
+              rt, "ubrn_uniffi_subetha_core_fn_func_wrap_topic_key_json"),
+          4,
+          [this](jsi::Runtime &rt, const jsi::Value &thisVal,
+                 const jsi::Value *args, size_t count) -> jsi::Value {
+            return this->cpp_uniffi_subetha_core_fn_func_wrap_topic_key_json(
                 rt, thisVal, args, count);
           });
   props["ubrn_uniffi_subetha_core_checksum_func_audio_demodulate"] =
@@ -3066,6 +3095,19 @@ NativeSubethaCore::NativeSubethaCore(
             return this->cpp_uniffi_subetha_core_checksum_func_sign_request(
                 rt, thisVal, args, count);
           });
+  props["ubrn_uniffi_subetha_core_checksum_func_unwrap_topic_key_json"] =
+      jsi::Function::createFromHostFunction(
+          rt,
+          jsi::PropNameID::forAscii(
+              rt,
+              "ubrn_uniffi_subetha_core_checksum_func_unwrap_topic_key_json"),
+          0,
+          [this](jsi::Runtime &rt, const jsi::Value &thisVal,
+                 const jsi::Value *args, size_t count) -> jsi::Value {
+            return this
+                ->cpp_uniffi_subetha_core_checksum_func_unwrap_topic_key_json(
+                    rt, thisVal, args, count);
+          });
   props["ubrn_uniffi_subetha_core_checksum_func_validate_envelope_json"] =
       jsi::Function::createFromHostFunction(
           rt,
@@ -3090,6 +3132,18 @@ NativeSubethaCore::NativeSubethaCore(
                  const jsi::Value *args, size_t count) -> jsi::Value {
             return this
                 ->cpp_uniffi_subetha_core_checksum_func_verify_envelope_json(
+                    rt, thisVal, args, count);
+          });
+  props["ubrn_uniffi_subetha_core_checksum_func_wrap_topic_key_json"] =
+      jsi::Function::createFromHostFunction(
+          rt,
+          jsi::PropNameID::forAscii(
+              rt, "ubrn_uniffi_subetha_core_checksum_func_wrap_topic_key_json"),
+          0,
+          [this](jsi::Runtime &rt, const jsi::Value &thisVal,
+                 const jsi::Value *args, size_t count) -> jsi::Value {
+            return this
+                ->cpp_uniffi_subetha_core_checksum_func_wrap_topic_key_json(
                     rt, thisVal, args, count);
           });
   props["ubrn_uniffi_subetha_core_checksum_method_corededuper_accept"] =
@@ -5003,6 +5057,24 @@ jsi::Value NativeSubethaCore::cpp_uniffi_subetha_core_fn_func_sign_request(
                                                           value);
 }
 jsi::Value
+NativeSubethaCore::cpp_uniffi_subetha_core_fn_func_unwrap_topic_key_json(
+    jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
+    size_t count) {
+  RustCallStatus status =
+      uniffi::subetha_core::Bridging<RustCallStatus>::rustSuccess(rt);
+  auto value = uniffi_subetha_core_fn_func_unwrap_topic_key_json(
+      uniffi::subetha_core::Bridging<RustBuffer>::fromJs(rt, callInvoker,
+                                                         args[0]),
+      uniffi::subetha_core::Bridging<RustBuffer>::fromJs(rt, callInvoker,
+                                                         args[1]),
+      &status);
+  uniffi::subetha_core::Bridging<RustCallStatus>::copyIntoJs(
+      rt, callInvoker, status, args[count - 1]);
+
+  return uniffi::subetha_core::Bridging<RustBuffer>::toJs(rt, callInvoker,
+                                                          value);
+}
+jsi::Value
 NativeSubethaCore::cpp_uniffi_subetha_core_fn_func_validate_envelope_json(
     jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
     size_t count) {
@@ -5032,6 +5104,28 @@ NativeSubethaCore::cpp_uniffi_subetha_core_fn_func_verify_envelope_json(
       rt, callInvoker, status, args[count - 1]);
 
   return uniffi_jsi::Bridging<int8_t>::toJs(rt, callInvoker, value);
+}
+jsi::Value
+NativeSubethaCore::cpp_uniffi_subetha_core_fn_func_wrap_topic_key_json(
+    jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
+    size_t count) {
+  RustCallStatus status =
+      uniffi::subetha_core::Bridging<RustCallStatus>::rustSuccess(rt);
+  auto value = uniffi_subetha_core_fn_func_wrap_topic_key_json(
+      uniffi::subetha_core::Bridging<RustBuffer>::fromJs(rt, callInvoker,
+                                                         args[0]),
+      uniffi::subetha_core::Bridging<RustBuffer>::fromJs(rt, callInvoker,
+                                                         args[1]),
+      uniffi::subetha_core::Bridging<RustBuffer>::fromJs(rt, callInvoker,
+                                                         args[2]),
+      uniffi::subetha_core::Bridging<RustBuffer>::fromJs(rt, callInvoker,
+                                                         args[3]),
+      &status);
+  uniffi::subetha_core::Bridging<RustCallStatus>::copyIntoJs(
+      rt, callInvoker, status, args[count - 1]);
+
+  return uniffi::subetha_core::Bridging<RustBuffer>::toJs(rt, callInvoker,
+                                                          value);
 }
 jsi::Value
 NativeSubethaCore::cpp_uniffi_subetha_core_checksum_func_audio_demodulate(
@@ -5215,6 +5309,14 @@ NativeSubethaCore::cpp_uniffi_subetha_core_checksum_func_sign_request(
   return uniffi_jsi::Bridging<uint16_t>::toJs(rt, callInvoker, value);
 }
 jsi::Value
+NativeSubethaCore::cpp_uniffi_subetha_core_checksum_func_unwrap_topic_key_json(
+    jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
+    size_t count) {
+  auto value = uniffi_subetha_core_checksum_func_unwrap_topic_key_json();
+
+  return uniffi_jsi::Bridging<uint16_t>::toJs(rt, callInvoker, value);
+}
+jsi::Value
 NativeSubethaCore::cpp_uniffi_subetha_core_checksum_func_validate_envelope_json(
     jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
     size_t count) {
@@ -5227,6 +5329,14 @@ NativeSubethaCore::cpp_uniffi_subetha_core_checksum_func_verify_envelope_json(
     jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
     size_t count) {
   auto value = uniffi_subetha_core_checksum_func_verify_envelope_json();
+
+  return uniffi_jsi::Bridging<uint16_t>::toJs(rt, callInvoker, value);
+}
+jsi::Value
+NativeSubethaCore::cpp_uniffi_subetha_core_checksum_func_wrap_topic_key_json(
+    jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args,
+    size_t count) {
+  auto value = uniffi_subetha_core_checksum_func_wrap_topic_key_json();
 
   return uniffi_jsi::Bridging<uint16_t>::toJs(rt, callInvoker, value);
 }

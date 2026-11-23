@@ -8,7 +8,7 @@
 
 use serde_json::{Map, Value};
 
-use crate::{canonical, e2ee, envelope, request, sign, ulid};
+use crate::{canonical, e2ee, envelope, keywrap, request, sign, ulid};
 
 /// Error surfaced to foreign languages.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -114,6 +114,25 @@ pub fn encrypt_envelope_json(envelope_json: String, key: Vec<u8>, kid: String) -
 pub fn decrypt_envelope_json(envelope_json: String, key: Vec<u8>) -> Result<Option<String>, FfiError> {
     let m = parse_object(&envelope_json)?;
     Ok(e2ee::decrypt_map(&m, &key32(&key)?).map(|d| to_json(&d)))
+}
+
+/// Wraps a 32-byte topic key for device `to` (spec §5.1); returns the wrapped-key JSON for
+/// `PUT /v1/keys`.
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn wrap_topic_key_json(key: Vec<u8>, topic: String, kid: String, to: String) -> Result<String, FfiError> {
+    let w = keywrap::wrap_topic_key(&key32(&key)?, &topic, &kid, &to)?;
+    Ok(serde_json::to_string(&w).expect("wrapped key serializes"))
+}
+
+/// Opens a wrapped key (one entry of `GET /v1/keys`; `created_at` is ignored) with the device
+/// seed. `None` if it isn't for this device, isn't a wrapped key, or was tampered with.
+#[cfg_attr(feature = "uniffi", uniffi::export)]
+pub fn unwrap_topic_key_json(wrapped_json: String, seed: Vec<u8>) -> Result<Option<Vec<u8>>, FfiError> {
+    let key = sign::DeviceKey::from_seed_slice(&seed)?;
+    let mut m = parse_object(&wrapped_json)?;
+    m.remove("created_at");
+    let Ok(w) = serde_json::from_value::<keywrap::WrappedKey>(Value::Object(m)) else { return Ok(None) };
+    Ok(keywrap::unwrap_topic_key(&w, &key).map(|k| k.to_vec()))
 }
 
 /// Raw Ed25519 signature (64 bytes) over `message` with the device seed.
@@ -235,6 +254,22 @@ mod tests {
         let p = enrollment_proof(seed, 1763750000).unwrap();
         assert_eq!(p.proof, ENROLL_SIG);
         assert!(sign_bytes(vec![0; 3], vec![]).is_err());
+    }
+
+    #[test]
+    fn topic_key_wrapping() {
+        let seed = crate::encoding::hex_decode(SEED).unwrap();
+        let me = device_key_from_seed(seed.clone()).unwrap();
+        let w = wrap_topic_key_json(vec![7; 32], "@alice/secret".into(), "k1".into(), me.device_id.clone()).unwrap();
+        assert_eq!(unwrap_topic_key_json(w.clone(), seed.clone()).unwrap(), Some(vec![7; 32]));
+        // As served by GET /v1/keys, with created_at.
+        let mut listed: Value = serde_json::from_str(&w).unwrap();
+        listed["created_at"] = 1.into();
+        assert_eq!(unwrap_topic_key_json(listed.to_string(), seed.clone()).unwrap(), Some(vec![7; 32]));
+        assert_eq!(unwrap_topic_key_json(w.clone(), vec![1; 32]).unwrap(), None);
+        assert_eq!(unwrap_topic_key_json(r#"{"alg":"x"}"#.into(), seed.clone()).unwrap(), None);
+        assert!(unwrap_topic_key_json("[]".into(), seed).is_err());
+        assert!(wrap_topic_key_json(vec![7; 31], "@alice/secret".into(), "k1".into(), me.device_id).is_err());
     }
 
     const NONCE: &str = "nonce_0123456789abcdef";

@@ -30,6 +30,19 @@ public struct CoreDeviceSigner: DeviceSigner {
     public func signEnvelope(_ envelopeJSON: String) throws -> String {
         try SubEthaCoreFFI.signEnvelopeJson(envelopeJson: envelopeJSON, seed: seed)
     }
+
+    /// Opens a wrapped topic key (spec §5.1; one entry of `GET /v1/keys`) addressed to this
+    /// device. Nil if it's for another device, malformed, or tampered with.
+    public func unwrapTopicKey(_ wrappedJSON: String) -> Data? {
+        (try? SubEthaCoreFFI.unwrapTopicKeyJson(wrappedJson: wrappedJSON, seed: seed)) ?? nil
+    }
+}
+
+/// Wrapped topic keys (spec §5.1): seal a 32-byte topic key to a device for `PUT /v1/keys`.
+public enum CoreKeyWrap {
+    public static func wrap(_ key: Data, topic: String, kid: String, deviceId: String) throws -> String {
+        try SubEthaCoreFFI.wrapTopicKeyJson(key: key, topic: topic, kid: kid, to: deviceId)
+    }
 }
 
 /// Signature checks and E2EE (spec §4, §5) through the Rust core.

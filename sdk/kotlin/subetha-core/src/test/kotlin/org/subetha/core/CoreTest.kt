@@ -89,6 +89,22 @@ class CoreTest {
     }
 
     @Test
+    fun keyWrapConformance() {
+        val v = vectors("e2ee.json")
+        val w = v["key_wrap"]!!.jsonObject
+        val key = Encoding.hexDecode(v["key"]!!.jsonPrimitive.content)
+        val device = CoreDeviceSigner(Encoding.hexDecode(w["recipient_seed"]!!.jsonPrimitive.content))
+        assertTrue(key.contentEquals(device.unwrapTopicKey(w["wrapped"].toString())!!))
+        for (c in w["invalid"]!!.jsonArray) {
+            assertNull(device.unwrapTopicKey(c.jsonObject["wrapped"].toString()), c.jsonObject["name"].toString())
+        }
+        // Round trip through a fresh wrap (random ephemeral key and nonce).
+        val fresh = CoreKeyWrap.wrap(key, "@alice/secret", "k2", device.deviceId)
+        assertTrue(key.contentEquals(device.unwrapTopicKey(fresh)!!))
+        assertNull(CoreDeviceSigner.generate().unwrapTopicKey(fresh))
+    }
+
+    @Test
     fun coreAndJdkSignersAgree() {
         val core = CoreDeviceSigner(seed)
         val jdk = JdkDeviceSigner(seed)

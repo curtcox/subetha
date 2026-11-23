@@ -83,6 +83,20 @@ final class CoreTests: XCTestCase {
         XCTAssertNil(crypto.decrypt(v["encrypted"]!.jsonString(), key: Data(count: 32)))
     }
 
+    func testKeyWrapVector() throws {
+        let v = try vectors("e2ee.json")
+        let w = v["key_wrap"]!
+        let key = Encoding.hexDecode(v["key"]!.stringValue!)!
+        let device = try CoreDeviceSigner(seed: Encoding.hexDecode(w["recipient_seed"]!.stringValue!)!)
+        XCTAssertEqual(device.unwrapTopicKey(w["wrapped"]!.jsonString()), key)
+        for c in w["invalid"]!.arrayValue! {
+            XCTAssertNil(device.unwrapTopicKey(c["wrapped"]!.jsonString()), c["name"]!.stringValue!)
+        }
+        let fresh = try CoreKeyWrap.wrap(key, topic: "@alice/secret", kid: "k2", deviceId: device.deviceId)
+        XCTAssertEqual(device.unwrapTopicKey(fresh), key)
+        XCTAssertNil(CoreDeviceSigner.generate().unwrapTopicKey(fresh))
+    }
+
     func testClientSignsAndEncrypts() throws {
         let signer = try CoreDeviceSigner(seed: seed)
         let c = SubEtha(deviceSigner: signer, crypto: CoreEnvelopeCrypto(),

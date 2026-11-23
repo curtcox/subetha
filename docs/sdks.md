@@ -38,7 +38,7 @@ plus `request()` for any other route. Useful options:
 | `deviceKey` | Sign every publish ([signed messages](publishing.md#signed-messages)). |
 | `signer`, `verifyEnvelope` | Sign and check signatures with something other than WebCrypto Ed25519, e.g. the Rust core in React Native (`createClient({ core, deviceSeed })` in `@subetha/react-native`). |
 | `signRequests: true` | Authenticate with device signatures instead of a token ([Devices](devices.md)). |
-| `topicKeys` | Per-topic E2EE keys: messages to those topics are encrypted, received ones decrypted. |
+| `topicKeys` | Per-topic E2EE keys: messages to those topics are encrypted, received ones decrypted. | `loadTopicKeys()` adds the ones [shared with this device](publishing.md#sharing-keys-with-devices) (in React Native, pass `unwrapper: coreKeyUnwrapper(core, seed)`; in Swift and Kotlin, `CoreDeviceSigner.unwrapTopicKey` and `CoreKeyWrap.wrap`). |
 | `fetch`, `WebSocket` | Bring your own (tests, older runtimes). |
 
 `subscribe()` picks a WebSocket when it can and falls back to an NDJSON stream; pass
@@ -47,7 +47,8 @@ disable) and can drop unsigned or badly signed messages (`verify`, `requireSigna
 are `SubEthaError` with `code`, `status`, and the JSON `body`.
 
 The protocol layer (`@subetha/sdk/protocol`) has canonical JSON, ULIDs, the topic grammar, device
-keys, Ed25519 signatures, XChaCha20-Poly1305 encryption, and the `Deduper`. `subscribeWebPush()`
+keys, Ed25519 signatures, XChaCha20-Poly1305 encryption, wrapped topic keys (`wrapTopicKey`,
+`unwrapTopicKey`), and the `Deduper`. `subscribeWebPush()`
 registers a browser for [Web Push](transports.md#web-push).
 
 ## Web components

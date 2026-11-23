@@ -3236,6 +3236,18 @@ public func signRequest(seed: Data, method: String, host: String, pathAndQuery: 
 })
 }
 /**
+ * Opens a wrapped key (one entry of `GET /v1/keys`; `created_at` is ignored) with the device
+ * seed. `None` if it isn't for this device, isn't a wrapped key, or was tampered with.
+ */
+public func unwrapTopicKeyJson(wrappedJson: String, seed: Data)throws  -> Data? {
+    return try  FfiConverterOptionData.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
+    uniffi_subetha_core_fn_func_unwrap_topic_key_json(
+        FfiConverterString.lower(wrappedJson),
+        FfiConverterData.lower(seed),$0
+    )
+})
+}
+/**
  * Validation problems for an envelope (empty = valid).
  */
 public func validateEnvelopeJson(envelopeJson: String) -> [String] {
@@ -3252,6 +3264,20 @@ public func verifyEnvelopeJson(envelopeJson: String) -> Bool {
     return try!  FfiConverterBool.lift(try! rustCall() {
     uniffi_subetha_core_fn_func_verify_envelope_json(
         FfiConverterString.lower(envelopeJson),$0
+    )
+})
+}
+/**
+ * Wraps a 32-byte topic key for device `to` (spec §5.1); returns the wrapped-key JSON for
+ * `PUT /v1/keys`.
+ */
+public func wrapTopicKeyJson(key: Data, topic: String, kid: String, to: String)throws  -> String {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeFfiError.lift) {
+    uniffi_subetha_core_fn_func_wrap_topic_key_json(
+        FfiConverterData.lower(key),
+        FfiConverterString.lower(topic),
+        FfiConverterString.lower(kid),
+        FfiConverterString.lower(to),$0
     )
 })
 }
@@ -3340,10 +3366,16 @@ private var initializationResult: InitializationResult = {
     if (uniffi_subetha_core_checksum_func_sign_request() != 14068) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_subetha_core_checksum_func_unwrap_topic_key_json() != 33719) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_subetha_core_checksum_func_validate_envelope_json() != 42612) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_subetha_core_checksum_func_verify_envelope_json() != 59783) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_subetha_core_checksum_func_wrap_topic_key_json() != 21017) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_subetha_core_checksum_method_corededuper_accept() != 9973) {

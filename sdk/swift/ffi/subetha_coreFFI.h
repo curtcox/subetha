@@ -637,6 +637,11 @@ RustBuffer uniffi_subetha_core_fn_func_sign_envelope_json(RustBuffer envelope_js
 RustBuffer uniffi_subetha_core_fn_func_sign_request(RustBuffer seed, RustBuffer method, RustBuffer host, RustBuffer path_and_query, uint64_t time, RustBuffer nonce, RustBuffer body, RustBuffer headers, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_UNWRAP_TOPIC_KEY_JSON
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_UNWRAP_TOPIC_KEY_JSON
+RustBuffer uniffi_subetha_core_fn_func_unwrap_topic_key_json(RustBuffer wrapped_json, RustBuffer seed, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_VALIDATE_ENVELOPE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_VALIDATE_ENVELOPE_JSON
 RustBuffer uniffi_subetha_core_fn_func_validate_envelope_json(RustBuffer envelope_json, RustCallStatus *_Nonnull out_status
@@ -645,6 +650,11 @@ RustBuffer uniffi_subetha_core_fn_func_validate_envelope_json(RustBuffer envelop
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_VERIFY_ENVELOPE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_VERIFY_ENVELOPE_JSON
 int8_t uniffi_subetha_core_fn_func_verify_envelope_json(RustBuffer envelope_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_WRAP_TOPIC_KEY_JSON
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_FN_FUNC_WRAP_TOPIC_KEY_JSON
+RustBuffer uniffi_subetha_core_fn_func_wrap_topic_key_json(RustBuffer key, RustBuffer topic, RustBuffer kid, RustBuffer to, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_SUBETHA_CORE_RUSTBUFFER_ALLOC
@@ -1065,6 +1075,12 @@ uint16_t uniffi_subetha_core_checksum_func_sign_request(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_UNWRAP_TOPIC_KEY_JSON
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_UNWRAP_TOPIC_KEY_JSON
+uint16_t uniffi_subetha_core_checksum_func_unwrap_topic_key_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_VALIDATE_ENVELOPE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_VALIDATE_ENVELOPE_JSON
 uint16_t uniffi_subetha_core_checksum_func_validate_envelope_json(void
@@ -1074,6 +1090,12 @@ uint16_t uniffi_subetha_core_checksum_func_validate_envelope_json(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_VERIFY_ENVELOPE_JSON
 #define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_VERIFY_ENVELOPE_JSON
 uint16_t uniffi_subetha_core_checksum_func_verify_envelope_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_WRAP_TOPIC_KEY_JSON
+#define UNIFFI_FFIDEF_UNIFFI_SUBETHA_CORE_CHECKSUM_FUNC_WRAP_TOPIC_KEY_JSON
+uint16_t uniffi_subetha_core_checksum_func_wrap_topic_key_json(void
     
 );
 #endif

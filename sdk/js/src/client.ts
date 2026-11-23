@@ -25,6 +25,12 @@ export interface ClientOptions {
   signRequests?: boolean;
 }
 
+/** Opens wrapped topic keys (spec §5.1) addressed to `deviceId`; null when it can't. */
+export interface KeyUnwrapper {
+  deviceId: string;
+  unwrap(w: WrappedKey): Uint8Array | null | Promise<Uint8Array | null>;
+}
+
 export interface PublishOptions {
   title?: string;
   priority?: 1 | 2 | 3 | 4 | 5;
@@ -404,17 +410,20 @@ export class SubEtha {
   /**
    * Fetches the wrapped keys addressed to this device, opens them with its device key, and uses
    * them for E2EE from then on (the newest key per topic wins). Needs `signRequests` (or a token
-   * for the device's account plus `deviceKey`). Returns the topics whose keys were loaded.
+   * for the device's account plus `deviceKey`). Pass `unwrapper` where WebCrypto X25519 is
+   * missing (React Native: `coreKeyUnwrapper` from @subetha/react-native). Returns the topics
+   * whose keys were loaded.
    */
-  async loadTopicKeys(o: { topic?: string; deviceKey?: DeviceKey } = {}): Promise<Record<string, { kid: string; key: Uint8Array }>> {
+  async loadTopicKeys(o: { topic?: string; deviceKey?: DeviceKey; unwrapper?: KeyUnwrapper } = {}): Promise<Record<string, { kid: string; key: Uint8Array }>> {
     const dk = o.deviceKey ?? this.deviceKey;
-    if (!dk) throw new Error("loadTopicKeys needs a deviceKey");
+    const unwrapper: KeyUnwrapper | undefined = o.unwrapper ?? (dk ? { deviceId: dk.deviceId, unwrap: (w) => unwrapTopicKey(w, dk) } : undefined);
+    if (!unwrapper) throw new Error("loadTopicKeys needs a deviceKey or an unwrapper");
     const { keys } = await this.listWrappedKeys(o.topic);
     const loaded: Record<string, { kid: string; key: Uint8Array; at: number }> = {};
     for (const w of keys) {
-      if (w.to !== dk.deviceId) continue;
+      if (w.to !== unwrapper.deviceId) continue;
       const { created_at: at, ...wrapped } = w;
-      const key = await unwrapTopicKey(wrapped, dk);
+      const key = await unwrapper.unwrap(wrapped);
       if (key && (!loaded[w.topic] || at >= loaded[w.topic]!.at)) loaded[w.topic] = { kid: w.kid, key, at };
     }
     const out: Record<string, { kid: string; key: Uint8Array }> = {};
