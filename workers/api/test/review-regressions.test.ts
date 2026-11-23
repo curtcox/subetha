@@ -120,7 +120,13 @@ describe("review regressions, batch 2", () => {
     const ep = await json(await SELF.fetch(`${BASE}/v1/endpoints`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ kind: "webhook", address: "https://hooks.example.com/r" }) }));
     let sends = 0;
     const real = globalThis.fetch;
-    vi.stubGlobal("fetch", async (i: RequestInfo | URL, init?: RequestInit) => (String(i instanceof Request ? i.url : i).startsWith(BASE) ? real(i, init) : (sends++, new Response("ok"))));
+    // Count only the webhook's own host: background work from other tests can fetch elsewhere.
+    vi.stubGlobal("fetch", async (i: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(i instanceof Request ? i.url : i);
+      if (url.startsWith(BASE)) return real(i, init);
+      if (url.startsWith("https://hooks.example.com/r")) sends++;
+      return new Response("ok");
+    });
     const ref = await reserve(E, a.account_id, 1000);
     const job: DeliveryJob = { topic: "@resend/x", owner: a.account_id, message: { topic: "@resend/x", id: "01JD0000000000000000000077", message: "x" }, sub: { id: "s", transport: "webhook", endpoint: ep.id as string }, reservation: { ref, micros: 1000 }, attempt: 0 };
     expect(await processJob(job, E)).toBe("delivered");
