@@ -5,7 +5,7 @@ import { actionPriceMicros, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { isTopic, isWrappedKey, ulid, type WrappedKey } from "@subetha/sdk/protocol";
 import { accountTier, audit } from "./accounts.ts";
-import { requireAccount, requireAdmin } from "./auth.ts";
+import { callerOf, requireAccount, requireAdmin } from "./auth.ts";
 import { accountStub } from "./durable/account.ts";
 import { ApiError } from "./errors.ts";
 import type { Env, Principal } from "./types.ts";
@@ -20,10 +20,20 @@ export const MAX_KEYS_PER_REQUEST = 100;
 export const MAX_KEYS_PER_TOPIC = 1000;
 
 /** Key-store calls are metered like other API requests (PLAN §8 rule 0), paid by the caller's account. */
-async function meter(env: Env, accountId: string, what: string) {
+async function meter(env: Env, accountId: string, p: Principal, what: string) {
   const tier = await accountTier(env, accountId);
-  const r = await accountStub(env, accountId).charge(actionPriceMicros(PRICES, "api_request", tier), `keys:${what}:${ulid()}`, null, {});
-  if (!r.ok) throw new ApiError("insufficient_balance", "balance too low for this request");
+  const caller = callerOf(p);
+  const r = await accountStub(env, accountId).charge(
+    actionPriceMicros(PRICES, "api_request", tier),
+    `keys:${what}:${ulid()}`,
+    caller.tokenId,
+    { tokenDaily: caller.caps.daily, tokenTotal: caller.caps.total },
+  );
+  if (!r.ok) {
+    if (r.code === "insufficient_balance") throw new ApiError("insufficient_balance", "balance too low for this request", { shortfall_usd_micros: r.shortfall });
+    if (r.cap === "account_paused") throw new ApiError("topic_paused", "account is paused");
+    throw new ApiError("spend_cap_exceeded", `spend cap reached: ${r.cap}`, { cap: r.cap, remaining_usd_micros: r.remaining });
+  }
 }
 
 async function ownedTopics(env: Env, accountId: string, topics: string[]): Promise<Set<string>> {
@@ -54,7 +64,7 @@ export function registerKeyRoutes(app: Hono<Vars>, principal: PrincipalFn) {
       const adding = keys.filter((k) => k.topic === t).length;
       if ((existing?.n ?? 0) + adding > MAX_KEYS_PER_TOPIC) throw new ApiError("bad_request", `${t} would have more than ${MAX_KEYS_PER_TOPIC} wrapped keys; delete old ones first`);
     }
-    await meter(c.env, id, "put");
+    await meter(c.env, id, p, "put");
     const now = Date.now();
     await c.env.DB.batch(keys.map((k) => c.env.DB.prepare(
       "INSERT INTO topic_keys (topic, kid, device_id, account_id, wrapped, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (topic, kid, device_id) DO UPDATE SET wrapped = excluded.wrapped, created_at = excluded.created_at",
@@ -74,14 +84,14 @@ export function registerKeyRoutes(app: Hono<Vars>, principal: PrincipalFn) {
     let rows: { wrapped: string; created_at: number }[];
     if (p.kind === "device") {
       const id = requireAccount(p);
-      await meter(c.env, id, "get");
+      await meter(c.env, id, p, "get");
       const q = topic
         ? c.env.DB.prepare("SELECT wrapped, created_at FROM topic_keys WHERE device_id = ? AND topic = ? ORDER BY created_at").bind(p.deviceId, topic)
         : c.env.DB.prepare("SELECT wrapped, created_at FROM topic_keys WHERE device_id = ? ORDER BY created_at LIMIT 1000").bind(p.deviceId);
       rows = (await q.all<{ wrapped: string; created_at: number }>()).results;
     } else {
       const id = requireAdmin(p);
-      await meter(c.env, id, "get");
+      await meter(c.env, id, p, "get");
       const q = topic
         ? c.env.DB.prepare("SELECT k.wrapped, k.created_at FROM topic_keys k JOIN topics t ON t.name = k.topic WHERE t.owner_account_id = ? AND k.topic = ? ORDER BY k.created_at").bind(id, topic)
         : c.env.DB.prepare("SELECT k.wrapped, k.created_at FROM topic_keys k JOIN topics t ON t.name = k.topic WHERE t.owner_account_id = ? ORDER BY k.created_at LIMIT 1000").bind(id);

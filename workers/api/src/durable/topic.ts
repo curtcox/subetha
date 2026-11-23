@@ -668,6 +668,14 @@ export class TopicDO extends DurableObject<Env> {
     }
   }
 
+  /** Verifies that `caller` is permitted to read this topic (for ntfy `GET /{topics}/auth`). */
+  async checkAuth(caller: Caller): Promise<RpcResult<true>> {
+    return asResult(async () => {
+      this.checkRead(caller);
+      return true as const;
+    });
+  }
+
   /** Poll: cached messages since `since`. Charged to the topic owner (D2). */
   async poll(params: SubscribeParams): Promise<RpcResult<Envelope[]>> {
     return asResult(() => this.pollInner(params));
@@ -819,7 +827,7 @@ export class TopicDO extends DurableObject<Env> {
 }
 
 /** Typed RPC surface (Envelope's index signature defeats the generated Rpc types). */
-export type TopicRpc = Pick<TopicDO, "configure" | "destroy" | "setAccountTransports" | "setTier" | "getMeta" | "subscriberCounts" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases">;
+export type TopicRpc = Pick<TopicDO, "configure" | "destroy" | "setAccountTransports" | "setTier" | "getMeta" | "subscriberCounts" | "setSubscriptions" | "publish" | "checkAuth" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases">;
 
 export function topicStub(env: Env, topic: string): TopicRpc {
   return env.TOPIC.get(env.TOPIC.idFromName(topic)) as unknown as TopicRpc;

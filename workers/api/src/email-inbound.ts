@@ -72,6 +72,7 @@ function decodeBody(p: Part): string {
 function findText(p: Part, depth = 0): string | null {
   const ct = p.headers["content-type"] ?? "text/plain";
   if (/^text\/plain/i.test(ct)) return decodeBody(p);
+  if (/^text\/html/i.test(ct)) return decodeBody(p).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   const boundary = /boundary="?([^";]+)"?/i.exec(ct)?.[1];
   if (/^multipart\//i.test(ct) && boundary && depth < 5) {
     const parts = p.body.split(`--${boundary}`).slice(1).filter((x) => !x.startsWith("--"));

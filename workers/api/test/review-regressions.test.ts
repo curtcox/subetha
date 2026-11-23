@@ -68,6 +68,9 @@ describe("review regressions", () => {
 import { env } from "cloudflare:test";
 import { vi } from "vitest";
 import { processJob } from "../src/delivery/consumer.ts";
+import { twilioSignature } from "../src/delivery/twilio.ts";
+import { parseEmail } from "../src/email-inbound.ts";
+import { meterRent } from "../src/cron.ts";
 import { signStripePayload } from "../src/stripe.ts";
 import type { DeliveryJob, Env } from "../src/types.ts";
 import { balance } from "./helpers.ts";
@@ -142,5 +145,120 @@ describe("review regressions, batch 2", () => {
     }
     const r = await SELF.fetch(`${BASE}/v1/tokens`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ scopes: ["publish"], origins: ["https://example.com"], daily_cap_usd: 1 }) });
     expect(r.status).toBe(400);
+  });
+
+  it("deletes topic attachments from R2 and D1 when a topic is deleted", async () => {
+    const a = await bootstrap("delatt", 1);
+    const up = await SELF.fetch(`${BASE}/@delatt/x`, {
+      method: "PUT",
+      body: new Uint8Array([1, 2, 3, 4]),
+      headers: auth(a.token, { "X-Filename": "snap.bin", "content-type": "application/octet-stream" }),
+    });
+    expect(up.status).toBe(200);
+    const msg = (await up.json()) as { attachment: { url: string } };
+    const path = new URL(msg.attachment.url).pathname;
+    expect((await SELF.fetch(`${BASE}${path}`)).status).toBe(200);
+
+    expect((await SELF.fetch(`${BASE}/v1/topics/@delatt/x`, { method: "DELETE", headers: auth(a.token) })).status).toBe(200);
+    expect((await SELF.fetch(`${BASE}${path}`)).status).toBe(404);
+    const row = await E.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE topic = '@delatt/x'").first<{ n: number }>();
+    expect(row?.n).toBe(0);
+  });
+
+  it("enforces read permissions on GET /{topics}/auth", async () => {
+    const a = await bootstrap("authchk", 1);
+    const b = await bootstrap("authother", 1);
+    await SELF.fetch(`${BASE}/v1/topics/@authchk/priv`, { method: "PUT", headers: auth(a.token), body: "{}" });
+    await SELF.fetch(`${BASE}/v1/topics/@authchk/pub`, { method: "PUT", headers: auth(a.token), body: JSON.stringify({ policy: { public_read: true } }) });
+
+    expect((await SELF.fetch(`${BASE}/@authchk/priv/auth`)).status).toBe(403);
+    expect((await SELF.fetch(`${BASE}/@authchk/priv/auth`, { headers: auth(b.token) })).status).toBe(403);
+    expect((await SELF.fetch(`${BASE}/@authchk/priv/auth`, { headers: auth(a.token) })).status).toBe(200);
+    expect((await SELF.fetch(`${BASE}/@authchk/pub/auth`)).status).toBe(200);
+  });
+
+  it("enforces token spend caps and account pause on /v1/keys", async () => {
+    const a = await bootstrap("keycap", 1);
+    await SELF.fetch(`${BASE}/v1/topics/@keycap/v`, { method: "PUT", headers: auth(a.token), body: "{}" });
+    const t = await json(await SELF.fetch(`${BASE}/v1/tokens`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ scopes: ["admin"], daily_cap_usd: 0.000001 }) }));
+    const r = await SELF.fetch(`${BASE}/v1/keys`, { headers: auth(t.token as string) });
+    expect(r.status).toBe(403);
+    expect((await json(r)).error).toBe("spend_cap_exceeded");
+
+    await SELF.fetch(`${BASE}/v1/account`, { method: "PATCH", headers: auth(a.token), body: JSON.stringify({ paused: true }) });
+    const paused = await SELF.fetch(`${BASE}/v1/keys`, { headers: auth(a.token) });
+    expect(paused.status).toBe(403);
+    expect((await json(paused)).error).toBe("topic_paused");
+  });
+
+  it("STOP re-syncs all matching sms/voice topics and ACK stops voice escalation across endpoints", async () => {
+    const a = await bootstrap("stopall", 5);
+    await SELF.fetch(`${BASE}/v1/topics/@stopall/sms`, { method: "PUT", headers: auth(a.token), body: "{}" });
+    await SELF.fetch(`${BASE}/v1/topics/@stopall/voice`, { method: "PUT", headers: auth(a.token), body: "{}" });
+    const phone = "+14155550199";
+    const now = Date.now();
+    await E.DB.batch([
+      E.DB.prepare("INSERT INTO endpoints (id, account_id, kind, address, config, verified_at, created_at) VALUES ('ep_sms_stop', ?, 'sms', ?, '{}', ?, ?)").bind(a.account_id, phone, now, now),
+      E.DB.prepare("INSERT INTO endpoints (id, account_id, kind, address, config, verified_at, created_at) VALUES ('ep_voice_stop', ?, 'voice', ?, '{}', ?, ?)").bind(a.account_id, phone, now, now),
+    ]);
+    await SELF.fetch(`${BASE}/v1/subscriptions`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ topic: "@stopall/sms", endpoint_id: "ep_sms_stop" }) });
+    await SELF.fetch(`${BASE}/v1/subscriptions`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ topic: "@stopall/voice", endpoint_id: "ep_voice_stop" }) });
+
+    // Confirm both topics currently plan deliveries to those endpoints.
+    expect(((await json(await publish("@stopall/sms", "hi", auth(a.token, { "X-Dry-Run": "1" })))).plan as unknown[]).length).toBe(1);
+    expect(((await json(await publish("@stopall/voice", "hi", auth(a.token, { "X-Dry-Run": "1" })))).plan as unknown[]).length).toBe(1);
+
+    // Send ACK for a voice-topic message via SMS from the same number.
+    const msg = await json(await publish("@stopall/voice", "alarm", auth(a.token, { "X-Dry-Run": "0" })));
+    const postTwilio = async (params: Record<string, string>) => {
+      const sigUrl = `${E.BASE_URL}/v1/hooks/twilio/sms`;
+      const sig = await twilioSignature(E.TWILIO_AUTH_TOKEN!, sigUrl, params);
+      return SELF.fetch(`${BASE}/v1/hooks/twilio/sms`, { method: "POST", headers: { "x-twilio-signature": sig, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(params) });
+    };
+    expect((await postTwilio({ From: phone, Body: `ACK ${msg.id as string}`, MessageSid: "SM_ack_1" })).status).toBe(200);
+    const trace = await json(await SELF.fetch(`${BASE}/v1/traces/${msg.id as string}?topic=${encodeURIComponent("@stopall/voice")}`, { headers: auth(a.token) }));
+    expect((trace.ack as { via: string } | null)?.via).toBe("sms");
+
+    // STOP must unverify AND sync both @stopall/sms and @stopall/voice so neither plans deliveries.
+    expect((await postTwilio({ From: phone, Body: "STOP", MessageSid: "SM_stop_1" })).status).toBe(200);
+    expect(((await json(await publish("@stopall/sms", "after", auth(a.token, { "X-Dry-Run": "1" })))).plan as unknown[]).length).toBe(0);
+    expect(((await json(await publish("@stopall/voice", "after", auth(a.token, { "X-Dry-Run": "1" })))).plan as unknown[]).length).toBe(0);
+  });
+
+  it("extracts text from single-part text/html inbound emails", () => {
+    const raw = [
+      "From: alerts@example.com",
+      "Subject: Disk full",
+      "Content-Type: text/html; charset=utf-8",
+      "",
+      "<html><body><h1>Alert</h1><p>Disk is <b>98%</b> full.</p></body></html>",
+    ].join("\r\n");
+    const parsed = parseEmail(raw);
+    expect(parsed.subject).toBe("Disk full");
+    expect(parsed.text).toBe("Alert Disk is 98% full.");
+  });
+
+  it("deletes account attachments when frozen grace period expires", async () => {
+    const a = await bootstrap("frozatt", 0.01);
+    const up = await SELF.fetch(`${BASE}/@frozatt/x`, {
+      method: "PUT",
+      body: new Uint8Array([9, 8, 7]),
+      headers: auth(a.token, { "X-Filename": "f.bin", "content-type": "application/octet-stream" }),
+    });
+    expect(up.status).toBe(200);
+    const msg = (await up.json()) as { attachment: { url: string } };
+    const path = new URL(msg.attachment.url).pathname;
+
+    // Give the account an endpoint, drain its balance, and set frozen_since > 30 days ago.
+    await E.DB.prepare("INSERT INTO endpoints (id, account_id, kind, address, config, verified_at, created_at) VALUES ('ep_froz', ?, 'webhook', 'https://hooks.example.com/f', '{}', ?, ?)").bind(a.account_id, Date.now(), Date.now()).run();
+    const cur = await balance(a.token);
+    await E.ACCOUNT.get(E.ACCOUNT.idFromName(a.account_id)).adjust(-cur, "drain:frozatt", "test");
+    const longAgo = Date.now() - 31 * 86_400_000;
+    await E.DB.prepare("UPDATE accounts SET frozen_since = ? WHERE id = ?").bind(longAgo, a.account_id).run();
+
+    await meterRent(E, Date.now());
+    expect((await SELF.fetch(`${BASE}${path}`)).status).toBe(404);
+    const row = await E.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE owner_account_id = ?").bind(a.account_id).first<{ n: number }>();
+    expect(row?.n).toBe(0);
   });
 });

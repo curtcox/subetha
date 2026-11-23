@@ -3,6 +3,7 @@
 import { livePriceMicros, rentNanos, tierFor, type PriceTable, type SkuPrice } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { audit, invalidateAccount, recomputeAccountTopups12mo } from "./accounts.ts";
+import { deleteAccountAttachments } from "./attachments.ts";
 import { backupDatabase } from "./backup.ts";
 import { syncAccountEndpoints } from "./control.ts";
 import { accountStub } from "./durable/account.ts";
@@ -87,6 +88,7 @@ export async function meterRent(env: Env, now: number) {
       await syncAccountEndpoints(env, a.id);
       await sendAccountNotice(env, a, "frozen", now, GRACE_DAYS);
     } else if (now - a.frozen_since > GRACE_DAYS * 86_400_000) {
+      await deleteAccountAttachments(env, a.id);
       await env.DB.batch([
         env.DB.prepare("DELETE FROM subscriptions WHERE endpoint_id IN (SELECT id FROM endpoints WHERE account_id = ?)").bind(a.id),
         env.DB.prepare("DELETE FROM endpoints WHERE account_id = ?").bind(a.id),

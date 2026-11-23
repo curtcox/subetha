@@ -297,7 +297,10 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     const topics = await topicsForEndpoint(c.env, id);
     const r = await c.env.DB.prepare("DELETE FROM endpoints WHERE id = ? AND account_id = ?").bind(id, accountId).run();
     if (!r.meta.changes) throw new ApiError("not_found");
-    await c.env.DB.prepare("DELETE FROM subscriptions WHERE endpoint_id = ?").bind(id).run();
+    await c.env.DB.batch([
+      c.env.DB.prepare("DELETE FROM subscriptions WHERE endpoint_id = ?").bind(id),
+      c.env.DB.prepare("UPDATE slack_bindings SET endpoint_id = NULL WHERE endpoint_id = ? AND account_id = ?").bind(id, accountId),
+    ]);
     for (const t of topics) await syncTopicSubscriptions(c.env, t);
     await audit(c.env, accountId, p.kind, "endpoint.delete", { id });
     return c.json({ deleted: true });
@@ -426,7 +429,8 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     const params = await twilioParams(c);
     const acct = c.req.query("acct") ?? "", ref = c.req.query("ref") ?? "", max = Number(c.req.query("max") ?? 0);
     if (c.req.query("t") !== (await ackToken(c.env.TWILIO_AUTH_TOKEN!, acct, `${ref}:${max}`))) throw new ApiError("forbidden");
-    const minutes = Math.ceil(Number(params.CallDuration ?? 0) / 60);
+    const dur = Math.max(0, Number(params.CallDuration ?? 0) || 0);
+    const minutes = Math.ceil(dur / 60);
     const perMinute = Math.floor(max / voiceMinutes(""));
     await accountStub(c.env, acct).settle(ref, Math.min(max, minutes * perMinute));
     return twiml(c);
@@ -447,15 +451,21 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     const ep = await c.env.DB.prepare("SELECT * FROM endpoints WHERE kind = ? AND address = ? AND verified_at IS NOT NULL ORDER BY json_extract(config, '$.inbound_topic') IS NULL, created_at LIMIT 1").bind(kind, from).first<EndpointRecord>();
     if (!ep) return twiml(c);
     if (/^(stop|stopall|unsubscribe|cancel|end|quit)$/i.test(body)) {
+      const affected = isWhatsapp
+        ? await c.env.DB.prepare("SELECT DISTINCT s.topic FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id WHERE e.kind = 'whatsapp' AND e.address = ?").bind(from).all<{ topic: string }>()
+        : await c.env.DB.prepare("SELECT DISTINCT s.topic FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id WHERE e.kind IN ('sms','voice') AND e.address = ?").bind(from).all<{ topic: string }>();
       if (isWhatsapp) await c.env.DB.prepare("UPDATE endpoints SET verified_at = NULL WHERE kind = 'whatsapp' AND address = ?").bind(from).run();
       else await c.env.DB.prepare("UPDATE endpoints SET verified_at = NULL WHERE kind IN ('sms','voice') AND address = ?").bind(from).run();
-      for (const t of await topicsForEndpoint(c.env, ep.id)) await syncTopicSubscriptions(c.env, t);
+      for (const r of affected.results) await syncTopicSubscriptions(c.env, r.topic);
       return twiml(c);
     }
     const ackMatch = /^ack\s+([0-9a-z]{26})$/i.exec(body);
     const cfg = JSON.parse(ep.config) as { inbound_topic?: string };
     if (ackMatch) {
-      for (const t of await topicsForEndpoint(c.env, ep.id)) await topicStub(c.env, t).ack(ackMatch[1]!, kind);
+      const ackTopics = isWhatsapp
+        ? await c.env.DB.prepare("SELECT DISTINCT s.topic FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id WHERE e.kind = 'whatsapp' AND e.address = ? AND e.verified_at IS NOT NULL").bind(from).all<{ topic: string }>()
+        : await c.env.DB.prepare("SELECT DISTINCT s.topic FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id WHERE e.kind IN ('sms','voice') AND e.address = ? AND e.verified_at IS NOT NULL").bind(from).all<{ topic: string }>();
+      for (const r of ackTopics.results) await topicStub(c.env, r.topic).ack(ackMatch[1]!, kind);
       return twiml(c);
     }
     if (!cfg.inbound_topic) return twiml(c);

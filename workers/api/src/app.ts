@@ -1,5 +1,5 @@
 // HTTP API: ntfy-compatible publish/subscribe plus the /v1 control plane (spec §8, PLAN §7).
-import { discardAttachment, recordAttachment, storeAttachment } from "./attachments.ts";
+import { deleteTopicAttachments, discardAttachment, recordAttachment, storeAttachment } from "./attachments.ts";
 import { Hono, type Context } from "hono";
 import { canonicalize, isTopic, validateEnvelope, ulid, type Envelope, type Json } from "@subetha/sdk/protocol";
 import { actionPriceMicros, topupSplit, tierFor, type PriceTable } from "@subetha/pricing";
@@ -532,6 +532,7 @@ app.delete("/v1/topics/:topic{.+}", async (c) => {
   const existing = await stub.getMeta();
   if (!existing || existing.owner !== id) throw new ApiError("not_found");
   await stub.destroy();
+  await deleteTopicAttachments(c.env, name);
   await c.env.DB.batch([
     c.env.DB.prepare("DELETE FROM subscriptions WHERE topic = ?").bind(name),
     c.env.DB.prepare("DELETE FROM slack_bindings WHERE topic = ? AND account_id = ?").bind(name, id),
@@ -688,10 +689,7 @@ async function doSubscribe(c: C, topics: string[], format: string): Promise<Resp
   const params: SubscribeParams = { format: format as SubscribeParams["format"], since: url.searchParams.get("since"), filter: parseFilter(url), caller: callerOf(p), poll };
 
   if (format === "auth") {
-    for (const t of topics) {
-      const meta = await topicStub(c.env, t).getMeta();
-      if (!meta) throw new ApiError("not_found");
-    }
+    for (const t of topics) unwrap(await topicStub(c.env, t).checkAuth(params.caller));
     return c.json({ success: true });
   }
 

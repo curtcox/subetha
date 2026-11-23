@@ -27,3 +27,31 @@ export async function recordAttachment(env: Env, fileId: string, file: Attachmen
   await env.DB.prepare("INSERT INTO files (id, topic, owner_account_id, name, type, size, message_id, expires, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
     .bind(fileId, topic, meta!.owner, file.name, file.type, file.bytes.length, result.message.id, result.message.expires, Date.now()).run();
 }
+
+/** Deletes all R2 attachments and D1 metadata rows for a deleted topic. */
+export async function deleteTopicAttachments(env: Env, topic: string): Promise<number> {
+  let deleted = 0;
+  for (let round = 0; round < 50; round++) {
+    const { results } = await env.DB.prepare("SELECT id FROM files WHERE topic = ? LIMIT 1000").bind(topic).all<{ id: string }>();
+    if (!results.length) break;
+    if (env.FILES) await env.FILES.delete(results.map((r) => `att/${r.id}`));
+    await env.DB.batch(results.map((r) => env.DB.prepare("DELETE FROM files WHERE id = ?").bind(r.id)));
+    deleted += results.length;
+    if (results.length < 1000) break;
+  }
+  return deleted;
+}
+
+/** Deletes all R2 attachments and D1 metadata rows owned by an account (e.g. after freeze grace period). */
+export async function deleteAccountAttachments(env: Env, accountId: string): Promise<number> {
+  let deleted = 0;
+  for (let round = 0; round < 50; round++) {
+    const { results } = await env.DB.prepare("SELECT id FROM files WHERE owner_account_id = ? LIMIT 1000").bind(accountId).all<{ id: string }>();
+    if (!results.length) break;
+    if (env.FILES) await env.FILES.delete(results.map((r) => `att/${r.id}`));
+    await env.DB.batch(results.map((r) => env.DB.prepare("DELETE FROM files WHERE id = ?").bind(r.id)));
+    deleted += results.length;
+    if (results.length < 1000) break;
+  }
+  return deleted;
+}
