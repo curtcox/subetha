@@ -1,6 +1,6 @@
 // The Android Gradle Plugin builds the native code with the Android NDK.
 
-group 'org.subetha.core_flutter'
+group 'us.subetha.core_flutter'
 version '1.0'
 
 buildscript {
@@ -26,7 +26,7 @@ apply plugin: 'com.android.library'
 
 android {
     if (project.android.hasProperty("namespace")) {
-        namespace 'org.subetha.core_flutter'
+        namespace 'us.subetha.core_flutter'
     }
 
     // Bumping the plugin compileSdkVersion requires all clients of this plugin

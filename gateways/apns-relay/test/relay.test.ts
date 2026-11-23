@@ -46,7 +46,7 @@ afterAll(async () => {
 });
 
 const push = (token: string, init: RequestInit & { headers?: Record<string, string> } = {}) =>
-  fetch(`${base}/3/device/${token}`, { method: "POST", body: JSON.stringify({ aps: { alert: "hi" } }), ...init, headers: { "x-relay-secret": SECRET, authorization: "bearer eyJ.provider.jwt", "apns-topic": "org.subetha.app", "apns-push-type": "alert", "apns-priority": "10", "content-type": "application/json", ...init.headers } });
+  fetch(`${base}/3/device/${token}`, { method: "POST", body: JSON.stringify({ aps: { alert: "hi" } }), ...init, headers: { "x-relay-secret": SECRET, authorization: "bearer eyJ.provider.jwt", "apns-topic": "us.subetha.app", "apns-push-type": "alert", "apns-priority": "10", "content-type": "application/json", ...init.headers } });
 
 describe("APNs relay", () => {
   it("forwards over HTTP/2 with headers and body unchanged, reusing one connection", async () => {
@@ -55,7 +55,7 @@ describe("APNs relay", () => {
     expect(r.headers.get("apns-id")).toBe("11111111-2222-3333-4444-555555555555");
     const s = seen.at(-1)!;
     expect(s.path).toBe(`/3/device/${TOKEN}`);
-    expect(s.headers).toMatchObject({ authorization: "bearer eyJ.provider.jwt", "apns-topic": "org.subetha.app", "apns-push-type": "alert", "apns-priority": "10", "apns-expiration": "1800000000" });
+    expect(s.headers).toMatchObject({ authorization: "bearer eyJ.provider.jwt", "apns-topic": "us.subetha.app", "apns-push-type": "alert", "apns-priority": "10", "apns-expiration": "1800000000" });
     expect(s.headers["x-other"]).toBeUndefined();
     expect(s.headers["x-relay-secret"]).toBeUndefined();
     expect(JSON.parse(s.body)).toEqual({ aps: { alert: "hi" } });

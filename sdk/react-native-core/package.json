@@ -48,7 +48,7 @@
       "android": "android/generated"
     },
     "android": {
-      "javaPackageName": "org.subetha.reactnativecore"
+      "javaPackageName": "us.subetha.reactnativecore"
     }
   },
   "dependencies": {

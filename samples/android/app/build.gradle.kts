@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "org.subetha.sample.doorbell"
+    namespace = "us.subetha.sample.doorbell"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "org.subetha.sample.doorbell"
+        applicationId = "us.subetha.sample.doorbell"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -26,10 +26,10 @@ android {
 }
 
 dependencies {
-    implementation("org.subetha:subetha:0.1.0")
+    implementation("us.subetha:subetha:0.1.0")
     // The Rust core (edge transports, signatures, E2EE) through UniFFI/JNA. The app runs without
     // libsubetha_core.so in src/main/jniLibs; the Edge tab then explains how to add it.
-    implementation("org.subetha:subetha-core:0.1.0") { exclude(group = "net.java.dev.jna", module = "jna") }
+    implementation("us.subetha:subetha-core:0.1.0") { exclude(group = "net.java.dev.jna", module = "jna") }
     implementation("net.java.dev.jna:jna:5.15.0@aar")
     implementation("androidx.core:core-ktx:1.15.0")
     // Edge tab: animated QR codes (ZXing encodes and decodes; CameraX supplies frames).

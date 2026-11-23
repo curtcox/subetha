@@ -10,7 +10,7 @@
 #   --check    generate into a temp dir and fail if the committed sources differ (CI)
 #
 # Outputs (committed; see sdk/core/BINDINGS.md):
-#   sdk/kotlin/subetha-core/src/main/kotlin/org/subetha/core/ffi/subetha_core.kt
+#   sdk/kotlin/subetha-core/src/main/kotlin/us/subetha/core/ffi/subetha_core.kt
 #   sdk/swift/Sources/SubEthaCoreFFI/subetha_core.swift
 #   sdk/swift/ffi/subetha_coreFFI.h, sdk/swift/ffi/module.modulemap   (go into the XCFramework)
 #
@@ -52,13 +52,13 @@ trap 'rm -rf "$tmp"' EXIT
 "${bindgen[@]}" generate --library "$lib" --language kotlin --no-format --out-dir "$tmp/kotlin"
 "${bindgen[@]}" generate --library "$lib" --language swift --no-format --out-dir "$tmp/swift"
 
-kotlin_out="$root/sdk/kotlin/subetha-core/src/main/kotlin/org/subetha/core/ffi"
+kotlin_out="$root/sdk/kotlin/subetha-core/src/main/kotlin/us/subetha/core/ffi"
 swift_out="$root/sdk/swift/Sources/SubEthaCoreFFI"
 ffi_out="$root/sdk/swift/ffi"
 
 stage="$tmp/stage"
 mkdir -p "$stage/kotlin" "$stage/swift" "$stage/ffi"
-cp "$tmp/kotlin/org/subetha/core/ffi/subetha_core.kt" "$stage/kotlin/"
+cp "$tmp/kotlin/us/subetha/core/ffi/subetha_core.kt" "$stage/kotlin/"
 cp "$tmp/swift/subetha_core.swift" "$stage/swift/"
 cp "$tmp/swift/subetha_coreFFI.h" "$stage/ffi/"
 # SwiftPM/Xcode want the file named module.modulemap inside the XCFramework's Headers.

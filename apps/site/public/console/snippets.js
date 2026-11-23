@@ -108,7 +108,7 @@ try await client.publish(${dq(p.topic)}, ${dq(p.message)}${o.length ? `, Publish
         if (p.deny.length) r.push(`deny = listOf(${p.deny.map(kt).join(", ")})`);
         o.push(`route = Route(${r.join(", ")})`);
       }
-      return `import org.subetha.*
+      return `import us.subetha.*
 
 val client = SubEtha(${custom ? `baseUrl = ${kt(p.baseUrl)}, ` : ""}token = System.getenv("SUBETHA_TOKEN"))
 client.publish(${kt(p.topic)}, ${kt(p.message)}${o.length ? `, PublishOptions(${o.join(", ")})` : ""})`;

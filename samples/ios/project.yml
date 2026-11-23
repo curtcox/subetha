@@ -1,7 +1,7 @@
 # XcodeGen spec: `brew install xcodegen && xcodegen` writes Doorbell.xcodeproj.
 name: Doorbell
 options:
-  bundleIdPrefix: org.subetha.sample
+  bundleIdPrefix: us.subetha.sample
   deploymentTarget:
     iOS: "16.0"
 packages:
@@ -22,7 +22,7 @@ targets:
         product: SubEthaCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.subetha.sample.doorbell
+        PRODUCT_BUNDLE_IDENTIFIER: us.subetha.sample.doorbell
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: Doorbell

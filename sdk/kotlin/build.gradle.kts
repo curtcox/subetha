@@ -3,6 +3,6 @@ plugins {
 }
 
 allprojects {
-    group = "org.subetha"
+    group = "us.subetha"
     version = "0.1.0"
 }

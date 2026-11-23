@@ -1,7 +1,7 @@
 # UniFFI binding options (read by `uniffi-bindgen generate --library`; see BINDINGS.md).
 
 [bindings.kotlin]
-package_name = "org.subetha.core.ffi"
+package_name = "us.subetha.core.ffi"
 cdylib_name = "subetha_core"
 
 [bindings.swift]

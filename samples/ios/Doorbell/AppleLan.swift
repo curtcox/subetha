@@ -17,7 +17,7 @@ final class AppleLan: @unchecked Sendable {
         var errorDescription: String? { "\(call): \(String(cString: strerror(code)))" }
     }
 
-    private let queue = DispatchQueue(label: "org.subetha.sample.lan")
+    private let queue = DispatchQueue(label: "us.subetha.sample.lan")
     private let node: EdgeGossipNode
     private let onMessage: (String) -> Void
     private var unicast: Int32 = -1

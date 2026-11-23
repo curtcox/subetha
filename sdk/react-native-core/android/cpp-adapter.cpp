@@ -7,10 +7,10 @@
 namespace jsi = facebook::jsi;
 namespace react = facebook::react;
 
-// Automated testing checks Java_org_subetha_reactnativecore_SubEthaCoreModule and subethacore
+// Automated testing checks Java_us_subetha_reactnativecore_SubEthaCoreModule and subethacore
 // by comparing the whole line here.
 /*
-Java_org_subetha_reactnativecore_SubEthaCoreModule_nativeMultiply(JNIEnv *env, jclass type, jdouble a, jdouble b) {
+Java_us_subetha_reactnativecore_SubEthaCoreModule_nativeMultiply(JNIEnv *env, jclass type, jdouble a, jdouble b) {
     return subethacore::multiply(a, b);
 }
 */
@@ -18,7 +18,7 @@ Java_org_subetha_reactnativecore_SubEthaCoreModule_nativeMultiply(JNIEnv *env, j
 // Installer coming from SubEthaCoreModule
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_org_subetha_reactnativecore_SubEthaCoreModule_nativeInstallRustCrate(
+Java_us_subetha_reactnativecore_SubEthaCoreModule_nativeInstallRustCrate(
     JNIEnv *env,
     jclass type,
     jlong rtPtr,
@@ -57,7 +57,7 @@ Java_org_subetha_reactnativecore_SubEthaCoreModule_nativeInstallRustCrate(
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_org_subetha_reactnativecore_SubEthaCoreModule_nativeCleanupRustCrate(JNIEnv *env, jclass type, jlong rtPtr) {
+Java_us_subetha_reactnativecore_SubEthaCoreModule_nativeCleanupRustCrate(JNIEnv *env, jclass type, jlong rtPtr) {
     auto runtime = reinterpret_cast<jsi::Runtime *>(rtPtr);
     return subethacore::cleanupRustCrate(*runtime);
 }

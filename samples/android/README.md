@@ -1,6 +1,6 @@
 # Android doorbell (Kotlin + Jetpack Compose)
 
-The scripted doorbell flow (see `samples/README.md`) on `org.subetha:subetha`, which this
+The scripted doorbell flow (see `samples/README.md`) on `us.subetha:subetha`, which this
 build takes from `sdk/kotlin` through a composite build (`includeBuild("../../sdk/kotlin")`).
 
 ```bash
@@ -12,8 +12,8 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 - `DoorbellViewModel` connects, collects `client.subscribe(topic)` into the inbox, rings with
   `publish`, and shows `estimate` (dry run) results.
 - The Edge tab sends messages **by sound** between two phones with no network:
-  `AndroidAudio` (AudioTrack/AudioRecord) is the platform half, and `org.subetha.core.AudioLink`
-  plus an `EdgeGossipNode` from `org.subetha:subetha-core` do the modem and gossip. It needs
+  `AndroidAudio` (AudioTrack/AudioRecord) is the platform half, and `us.subetha.core.AudioLink`
+  plus an `EdgeGossipNode` from `us.subetha:subetha-core` do the modem and gossip. It needs
   the core library in the APK:
 
   ```bash
@@ -24,12 +24,12 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
   (from the repo root). Without it the app still runs and the Edge tab says what's missing.
 - **QR** on the Edge tab: "Show as QR" animates a message as fountain-coded frames
-  (`org.subetha.core.QrSender`, spec §11.2) at 8 frames a second; "Scan QR" decodes them from
+  (`us.subetha.core.QrSender`, spec §11.2) at 8 frames a second; "Scan QR" decodes them from
   the camera (CameraX frames, ZXing, `QrReceiver`). The scanner can start late or miss frames.
   The Edge lab page (`/tools/edge.html`) shows and scans the same codes.
 - **Bluetooth** on the Edge tab: `AndroidBle` makes the phone both a peripheral (GATT server
   with the spec §11.3 service, advertising) and a central (scans for that service and
-  connects), and gives every connection an `org.subetha.core.BleLink` for chunking and gossip.
+  connects), and gives every connection an `us.subetha.core.BleLink` for chunking and gossip.
   Phones in range exchange summaries and fetch what they're missing, so a message hops from
   phone to phone (each envelope's `hops` limits how far). Web Bluetooth pages (the Edge lab at
   `/tools/edge.html`) can connect to the phone as centrals.

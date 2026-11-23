@@ -136,7 +136,7 @@ final class EdgeModel: ObservableObject {
             return
         }
         node.subscribe(topic: topic)
-        let b = AppleBle(node: node, queue: DispatchQueue(label: "org.subetha.sample.ble"),
+        let b = AppleBle(node: node, queue: DispatchQueue(label: "us.subetha.sample.ble"),
                          onMessage: { [weak self] env in Task { @MainActor in self?.received(env, via: "Bluetooth") } },
                          onStatus: { [weak self] text, count in Task { @MainActor in self?.status = text; self?.peers = count } })
         b.start()
@@ -220,7 +220,7 @@ final class EdgeModel: ObservableObject {
 
 /// Microphone buffers → modem decoder, on its own queue (AudioLink isn't thread-safe).
 final class SoundListener: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "org.subetha.sample.sound")
+    private let queue = DispatchQueue(label: "us.subetha.sample.sound")
     private let onPayload: (Data) -> Void
     private var link: AudioLink?
 

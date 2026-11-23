@@ -80,9 +80,9 @@ jobs:
       - run: gradle -p sdk/kotlin test --no-daemon
       - name: Core tests ran (not skipped)
         run: |
-          grep -q 'skipped="0"' sdk/kotlin/subetha-core/build/test-results/test/TEST-org.subetha.core.CoreTest.xml
-          grep -q 'skipped="0"' sdk/kotlin/subetha-core/build/test-results/test/TEST-org.subetha.core.EdgeLinksTest.xml
-          grep -q 'tests="3"' sdk/kotlin/subetha-core/build/test-results/test/TEST-org.subetha.core.LanTest.xml
+          grep -q 'skipped="0"' sdk/kotlin/subetha-core/build/test-results/test/TEST-us.subetha.core.CoreTest.xml
+          grep -q 'skipped="0"' sdk/kotlin/subetha-core/build/test-results/test/TEST-us.subetha.core.EdgeLinksTest.xml
+          grep -q 'tests="3"' sdk/kotlin/subetha-core/build/test-results/test/TEST-us.subetha.core.LanTest.xml
 
   swift:
     name: Swift SDK (macOS)

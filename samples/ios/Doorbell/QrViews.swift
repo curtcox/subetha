@@ -62,7 +62,7 @@ struct QrScannerView: UIViewRepresentable {
 
     final class Coordinator: NSObject, AVCaptureMetadataOutputObjectsDelegate {
         private let session = AVCaptureSession()
-        private let queue = DispatchQueue(label: "org.subetha.sample.qr")
+        private let queue = DispatchQueue(label: "us.subetha.sample.qr")
         private let onText: (String) -> Void
         private var last: String?
 

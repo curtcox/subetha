@@ -294,7 +294,7 @@ describe("apns sender", () => {
   async function apnsEnv() {
     clearApnsTokenCache();
     const kp = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])) as CryptoKeyPair;
-    const envx = { ...E, APNS_KEY_P8: toPem((await crypto.subtle.exportKey("pkcs8", kp.privateKey)) as ArrayBuffer), APNS_KEY_ID: "ABC123DEFG", APNS_TEAM_ID: "TEAM123456", APNS_TOPIC: "org.subetha.app", APNS_ENDPOINT: "https://apns-relay.example.com/", APNS_RELAY_SECRET: "relay-secret-0123456789" } as Env;
+    const envx = { ...E, APNS_KEY_P8: toPem((await crypto.subtle.exportKey("pkcs8", kp.privateKey)) as ArrayBuffer), APNS_KEY_ID: "ABC123DEFG", APNS_TEAM_ID: "TEAM123456", APNS_TOPIC: "us.subetha.app", APNS_ENDPOINT: "https://apns-relay.example.com/", APNS_RELAY_SECRET: "relay-secret-0123456789" } as Env;
     return { kp, envx };
   }
 
@@ -307,7 +307,7 @@ describe("apns sender", () => {
     expect(await processJob(await s.job(), envx)).toBe("delivered");
     const c = calls[0]!;
     expect(c.url).toBe(`https://apns-relay.example.com/3/device/${device}`);
-    expect(c.headers).toMatchObject({ "apns-topic": "org.subetha.app", "apns-push-type": "alert", "apns-priority": "10", "apns-expiration": String(expires) });
+    expect(c.headers).toMatchObject({ "apns-topic": "us.subetha.app", "apns-push-type": "alert", "apns-priority": "10", "apns-expiration": String(expires) });
     expect(c.headers["apns-collapse-id"]).toBeUndefined();
     expect(c.headers["x-relay-secret"]).toBe("relay-secret-0123456789");
     const jwt = decodeJwt(c.headers.authorization!.replace(/^bearer /, ""));

@@ -13,6 +13,6 @@ dependencyResolutionManagement {
     }
 }
 
-// org.subetha:subetha       pure-Kotlin client (JVM + Android), no native code
-// org.subetha:subetha-core  UniFFI bindings to the Rust core (JNA + libsubetha_core)
+// us.subetha:subetha       pure-Kotlin client (JVM + Android), no native code
+// us.subetha:subetha-core  UniFFI bindings to the Rust core (JNA + libsubetha_core)
 include("subetha", "subetha-core")

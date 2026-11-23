@@ -95,7 +95,7 @@ uses all of them. See the [package README](https://github.com/curtcox/subetha/tr
 
 ### Kotlin, Swift, and Flutter
 
-The Kotlin (`org.subetha:subetha-core`), Swift (`SubEthaCore`), and Flutter (`subetha_core`) SDKs add drivers that do
+The Kotlin (`us.subetha:subetha-core`), Swift (`SubEthaCore`), and Flutter (`subetha_core`) SDKs add drivers that do
 everything except move bytes, the same as the TypeScript ones:
 
 | Driver | Feed it | It gives you |

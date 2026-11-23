@@ -51,7 +51,7 @@ def supportsNamespace() {
 
 android {
   if (supportsNamespace()) {
-    namespace "org.subetha.reactnativecore"
+    namespace "us.subetha.reactnativecore"
 
     sourceSets {
       main {
@@ -138,6 +138,6 @@ if (isNewArchitectureEnabled()) {
   react {
     jsRootDir = file("../src/")
     libraryName = "SubEthaCore"
-    codegenJavaPackageName = "org.subetha.reactnativecore"
+    codegenJavaPackageName = "us.subetha.reactnativecore"
   }
 }

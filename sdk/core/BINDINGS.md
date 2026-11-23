@@ -56,7 +56,7 @@ threads):
 `restore_json` for persistence) and `CoreDeduper` (spec §6).
 
 Swift wraps them in `SubEthaCore/Edge.swift` (`Edge.modulate`, `Edge.bleChunks`, typealiases,
-GATT UUIDs). Kotlin uses `org.subetha.core.ffi` directly. Both test suites check them against
+GATT UUIDs). Kotlin uses `us.subetha.core.ffi` directly. Both test suites check them against
 `spec/vectors/edge.json` and run a gossip exchange over 23-byte BLE chunks.
 
 `host` is what WHATWG `URL.host` gives: lowercase, with `:port` only when the port is not
@@ -82,7 +82,7 @@ forbids `unsafe` code, has no UniFFI dependency, and the functions are plain Rus
   (`src/bin/uniffi-bindgen.rs`, the standard `uniffi::uniffi_bindgen_main()`), so the generator
   always matches the library's UniFFI version. Library builds for phones use only `uniffi`
   and don't compile clap/askama/goblin.
-- `uniffi.toml` sets the Kotlin package (`org.subetha.core.ffi`) and the Swift FFI module name
+- `uniffi.toml` sets the Kotlin package (`us.subetha.core.ffi`) and the Swift FFI module name
   (`subetha_coreFFI`).
 
 ```bash
@@ -119,7 +119,7 @@ Only the native libraries come from cargo or CI. Regenerate whenever `ffi.rs` ch
    armeabi-v7a and x86_64 and publishes `subetha-core` as an AAR with `jniLibs` and
    `jna@aar`.
 2. **Releases.** On tags, upload `subetha_coreFFI.xcframework.zip` and publish its checksum
-   for `Package.swift`. Publish `org.subetha:subetha` / `subetha-core` to Maven Central.
+   for `Package.swift`. Publish `us.subetha:subetha` / `subetha-core` to Maven Central.
 3. **React Native.** Done: `@subetha/react-native-core` is generated, `sdk/react-native` signs
    and verifies with it on Hermes (`createClient({ core, deviceSeed })`), and CI builds it into
    an x86_64 Android development build of the Expo sample. Still to do: an iOS build of that
