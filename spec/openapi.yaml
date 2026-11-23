@@ -449,6 +449,9 @@ paths:
               properties:
                 handle: { type: string }
                 daily_cap_micros: { type: [integer, "null"], minimum: 0 }
+                monthly_cap_micros: { type: [integer, "null"], minimum: 0, description: Account-wide monthly spend cap (UTC calendar month). }
+                allow_transports: { type: [array, "null"], items: { $ref: "#/components/schemas/Transport" }, description: Account-wide transport allow-list intersected with topic/token/message policies (`null` = all). }
+                deny_transports: { type: [array, "null"], items: { $ref: "#/components/schemas/Transport" }, description: Account-wide transport deny-list (`null` = none). }
                 oauth_daily_cap_micros:
                   type: [integer, "null"]
                   minimum: 0
@@ -2060,6 +2063,9 @@ components:
         balance_usd_micros: { type: integer }
         reserved_usd_micros: { type: integer }
         daily_cap_micros: { type: [integer, "null"], description: Account-wide daily spend cap. }
+        monthly_cap_micros: { type: [integer, "null"], description: Account-wide monthly spend cap (UTC calendar month). }
+        allow_transports: { type: [array, "null"], items: { $ref: "#/components/schemas/Transport" }, description: Account-wide transport allow-list (`null` = all). }
+        deny_transports: { type: [array, "null"], items: { $ref: "#/components/schemas/Transport" }, description: Account-wide transport deny-list (`null` = none). }
         oauth_daily_cap_micros: { type: [integer, "null"], description: "Daily cap per OAuth client; null = the $1 default, 0 = OAuth off." }
         telephony_countries: { type: array, items: { type: string }, description: "Opt-in countries outside the US for SMS/voice endpoints." }
         has_saved_card: { type: boolean, description: "Whether a Stripe card is saved on file for auto-recharge." }
@@ -2128,6 +2134,7 @@ components:
         deny_transports: { type: array, items: { $ref: "#/components/schemas/Transport" } }
         max_cost_per_message_micros: { type: integer }
         daily_cap_micros: { type: integer }
+        monthly_cap_micros: { type: integer }
         retention_s: { type: integer }
         paused: { type: boolean }
         min_priority:

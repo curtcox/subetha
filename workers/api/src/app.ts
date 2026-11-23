@@ -4,7 +4,7 @@ import { Hono, type Context } from "hono";
 import { canonicalize, isTopic, validateEnvelope, ulid, type Envelope, type Json } from "@subetha/sdk/protocol";
 import { actionPriceMicros, topupSplit, tierFor, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
-import { audit, autoCreateOwnerFor, createAccount, getAccount, invalidateAccount, recordTopic, validateHandle, validatePolicy } from "./accounts.ts";
+import { accountTransportsOf, audit, autoCreateOwnerFor, createAccount, getAccount, invalidateAccount, recordTopic, syncAccountTopics, validateHandle, validatePolicy } from "./accounts.ts";
 import { authenticate, callerOf, invalidateToken, newTokenSecret, requireAdmin, scopeAllows, validateScopes, validateTransports } from "./auth.ts";
 import { sha256Hex } from "./crypto.ts";
 import { parseCidr } from "./ip.ts";
@@ -153,7 +153,8 @@ app.get("/v1/account", async (c) => {
   const acct = await getAccount(c.env, id);
   if (!acct) throw new ApiError("not_found");
   const bal = await accountStub(c.env, id).balance();
-  return c.json({ id: acct.id, handle: acct.handle, email: acct.email, tier: tierFor(PRICES, acct.topups_12mo_micros), balance_usd_micros: bal.available, reserved_usd_micros: bal.reserved, daily_cap_micros: acct.daily_cap_micros, oauth_daily_cap_micros: acct.oauth_daily_cap_micros ?? null, telephony_countries: JSON.parse(acct.telephony_countries ?? "[]") as string[], has_saved_card: !!acct.stripe_customer_id, auto_recharge: acct.auto_recharge ? (JSON.parse(acct.auto_recharge) as { threshold_micros: number; amount_micros: number }) : null, paused: !!acct.paused, created_at: acct.created_at });
+  const transports = accountTransportsOf(acct);
+  return c.json({ id: acct.id, handle: acct.handle, email: acct.email, tier: tierFor(PRICES, acct.topups_12mo_micros), balance_usd_micros: bal.available, reserved_usd_micros: bal.reserved, daily_cap_micros: acct.daily_cap_micros, monthly_cap_micros: acct.monthly_cap_micros ?? null, allow_transports: transports.allow, deny_transports: transports.deny, oauth_daily_cap_micros: acct.oauth_daily_cap_micros ?? null, telephony_countries: JSON.parse(acct.telephony_countries ?? "[]") as string[], has_saved_card: !!acct.stripe_customer_id, auto_recharge: acct.auto_recharge ? (JSON.parse(acct.auto_recharge) as { threshold_micros: number; amount_micros: number }) : null, paused: !!acct.paused, created_at: acct.created_at });
 });
 
 app.post("/v1/account", async (c) => {
@@ -170,7 +171,7 @@ app.post("/v1/account", async (c) => {
 
 app.patch("/v1/account", async (c) => {
   const id = requireAdmin(await principal(c));
-  const body = (await c.req.json()) as { handle?: string; daily_cap_micros?: number | null; oauth_daily_cap_micros?: number | null; paused?: boolean; telephony_countries?: string[]; auto_recharge?: { threshold_usd: number; amount_usd: number } | null };
+  const body = (await c.req.json()) as { handle?: string; daily_cap_micros?: number | null; monthly_cap_micros?: number | null; allow_transports?: unknown; deny_transports?: unknown; oauth_daily_cap_micros?: number | null; paused?: boolean; telephony_countries?: string[]; auto_recharge?: { threshold_usd: number; amount_usd: number } | null };
   const acct = await getAccount(c.env, id);
   if (body.auto_recharge !== undefined) {
     if (body.auto_recharge === null) {
@@ -193,7 +194,24 @@ app.patch("/v1/account", async (c) => {
       throw String(e).includes("UNIQUE") ? new ApiError("conflict", "handle taken") : e;
     });
   }
-  if (body.daily_cap_micros !== undefined) await c.env.DB.prepare("UPDATE accounts SET daily_cap_micros = ? WHERE id = ?").bind(body.daily_cap_micros, id).run();
+  if (body.daily_cap_micros !== undefined) {
+    const v = body.daily_cap_micros;
+    if (v !== null && !(Number.isSafeInteger(v) && v >= 0)) throw new ApiError("bad_request", "daily_cap_micros must be a non-negative integer or null");
+    await c.env.DB.prepare("UPDATE accounts SET daily_cap_micros = ? WHERE id = ?").bind(v, id).run();
+  }
+  if (body.monthly_cap_micros !== undefined) {
+    const v = body.monthly_cap_micros;
+    if (v !== null && !(Number.isSafeInteger(v) && v >= 0)) throw new ApiError("bad_request", "monthly_cap_micros must be a non-negative integer or null");
+    await c.env.DB.prepare("UPDATE accounts SET monthly_cap_micros = ? WHERE id = ?").bind(v, id).run();
+  }
+  if (body.allow_transports !== undefined) {
+    const list = validateTransports(body.allow_transports);
+    await c.env.DB.prepare("UPDATE accounts SET allow_transports = ? WHERE id = ?").bind(list?.length ? JSON.stringify(list) : null, id).run();
+  }
+  if (body.deny_transports !== undefined) {
+    const list = validateTransports(body.deny_transports);
+    await c.env.DB.prepare("UPDATE accounts SET deny_transports = ? WHERE id = ?").bind(list?.length ? JSON.stringify(list) : null, id).run();
+  }
   if (body.paused !== undefined) await c.env.DB.prepare("UPDATE accounts SET paused = ? WHERE id = ?").bind(body.paused ? 1 : 0, id).run();
   if (body.oauth_daily_cap_micros !== undefined) {
     const v = body.oauth_daily_cap_micros;
@@ -206,13 +224,18 @@ app.patch("/v1/account", async (c) => {
     await c.env.DB.prepare("UPDATE accounts SET telephony_countries = ? WHERE id = ?").bind(list.length ? JSON.stringify(list) : null, id).run();
     await syncAccountEndpoints(c.env, id); // numbers in countries no longer allowed stop receiving
   }
-  if (body.daily_cap_micros !== undefined || body.paused !== undefined) {
-    const row = await c.env.DB.prepare("SELECT paused, daily_cap_micros FROM accounts WHERE id = ?").bind(id).first<{ paused: number; daily_cap_micros: number | null }>();
-    await accountStub(c.env, id).setControls({ paused: !!row?.paused, dailyCapMicros: row?.daily_cap_micros ?? null });
+  if (body.daily_cap_micros !== undefined || body.monthly_cap_micros !== undefined || body.paused !== undefined) {
+    const row = await c.env.DB.prepare("SELECT paused, daily_cap_micros, monthly_cap_micros FROM accounts WHERE id = ?").bind(id).first<{ paused: number; daily_cap_micros: number | null; monthly_cap_micros: number | null }>();
+    await accountStub(c.env, id).setControls({ paused: !!row?.paused, dailyCapMicros: row?.daily_cap_micros ?? null, monthlyCapMicros: row?.monthly_cap_micros ?? null });
   }
   await invalidateAccount(c.env, id);
+  const updated = await getAccount(c.env, id);
+  if (body.allow_transports !== undefined || body.deny_transports !== undefined) {
+    const t = accountTransportsOf(updated);
+    await syncAccountTopics(c.env, id, t.allow, t.deny);
+  }
   await audit(c.env, id, actorOf(await principal(c)), "account.update", body);
-  return c.json(await getAccount(c.env, id));
+  return c.json(updated);
 });
 
 app.get("/v1/balance", async (c) => {
@@ -400,7 +423,7 @@ app.put("/v1/topics/:topic{.+}", async (c) => {
   if (!existing && (await autoCreateOwnerFor(c.env, id, name)) !== id) throw new ApiError("forbidden", "you can only create topics in your own @handle namespace or secret t_ topics");
   const acct = await getAccount(c.env, id);
   const meta: TopicMeta & { tier: string } = { name, owner: id, policy, created_at: existing?.created_at ?? Date.now(), tier: tierFor(PRICES, acct?.topups_12mo_micros ?? 0) };
-  await stub.configure(meta);
+  await stub.configure(meta, accountTransportsOf(acct));
   await recordTopic(c.env, meta);
   await audit(c.env, id, actorOf(p), existing ? "topic.update" : "topic.create", { name, policy });
   return c.json(meta, existing ? 200 : 201);
@@ -462,10 +485,13 @@ async function doPublish(c: C, parsed: ParsedPublish): Promise<Response> {
   const bodyHash = await sha256Hex(canonicalize({ ...env, route: parsed.route, file: parsed.file ? await sha256Hex(parsed.file.bytes) : undefined } as unknown as Json));
   let result;
   try {
+    const autoOwner = await autoCreateOwnerFor(c.env, caller.accountId, env.topic);
+    const autoAccountTransports = autoOwner ? accountTransportsOf(await getAccount(c.env, autoOwner)) : undefined;
     result = unwrap(await topicStub(c.env, env.topic).publish({
       envelope: env,
       caller,
-      autoCreateOwner: await autoCreateOwnerFor(c.env, caller.accountId, env.topic),
+      autoCreateOwner: autoOwner,
+      autoCreateAccountTransports: autoAccountTransports,
       idempotencyKey: parsed.idempotencyKey,
       bodyHash,
       dryRun: parsed.dryRun,

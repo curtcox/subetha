@@ -2,7 +2,7 @@
 // plus SSE / JSON / raw streams), plans fan-out, and pays for it from credit leases taken from the
 // owner's AccountDO (PLAN §5, §7).
 import { DurableObject } from "cloudflare:workers";
-import { ulid, verifyEnvelope, type Envelope } from "@subetha/sdk/protocol";
+import { ulid, verifyEnvelope, type Envelope, type Transport } from "@subetha/sdk/protocol";
 import { actionPriceMicros, rentNanos, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { asResult, rpcError, type RpcResult } from "../errors.ts";
@@ -39,6 +39,7 @@ export interface SubscribeParams {
 
 const enc = new TextEncoder();
 const today = () => new Date().toISOString().slice(0, 10);
+const thisMonth = () => new Date().toISOString().slice(0, 7);
 
 export function matchesFilter(m: Envelope, f: SubscriptionFilter): boolean {
   if (f.priority?.length && !f.priority.includes(m.priority ?? 3)) return false;
@@ -54,6 +55,7 @@ function idMatch(list: string[] | undefined, c: Caller): boolean {
 export class TopicDO extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private meta: TopicMeta | null = null;
+  private accountTransports: { allow: Transport[] | null; deny: Transport[] | null } = { allow: null, deny: null };
   private leases: Lease[] = [];
   private nanoDebt = 0;
   private readonly streams = new Map<string, Stream>();
@@ -73,6 +75,7 @@ export class TopicDO extends DurableObject<Env> {
       CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, until INTEGER NOT NULL);`);
     ctx.blockConcurrencyWhile(async () => {
       this.meta = this.kvGet<TopicMeta>("meta");
+      this.accountTransports = this.kvGet<{ allow: Transport[] | null; deny: Transport[] | null }>("account_transports") ?? { allow: null, deny: null };
       this.leases = this.kvGet<Lease[]>("leases") ?? [];
       this.nanoDebt = this.kvGet<number>("nano_debt") ?? 0;
     });
@@ -99,10 +102,19 @@ export class TopicDO extends DurableObject<Env> {
   }
 
   // ---------- configuration ----------
-  async configure(meta: TopicMeta): Promise<void> {
+  async configure(meta: TopicMeta, accountTransports?: { allow: Transport[] | null; deny: Transport[] | null }): Promise<void> {
     this.meta = meta;
     this.kvPut("meta", meta);
+    if (accountTransports) {
+      this.accountTransports = accountTransports;
+      this.kvPut("account_transports", accountTransports);
+    }
     if (meta.policy.paused) this.closeAll(4403, "topic paused");
+  }
+
+  async setAccountTransports(allow: Transport[] | null, deny: Transport[] | null): Promise<void> {
+    this.accountTransports = { allow, deny };
+    this.kvPut("account_transports", this.accountTransports);
   }
 
   async getMeta(): Promise<TopicMeta | null> {
@@ -141,16 +153,22 @@ export class TopicDO extends DurableObject<Env> {
   }
 
   // ---------- money ----------
-  /** Read-side spend (polls, streams, backlog) also counts toward the topic's daily cap. */
-  private async spendOwnerCapped(micros: number): Promise<"ok" | "cap" | "broke"> {
-    const cap = this.meta?.policy.daily_cap_micros;
-    const key = `topic_spend:${today()}`;
-    const spent = this.kvGet<number>(key) ?? 0;
-    if (cap != null && spent + micros > cap) return "cap";
+  /** Read-side spend (polls, streams, backlog) also counts toward the topic's daily and monthly caps. */
+  private async spendOwnerCapped(micros: number): Promise<"ok" | "cap_daily" | "cap_monthly" | "broke"> {
+    const dailyCap = this.meta?.policy.daily_cap_micros;
+    const monthlyCap = this.meta?.policy.monthly_cap_micros;
+    const dayKey = `topic_spend:${today()}`;
+    const monthKey = `topic_spend_month:${thisMonth()}`;
+    const daySpent = this.kvGet<number>(dayKey) ?? 0;
+    const monthSpent = this.kvGet<number>(monthKey) ?? 0;
+    if (dailyCap != null && daySpent + micros > dailyCap) return "cap_daily";
+    if (monthlyCap != null && monthSpent + micros > monthlyCap) return "cap_monthly";
     // Count it before awaiting, so concurrent requests can't all pass the same check.
-    this.kvPut(key, spent + micros);
+    this.kvPut(dayKey, daySpent + micros);
+    this.kvPut(monthKey, monthSpent + micros);
     if (!(await this.spendOwner(micros))) {
-      this.bump(key, -micros);
+      this.bump(dayKey, -micros);
+      this.bump(monthKey, -micros);
       return "broke";
     }
     return "ok";
@@ -286,7 +304,7 @@ export class TopicDO extends DurableObject<Env> {
     let created = false;
     if (!this.meta) {
       if (!input.autoCreateOwner) throw rpcError("no_funded_owner", "topic has no owner; create it first");
-      await this.configure({ name: input.envelope.topic, owner: input.autoCreateOwner, policy: {}, created_at: Date.now() });
+      await this.configure({ name: input.envelope.topic, owner: input.autoCreateOwner, policy: {}, created_at: Date.now() }, input.autoCreateAccountTransports);
       created = true;
     }
     const meta = this.meta!;
@@ -363,8 +381,8 @@ export class TopicDO extends DurableObject<Env> {
       queued: this.queuedSubs(),
       mode: input.route.mode,
       priority: env.priority ?? 3,
-      allowLists: [input.route.allow, caller.transports],
-      denyLists: [input.route.deny],
+      allowLists: [input.route.allow, caller.transports, this.accountTransports.allow],
+      denyLists: [input.route.deny, this.accountTransports.deny],
       policy: meta.policy,
       maxCostMicros: input.route.maxCost,
       deadlineS: input.route.deadlineS ?? null,
@@ -406,15 +424,22 @@ export class TopicDO extends DurableObject<Env> {
       if (spent + ownerAll > cap) throw rpcError("spend_cap_exceeded", "anonymous daily cap reached for this topic");
     }
     const topicKey = `topic_spend:${today()}`;
+    const topicMonthKey = `topic_spend_month:${thisMonth()}`;
     const topicSpent = this.kvGet<number>(topicKey) ?? 0;
+    const topicMonthSpent = this.kvGet<number>(topicMonthKey) ?? 0;
     if (meta.policy.daily_cap_micros != null && topicSpent + ownerTotal > meta.policy.daily_cap_micros) {
       throw rpcError("spend_cap_exceeded", "topic daily cap reached", { cap: "topic_daily" });
     }
+    if (meta.policy.monthly_cap_micros != null && topicMonthSpent + ownerTotal > meta.policy.monthly_cap_micros) {
+      throw rpcError("spend_cap_exceeded", "topic monthly cap reached", { cap: "topic_monthly" });
+    }
     if (anonymous) this.bump(anonKey, ownerAll);
     this.kvPut(topicKey, topicSpent + ownerTotal);
+    this.kvPut(topicMonthKey, topicMonthSpent + ownerTotal);
     const rollback = () => {
       if (anonymous) this.bump(anonKey, -ownerAll);
       this.bump(topicKey, -ownerTotal);
+      this.bump(topicMonthKey, -ownerTotal);
     };
     try {
 
@@ -594,7 +619,8 @@ export class TopicDO extends DurableObject<Env> {
     const cost = actionPriceMicros(PRICES, "api_request", this.tier()) + msgs.length * actionPriceMicros(PRICES, "deliver_live", this.tier());
     await this.capTokenRead(params.caller, cost);
     const paid = await this.spendOwnerCapped(cost);
-    if (paid === "cap") throw rpcError("spend_cap_exceeded", "topic daily cap reached", { cap: "topic_daily" });
+    if (paid === "cap_daily") throw rpcError("spend_cap_exceeded", "topic daily cap reached", { cap: "topic_daily" });
+    if (paid === "cap_monthly") throw rpcError("spend_cap_exceeded", "topic monthly cap reached", { cap: "topic_monthly" });
     if (paid === "broke") throw rpcError("insufficient_balance", "topic owner's balance cannot cover delivery", { payer: "topic_owner" });
     return msgs;
   }
@@ -615,7 +641,8 @@ export class TopicDO extends DurableObject<Env> {
       return new Response((e as Error).message.split("\u0000")[0], { status: 403 });
     }
     const paid = await this.spendOwnerCapped(cost);
-    if (paid === "cap") return new Response("ApiError:spend_cap_exceeded:topic daily cap reached", { status: 403 });
+    if (paid === "cap_daily") return new Response("ApiError:spend_cap_exceeded:topic daily cap reached", { status: 403 });
+    if (paid === "cap_monthly") return new Response("ApiError:spend_cap_exceeded:topic monthly cap reached", { status: 403 });
     if (paid === "broke") return new Response("ApiError:insufficient_balance:topic owner's balance cannot cover delivery", { status: 402 });
     const id = `c_${ulid()}`;
     const openEvt = { id: ulid(), time: Math.floor(Date.now() / 1000), event: "open", topic: this.meta!.name };
@@ -732,7 +759,7 @@ export class TopicDO extends DurableObject<Env> {
 }
 
 /** Typed RPC surface (Envelope's index signature defeats the generated Rpc types). */
-export type TopicRpc = Pick<TopicDO, "configure" | "getMeta" | "subscriberCounts" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases">;
+export type TopicRpc = Pick<TopicDO, "configure" | "setAccountTransports" | "getMeta" | "subscriberCounts" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases">;
 
 export function topicStub(env: Env, topic: string): TopicRpc {
   return env.TOPIC.get(env.TOPIC.idFromName(topic)) as unknown as TopicRpc;

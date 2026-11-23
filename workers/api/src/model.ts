@@ -17,6 +17,7 @@ export interface TopicPolicy {
   deny_transports?: Transport[];
   max_cost_per_message_micros?: number;
   daily_cap_micros?: number;
+  monthly_cap_micros?: number;
   retention_s?: number;
   paused?: boolean;
   /** Minimum message priority for a transport, e.g. { sms: 4 }. */

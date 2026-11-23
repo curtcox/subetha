@@ -27,6 +27,8 @@ export interface Caps {
   tokenTotal?: number | null;
   /** Account daily cap (µ$). */
   accountDaily?: number | null;
+  /** Account monthly cap (µ$, UTC calendar month). */
+  accountMonthly?: number | null;
 }
 
 export interface LedgerStore {
@@ -48,9 +50,10 @@ export interface LedgerStore {
 export type ReserveResult =
   | { ok: true; available: number }
   | { ok: false; code: "insufficient_balance"; shortfall: number; available: number }
-  | { ok: false; code: "spend_cap_exceeded"; cap: "token_daily" | "token_total" | "account_daily" | "account_paused"; remaining: number };
+  | { ok: false; code: "spend_cap_exceeded"; cap: "token_daily" | "token_total" | "account_daily" | "account_monthly" | "account_paused"; remaining: number };
 
 const day = (t: number) => new Date(t).toISOString().slice(0, 10);
+const month = (t: number) => new Date(t).toISOString().slice(0, 7);
 const assertAmount = (n: number) => {
   if (!Number.isSafeInteger(n) || n < 0) throw new Error(`amount must be a non-negative integer µ$, got ${n}`);
 };
@@ -101,6 +104,10 @@ export class Ledger {
       const spent = this.s.getSpend("a", today);
       if (spent + amount > caps.accountDaily) return { ok: false, code: "spend_cap_exceeded", cap: "account_daily", remaining: Math.max(0, caps.accountDaily - spent) };
     }
+    if (caps.accountMonthly != null) {
+      const spent = this.s.getSpend("a", month(this.now()));
+      if (spent + amount > caps.accountMonthly) return { ok: false, code: "spend_cap_exceeded", cap: "account_monthly", remaining: Math.max(0, caps.accountMonthly - spent) };
+    }
     const avail = this.available;
     if (amount > avail) return { ok: false, code: "insufficient_balance", shortfall: amount - avail, available: avail };
     this.s.setAvailable(avail - amount);
@@ -112,8 +119,10 @@ export class Ledger {
   }
 
   private addSpend(tokenId: string | null, delta: number) {
-    const today = day(this.now());
+    const now = this.now();
+    const today = day(now);
     this.s.addSpend("a", today, delta);
+    this.s.addSpend("a", month(now), delta);
     if (tokenId) {
       this.s.addSpend(`t:${tokenId}`, today, delta);
       this.s.addSpend(`t:${tokenId}`, "total", delta);

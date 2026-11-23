@@ -123,21 +123,22 @@ export class AccountDO extends DurableObject<Env> {
     });
   }
 
-  // ---------- account controls (kill switch, daily cap) ----------
-  async setControls(c: { paused: boolean; dailyCapMicros: number | null }): Promise<void> {
-    await this.ctx.storage.put("controls", c);
-    this.controls = c;
+  // ---------- account controls (kill switch, daily/monthly caps) ----------
+  async setControls(c: { paused: boolean; dailyCapMicros: number | null; monthlyCapMicros?: number | null }): Promise<void> {
+    const normalized = { paused: c.paused, dailyCapMicros: c.dailyCapMicros, monthlyCapMicros: c.monthlyCapMicros ?? null };
+    await this.ctx.storage.put("controls", normalized);
+    this.controls = normalized;
   }
 
-  private controls: { paused: boolean; dailyCapMicros: number | null } | null = null;
+  private controls: { paused: boolean; dailyCapMicros: number | null; monthlyCapMicros?: number | null } | null = null;
   private async getControls() {
-    this.controls ??= (await this.ctx.storage.get<{ paused: boolean; dailyCapMicros: number | null }>("controls")) ?? { paused: false, dailyCapMicros: null };
+    this.controls ??= (await this.ctx.storage.get<{ paused: boolean; dailyCapMicros: number | null; monthlyCapMicros?: number | null }>("controls")) ?? { paused: false, dailyCapMicros: null, monthlyCapMicros: null };
     return this.controls;
   }
   private async withControls(caps: Caps): Promise<Caps | null> {
     const c = await this.getControls();
     if (c.paused) return null;
-    return { ...caps, accountDaily: c.dailyCapMicros ?? caps.accountDaily };
+    return { ...caps, accountDaily: c.dailyCapMicros ?? caps.accountDaily, accountMonthly: c.monthlyCapMicros ?? caps.accountMonthly };
   }
   private static PAUSED: ReserveResult = { ok: false, code: "spend_cap_exceeded", cap: "account_paused", remaining: 0 };
 
@@ -185,8 +186,14 @@ export class AccountDO extends DurableObject<Env> {
   async lease(min: number, max: number, ref: string) {
     const c = await this.getControls();
     if (c.paused) return { granted: 0 as const, shortfall: min };
+    const nowIso = new Date().toISOString();
     if (c.dailyCapMicros != null) {
-      const left = c.dailyCapMicros - this.store.getSpend("a", new Date().toISOString().slice(0, 10));
+      const left = c.dailyCapMicros - this.store.getSpend("a", nowIso.slice(0, 10));
+      if (left < min) return { granted: 0 as const, shortfall: min - Math.max(0, left) };
+      max = Math.min(max, left);
+    }
+    if (c.monthlyCapMicros != null) {
+      const left = c.monthlyCapMicros - this.store.getSpend("a", nowIso.slice(0, 7));
       if (left < min) return { granted: 0 as const, shortfall: min - Math.max(0, left) };
       max = Math.min(max, left);
     }

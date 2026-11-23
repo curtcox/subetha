@@ -1,9 +1,23 @@
 // Account directory (D1) helpers.
-import { HANDLE_RE, ulid } from "@subetha/sdk/protocol";
+import { HANDLE_RE, ulid, type Transport } from "@subetha/sdk/protocol";
+import { topicStub } from "./durable/topic.ts";
 import { ApiError } from "./errors.ts";
 import type { Env, TopicMeta, TopicPolicy } from "./types.ts";
 
-export interface AccountRow { id: string; handle: string | null; clerk_id: string | null; email: string | null; topups_12mo_micros: number; daily_cap_micros: number | null; oauth_daily_cap_micros?: number | null; telephony_countries?: string | null; stripe_customer_id?: string | null; auto_recharge?: string | null; paused: number; created_at: number }
+export interface AccountRow { id: string; handle: string | null; clerk_id: string | null; email: string | null; topups_12mo_micros: number; daily_cap_micros: number | null; monthly_cap_micros?: number | null; allow_transports?: string | null; deny_transports?: string | null; oauth_daily_cap_micros?: number | null; telephony_countries?: string | null; stripe_customer_id?: string | null; auto_recharge?: string | null; paused: number; created_at: number }
+
+export function accountTransportsOf(acct: AccountRow | null): { allow: Transport[] | null; deny: Transport[] | null } {
+  return {
+    allow: acct?.allow_transports ? (JSON.parse(acct.allow_transports) as Transport[]) : null,
+    deny: acct?.deny_transports ? (JSON.parse(acct.deny_transports) as Transport[]) : null,
+  };
+}
+
+/** Propagates the account's transport allow/deny lists to all of its topics' Durable Objects. */
+export async function syncAccountTopics(env: Env, accountId: string, allow: Transport[] | null, deny: Transport[] | null) {
+  const { results } = await env.DB.prepare("SELECT name FROM topics WHERE owner_account_id = ?").bind(accountId).all<{ name: string }>();
+  for (const r of results) await topicStub(env, r.name).setAccountTransports(allow, deny);
+}
 
 const RESERVED_HANDLES = new Set(["admin", "api", "subetha", "root", "system", "support", "help", "www", "mail", "docs", "console", "status", "billing", "security", "abuse", "ntfy", "mcp", "v1"]);
 
@@ -67,7 +81,7 @@ export function validatePolicy(p: unknown): TopicPolicy {
   const x = p as Record<string, unknown>;
   const checks: [string, (v: unknown) => boolean][] = [
     ["public_publish", BOOL], ["public_read", BOOL], ["require_signature", BOOL], ["paused", BOOL],
-    ["anon_rate_per_min", NUM], ["anon_daily_cap_micros", NUM], ["max_cost_per_message_micros", NUM], ["daily_cap_micros", NUM], ["retention_s", NUM],
+    ["anon_rate_per_min", NUM], ["anon_daily_cap_micros", NUM], ["max_cost_per_message_micros", NUM], ["daily_cap_micros", NUM], ["monthly_cap_micros", NUM], ["retention_s", NUM],
     ["allowed_publishers", STRS], ["email_senders", STRS], ["allowed_readers", STRS], ["allow_transports", TRANSPORT_LIST], ["deny_transports", TRANSPORT_LIST],
     ["min_priority", (v) => v === undefined || (typeof v === "object" && v !== null)],
     ["quiet_hours", (v) => v === undefined || (typeof v === "object" && v !== null && /^\d\d:\d\d$/.test((v as { start: string }).start) && /^\d\d:\d\d$/.test((v as { end: string }).end))],

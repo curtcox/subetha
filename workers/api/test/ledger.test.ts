@@ -36,6 +36,11 @@ describe("Ledger", () => {
     const later = new Ledger((l as unknown as { s: MemoryLedgerStore }).s, () => Date.UTC(2026, 0, 2));
     expect(later.charge(60, "4", { tokenId: "tk", caps })).toMatchObject({ ok: false, cap: "token_total", remaining: 50 });
     expect(later.charge(500, "5", { caps: { accountDaily: 400 } })).toMatchObject({ ok: false, cap: "account_daily" });
+    // Monthly cap spans multiple days in the same UTC calendar month and resets next month.
+    expect(later.charge(100, "m1", { caps: { accountMonthly: 180 } })).toMatchObject({ ok: false, cap: "account_monthly", remaining: 80 });
+    expect(later.charge(80, "m2", { caps: { accountMonthly: 180 } }).ok).toBe(true);
+    const nextMonth = new Ledger((l as unknown as { s: MemoryLedgerStore }).s, () => Date.UTC(2026, 1, 1));
+    expect(nextMonth.charge(180, "m3", { caps: { accountMonthly: 180 } }).ok).toBe(true);
   });
 
   it("released reservations don't count against caps", () => {

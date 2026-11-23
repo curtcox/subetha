@@ -93,6 +93,8 @@ export interface PublishInput {
   caller: Caller;
   /** If the topic has no owner yet, create it with this owner. */
   autoCreateOwner: string | null;
+  /** Account-level transport policy to apply if the topic is auto-created. */
+  autoCreateAccountTransports?: { allow: Transport[] | null; deny: Transport[] | null };
   idempotencyKey: string | null;
   bodyHash: string;
   dryRun: boolean;
