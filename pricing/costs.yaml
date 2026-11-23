@@ -110,6 +110,25 @@ skus:
     markup: 0.4
     components: { twilio: 0.014, tts: 0.0024, overhead: 0.0005 }
     floor_usd: 0.001
+  # Outside the US, SMS and voice are priced per destination country from Twilio's live prices
+  # (PLAN §8, rule 5): the daily cron replaces the `twilio` component with the country's highest
+  # current price and applies this SKU's markup and floor. The `twilio` figure here is only a
+  # reference for the report; destinations without a current price are rejected. No transports:
+  # US numbers keep using the SKUs above.
+  deliver_sms_intl:
+    description: Send one SMS segment to a verified number outside the US (live price per country)
+    unit: segment
+    charge: action
+    markup: 0.4
+    components: { twilio: 0.05, queue_ops: 0.0000012, overhead: 0.0005 }
+    floor_usd: 0.001
+  deliver_voice_intl:
+    description: One minute of a text-to-speech call to a verified number outside the US (live price per country)
+    unit: minute
+    charge: action
+    markup: 0.4
+    components: { twilio: 0.05, tts: 0.0024, overhead: 0.001 }
+    floor_usd: 0.002
   deliver_lxmf:
     description: Deliver over the hosted Reticulum/LXMF gateway
     unit: delivery

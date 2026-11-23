@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import {
-  actionPriceMicros, generatePrices, PricingInvariantError, rentNanos, skuForTransport, tierFor, topupSplit,
+  actionPriceMicros, generatePrices, livePriceMicros, PricingInvariantError, rentNanos, skuForTransport, tierFor, topupSplit,
   type CostsFile, type PriceTable,
 } from "../src/index.ts";
 
@@ -89,5 +89,32 @@ describe("runtime helpers", () => {
     expect(tierFor(committed, 0)).toBe("standard");
     expect(tierFor(committed, 600_000_000)).toBe("bulk");
     expect(tierFor(committed, 6_000_000_000)).toBe("volume");
+  });
+});
+
+describe("live per-destination prices (rule 5)", () => {
+  it("reproduces the static price when the provider price equals the reference component", () => {
+    for (const sku of ["deliver_sms_intl", "deliver_voice_intl"]) for (const t of committed.tiers) {
+      const ref = committed.skus[sku]!.components_nanos.twilio! / 1e9;
+      expect(livePriceMicros(committed, sku, "twilio", ref, t.id)).toBe(committed.skus[sku]!.price_nanos[t.id]! / 1000);
+    }
+  });
+  it("keeps the margin floor at every provider price and tier, and never gets cheaper as cost rises", () => {
+    for (const t of committed.tiers) {
+      let last = 0;
+      for (const usd of [0.0001, 0.003, 0.0217, 0.0731, 0.15, 0.49]) {
+        const p = livePriceMicros(committed, "deliver_sms_intl", "twilio", usd, t.id)!;
+        const s = committed.skus.deliver_sms_intl!;
+        const cost = (s.cost_nanos - s.components_nanos.twilio! + usd * 1e9) / 1000;
+        expect((p - cost) / p).toBeGreaterThanOrEqual(committed.min_margin);
+        expect(p).toBeGreaterThanOrEqual(last);
+        last = p;
+      }
+    }
+  });
+  it("rejects unknown prices and SKUs", () => {
+    expect(livePriceMicros(committed, "deliver_sms_intl", "twilio", 0)).toBeNull();
+    expect(livePriceMicros(committed, "deliver_sms_intl", "twilio", Number.NaN)).toBeNull();
+    expect(livePriceMicros(committed, "nope", "twilio", 0.05)).toBeNull();
   });
 });

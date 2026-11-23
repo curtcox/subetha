@@ -32,6 +32,9 @@ export interface SkuPrice {
   /** Price in nano-dollars, per tier. Action SKUs are whole micro-dollars (multiples of 1000). */
   price_nanos: Record<string, number>;
   margin: Record<string, number>;
+  /** Markup before the tier factor, and the floor, so live-priced SKUs can be re-derived (rule 5). */
+  markup: number;
+  floor_nanos: number;
 }
 
 export interface PriceTable {
@@ -39,7 +42,7 @@ export interface PriceTable {
   generated_from: string;
   currency: string;
   min_margin: number;
-  tiers: { id: string; min_topups_usd: number }[];
+  tiers: { id: string; min_topups_usd: number; markup_factor: number }[];
   topup: { min_usd_micros: number; max_usd_micros: number; fee_percent: number; fee_fixed_usd_micros: number };
   skus: Record<string, SkuPrice>;
 }
@@ -83,7 +86,7 @@ export function generatePrices(costs: CostsFile, source = "pricing/costs.yaml"):
     const ps = costs.tiers.map((t) => price_nanos[t.id]!);
     for (let i = 1; i < ps.length; i++) if (ps[i]! > ps[i - 1]!) violations.push(`${id}: tier ${costs.tiers[i]!.id} is more expensive than ${costs.tiers[i - 1]!.id}`);
     const components_nanos = Object.fromEntries(Object.entries(sku.components).map(([k, v]) => [k, usdToNanosCeil(v)]));
-    skus[id] = { description: sku.description, unit: sku.unit, charge: sku.charge, transports: sku.transports ?? [], cost_nanos: cost, components_nanos, price_nanos, margin };
+    skus[id] = { description: sku.description, unit: sku.unit, charge: sku.charge, transports: sku.transports ?? [], cost_nanos: cost, components_nanos, price_nanos, margin, markup, floor_nanos: usdToNanosCeil(sku.floor_usd) };
   }
 
   // Every transport that can be metered maps to exactly one delivery SKU.
@@ -113,7 +116,7 @@ export function generatePrices(costs: CostsFile, source = "pricing/costs.yaml"):
     generated_from: source,
     currency: costs.policy.currency,
     min_margin,
-    tiers: costs.tiers.map(({ id, min_topups_usd }) => ({ id, min_topups_usd })),
+    tiers: costs.tiers.map(({ id, min_topups_usd, markup_factor }) => ({ id, min_topups_usd, markup_factor })),
     topup: {
       min_usd_micros: Math.round(t.min_usd * 1e6),
       max_usd_micros: Math.round(t.max_usd * 1e6),

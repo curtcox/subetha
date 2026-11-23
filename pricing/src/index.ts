@@ -39,3 +39,19 @@ export function tierFor(table: PriceTable, topupsLast12moMicros: number): string
   for (const t of table.tiers) if (topupsLast12moMicros >= t.min_topups_usd * 1e6) tier = t.id;
   return tier;
 }
+
+/**
+ * Price of one unit of a live-priced SKU (PLAN §8, rule 5), in whole µ$: the SKU's cost with
+ * `component` replaced by today's provider price, marked up and floored exactly as the generator
+ * does for static SKUs. Returns null when the provider price is unknown, or when the result would
+ * not keep the minimum margin (unknown or unprofitable destinations are rejected).
+ */
+export function livePriceMicros(table: PriceTable, sku: SkuId, component: string, providerUsd: number, tier = "standard"): number | null {
+  const s = table.skus[sku];
+  if (!s || s.charge !== "action" || !(providerUsd > 0) || !Number.isFinite(providerUsd)) return null;
+  const t = table.tiers.find((x) => x.id === tier) ?? table.tiers[0]!;
+  const cost = s.cost_nanos - (s.components_nanos[component] ?? 0) + Math.ceil(Math.round(providerUsd * 1e12) / 1000);
+  const p = Math.ceil((cost * (1 + s.markup * t.markup_factor) + s.floor_nanos) / 1000) * 1000;
+  if (!(p > cost) || (p - cost) / p < table.min_margin) return null;
+  return p / 1000;
+}
