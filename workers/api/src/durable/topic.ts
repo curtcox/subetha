@@ -12,6 +12,7 @@ import { renderText } from "../delivery/senders.ts";
 import { DEST_PRICES_KEY, destUnitPrice, type DestinationPrices } from "../delivery/destinations.ts";
 import type { Caller, DeliveryJob, Env, PublishInput, PublishResult, QueuedSubscription, SubscriptionFilter, TopicMeta } from "../types.ts";
 import { accountStub } from "./account.ts";
+import { emitMetric, estimatedCostMicros } from "../telemetry.ts";
 
 const PRICES = prices as unknown as PriceTable;
 const LEASE_MICROS = 10_000; // 1¢
@@ -521,6 +522,12 @@ export class TopicDO extends DurableObject<Env> {
     }
 
     const callerCost = (anonymous ? 0 : publishPrice) + (caller.accountId === meta.owner ? liveCost + queued.reduce((n, d) => n + d.cost_micros, 0) : 0);
+    emitMetric(this.env, {
+      accountId: meta.owner, event: "publish", transport: live.length ? "ws" : "", sku: "publish",
+      detail: meta.name, revenueMicros: publishPrice + liveCost,
+      providerCostMicros: estimatedCostMicros("publish") + estimatedCostMicros("deliver_live", live.length),
+      units: 1 + live.length,
+    });
     this.trace(env.id!, { published: nowMs, plan: plan.deliveries, dropped: plan.dropped, cost_micros: { publish: publishPrice, live: liveCost, queued: queued.reduce((n, d) => n + d.cost_micros, 0), retention_nanos: retentionNanos }, publisher: caller.tokenId ?? caller.deviceId ?? caller.accountId ?? "anonymous" }, storeUntil);
     await this.ensureAlarm();
     return { message: env, created_topic: created, duplicate: false, cost_micros: callerCost, plan: caller.accountId === meta.owner ? plan.deliveries : [], dry_run: false };

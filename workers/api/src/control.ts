@@ -19,7 +19,8 @@ import type { Env, Principal, QueuedSubscription, SubscriptionFilter } from "./t
 import { registerDeviceRoutes } from "./devices.ts";
 import { registerInspectorRoutes } from "./inspector.ts";
 import { registerPushCredentialRoutes } from "./push-credentials.ts";
-import { CIRCUIT_KEY } from "./cron.ts";
+import { checkTelephonyCircuit } from "./cron.ts";
+import { emitMetric, estimatedCostMicros } from "./telemetry.ts";
 
 const PRICES = prices as unknown as PriceTable;
 type Vars = { Bindings: Env; Variables: { principal: Principal } };
@@ -121,7 +122,7 @@ async function sendCode(env: Env, e: EndpointRecord, code: string) {
   // verification sends go to unverified numbers/addresses, so they're the abuse surface.
   const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM endpoints WHERE account_id = ? AND verified_at IS NULL AND created_at > ?").bind(e.account_id, Date.now() - 86_400_000).first<{ n: number }>();
   if ((pending?.n ?? 0) > MAX_PENDING_VERIFICATIONS) throw new ApiError("rate_limited", "too many unverified endpoints in the last day");
-  if (telephony && (await env.CACHE.get(CIRCUIT_KEY))) throw new ApiError("provider_unavailable", "SMS and voice are temporarily paused");
+  if (telephony && (await checkTelephonyCircuit(env, e.account_id))) throw new ApiError("provider_unavailable", "SMS and voice are temporarily paused");
   const dest = `${e.kind}:${e.address.toLowerCase()}`;
   const sentAt = await claimVerifySend(env, dest);
   if (sentAt === null) throw new ApiError("rate_limited", "a code was sent to this destination recently; try again in an hour");
@@ -449,9 +450,11 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     // An MMS's first picture becomes the message's attachment (billed as inbound_mms_us, plus
     // the attachment's upload and storage like any publish); other media types are dropped.
     const media = Number(params.NumMedia ?? 0) > 0 && c.env.FILES ? await fetchInboundMedia(c.env, params.MediaUrl0 ?? "").catch(() => null) : null;
-    const price = actionPriceMicros(PRICES, media ? "inbound_mms_us" : "inbound_sms_us");
+    const sku = media ? "inbound_mms_us" : "inbound_sms_us";
+    const price = actionPriceMicros(PRICES, sku);
     const charge = await accountStub(c.env, ep.account_id).charge(price, `insms:${params.MessageSid}`, null, {}, true);
     if (!charge.ok) return twiml(c);
+    emitMetric(c.env, { accountId: ep.account_id, event: "inbound_sms", transport: "sms", sku, revenueMicros: price, providerCostMicros: estimatedCostMicros(sku) });
     const stored = media ? await storeAttachment(c.env, media) : null;
     const envelope = { topic: cfg.inbound_topic, message: (body || (media ? `You received a file: ${media.name}` : "")).slice(0, 4096), tags: ["sms"], sms_from: maskAddress("sms", from), ...(stored ? { attachment: stored.attachment } : {}) };
     let result;

@@ -8,6 +8,7 @@ import { accountStub } from "./durable/account.ts";
 import { topicStub } from "./durable/topic.ts";
 import type { Env } from "./types.ts";
 import { sha256Hex } from "./crypto.ts";
+import { emitMetric, estimatedCostMicros } from "./telemetry.ts";
 
 const PRICES = prices as unknown as PriceTable;
 const MAX_RAW = 512 * 1024;
@@ -106,8 +107,10 @@ export async function handleInboundEmail(message: ForwardableEmailMessage, env: 
   const parsed = parseEmail(raw);
   // Message-ID is sender-controlled, so scope it to the sender and topic.
   const msgId = await sha256Hex(`${topic}\n${from}\n${message.headers.get("message-id") ?? `${Date.now()}`}`);
-  const charge = await accountStub(env, meta.owner).charge(actionPriceMicros(PRICES, "inbound_email"), `inmail:${msgId}`, null, {}, true);
+  const inPrice = actionPriceMicros(PRICES, "inbound_email");
+  const charge = await accountStub(env, meta.owner).charge(inPrice, `inmail:${msgId}`, null, {}, true);
   if (!charge.ok) return message.setReject("topic owner's balance is empty");
+  emitMetric(env, { accountId: meta.owner, event: "inbound_email", transport: "email", sku: "inbound_email", revenueMicros: inPrice, providerCostMicros: estimatedCostMicros("inbound_email"), detail: topic });
   const r = await topicStub(env, topic).publish({
     envelope: { topic, title: parsed.subject.slice(0, 256) || undefined, message: (parsed.text || "(no text)").slice(0, 4096), tags: ["email"], email_from: from } as never,
     caller: { accountId: meta.owner, tokenId: null, deviceId: null, caps: { daily: null, total: null }, transports: null },

@@ -20,6 +20,8 @@ import { mcpChallenge, registerMcp } from "./mcp.ts";
 import { registerPaymentRoutes } from "./payments.ts";
 import { registerKeyRoutes } from "./keys.ts";
 import { USAGE_LABELS } from "./usage.ts";
+import { checkTelephonyCircuit, tripAccountTelephonyCircuit } from "./cron.ts";
+import { emitMetric } from "./telemetry.ts";
 
 const PRICES = prices as unknown as PriceTable;
 type C = Context<{ Bindings: Env; Variables: { principal: Principal } }>;
@@ -152,9 +154,9 @@ app.get("/v1/account", async (c) => {
   const id = requireAdmin(await principal(c));
   const acct = await getAccount(c.env, id);
   if (!acct) throw new ApiError("not_found");
-  const bal = await accountStub(c.env, id).balance();
+  const [bal, telephonyCircuit] = await Promise.all([accountStub(c.env, id).balance(), checkTelephonyCircuit(c.env, id)]);
   const transports = accountTransportsOf(acct);
-  return c.json({ id: acct.id, handle: acct.handle, email: acct.email, tier: tierFor(PRICES, acct.topups_12mo_micros), balance_usd_micros: bal.available, reserved_usd_micros: bal.reserved, daily_cap_micros: acct.daily_cap_micros, monthly_cap_micros: acct.monthly_cap_micros ?? null, allow_transports: transports.allow, deny_transports: transports.deny, oauth_daily_cap_micros: acct.oauth_daily_cap_micros ?? null, telephony_countries: JSON.parse(acct.telephony_countries ?? "[]") as string[], has_saved_card: !!acct.stripe_customer_id, auto_recharge: acct.auto_recharge ? (JSON.parse(acct.auto_recharge) as { threshold_micros: number; amount_micros: number }) : null, paused: !!acct.paused, created_at: acct.created_at });
+  return c.json({ id: acct.id, handle: acct.handle, email: acct.email, tier: tierFor(PRICES, acct.topups_12mo_micros), balance_usd_micros: bal.available, reserved_usd_micros: bal.reserved, daily_cap_micros: acct.daily_cap_micros, monthly_cap_micros: acct.monthly_cap_micros ?? null, allow_transports: transports.allow, deny_transports: transports.deny, oauth_daily_cap_micros: acct.oauth_daily_cap_micros ?? null, telephony_countries: JSON.parse(acct.telephony_countries ?? "[]") as string[], telephony_circuit: telephonyCircuit, has_saved_card: !!acct.stripe_customer_id, auto_recharge: acct.auto_recharge ? (JSON.parse(acct.auto_recharge) as { threshold_micros: number; amount_micros: number }) : null, paused: !!acct.paused, created_at: acct.created_at });
 });
 
 app.post("/v1/account", async (c) => {
@@ -301,6 +303,7 @@ app.post("/v1/hooks/stripe", async (c) => {
     if (!accountId) throw new ApiError("bad_request", "missing account_id metadata");
     const { creditMicros, feeMicros } = topupSplit(PRICES, amountMicros);
     await accountStub(c.env, accountId).topup(creditMicros, String(obj.id), `stripe amount=${amountMicros} fee=${feeMicros}`);
+    emitMetric(c.env, { accountId, event: "topup", revenueMicros: feeMicros, detail: "checkout" });
     if (typeof obj.payment_intent === "string") await c.env.DB.prepare("INSERT OR IGNORE INTO stripe_payments (payment_intent, account_id, amount_micros, fee_micros, kind, created_at) VALUES (?, ?, ?, ?, 'checkout', ?)").bind(obj.payment_intent, accountId, amountMicros, feeMicros, Date.now()).run();
     await c.env.DB.batch([
       c.env.DB.prepare("INSERT INTO stripe_events (id, type, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?, ?)").bind(evt.id, evt.type, accountId, amountMicros, Date.now()),
@@ -313,6 +316,7 @@ app.post("/v1/hooks/stripe", async (c) => {
     if (evt.type === "payment_intent.succeeded") {
       const { creditMicros, feeMicros } = topupSplit(PRICES, amountMicros);
       await accountStub(c.env, accountId).topup(creditMicros, String(obj.id), `auto-recharge amount=${amountMicros} fee=${feeMicros}`);
+      emitMetric(c.env, { accountId, event: "topup", revenueMicros: feeMicros, detail: "auto_recharge" });
       await c.env.DB.prepare("INSERT OR IGNORE INTO stripe_payments (payment_intent, account_id, amount_micros, fee_micros, kind, created_at) VALUES (?, ?, ?, ?, 'auto_recharge', ?)").bind(String(obj.id), accountId, amountMicros, feeMicros, Date.now()).run();
       await c.env.DB.prepare("UPDATE accounts SET topups_12mo_micros = topups_12mo_micros + ? WHERE id = ?").bind(amountMicros, accountId).run();
     } else {
@@ -333,6 +337,8 @@ app.post("/v1/hooks/stripe", async (c) => {
         await c.env.DB.prepare("UPDATE stripe_payments SET disputed = 1 WHERE payment_intent = ?").bind(pi).run();
         const r = await accountStub(c.env, pay.account_id).adjust(-deducted, `dispute:${pi}`, "chargeback");
         if (r.unrecovered) await audit(c.env, pay.account_id, "stripe", "chargeback.unrecovered", { micros: r.unrecovered });
+        await tripAccountTelephonyCircuit(c.env, pay.account_id, "chargeback dispute");
+        emitMetric(c.env, { accountId: pay.account_id, event: "dispute", outcome: "disputed", providerCostMicros: deducted });
       } else if (evt.type === "charge.refunded") {
         const total = Number(obj.amount_refunded ?? 0) * 10_000;
         deducted = Math.max(0, total - pay.refunded_micros); // only the newly refunded part

@@ -20,6 +20,8 @@ export interface Env {
   ASSETS?: Fetcher;
   RL_AUTH?: RateLimit;
   RL_ANON?: RateLimit;
+  /** Usage metering & cost telemetry (PLAN §7). */
+  ANALYTICS?: AnalyticsEngineDataset;
   // Clerk
   CLERK_ISSUER?: string;
   CLERK_PUBLISHABLE_KEY?: string;

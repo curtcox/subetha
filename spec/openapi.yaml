@@ -2227,6 +2227,7 @@ components:
         deny_transports: { type: [array, "null"], items: { $ref: "#/components/schemas/Transport" }, description: Account-wide transport deny-list (`null` = none). }
         oauth_daily_cap_micros: { type: [integer, "null"], description: "Daily cap per OAuth client; null = the $1 default, 0 = OAuth off." }
         telephony_countries: { type: array, items: { type: string }, description: "Opt-in countries outside the US for SMS/voice endpoints." }
+        telephony_circuit: { type: [string, "null"], description: "Set when global or per-account SMS/voice circuit breaker is open." }
         has_saved_card: { type: boolean, description: "Whether a Stripe card is saved on file for auto-recharge." }
         auto_recharge:
           description: "Configured off-session top-up rule, or null when disabled."

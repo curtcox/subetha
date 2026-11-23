@@ -8,17 +8,37 @@ import { syncAccountEndpoints } from "./control.ts";
 import { accountStub } from "./durable/account.ts";
 import { sendAccountNotice, WARNING_DAYS_BEFORE } from "./notices.ts";
 import { DEST_PRICES_KEY, INTL_COUNTRIES, type DestinationPrices } from "./delivery/destinations.ts";
+import { emitMetric } from "./telemetry.ts";
 import type { Env } from "./types.ts";
 
 const PRICES = prices as unknown as PriceTable;
 const GRACE_DAYS = 30;
 export const CIRCUIT_KEY = "circuit:telephony";
+/** Minimum daily Twilio spend (µ$) before the divergence breaker evaluates margin (avoids noise on tiny test traffic). */
+export const DIVERGENCE_NOISE_MICROS = 250_000; // $0.25
+
+export const accountCircuitKey = (accountId: string) => `circuit:telephony:acct:${accountId}`;
+
+/** Returns the active telephony circuit-breaker reason (global or per-account), or null if open for business. */
+export async function checkTelephonyCircuit(env: Env, accountId: string): Promise<string | null> {
+  const [global, acct] = await Promise.all([env.CACHE.get(CIRCUIT_KEY), env.CACHE.get(accountCircuitKey(accountId))]);
+  return global ?? acct;
+}
+
+/** Trips a per-account telephony circuit breaker (PLAN §8). */
+export async function tripAccountTelephonyCircuit(env: Env, accountId: string, reason: string, ttlS = 30 * 86_400): Promise<void> {
+  const value = `open: ${reason}`;
+  await env.CACHE.put(accountCircuitKey(accountId), value, { expirationTtl: ttlS });
+  await audit(env, accountId, "system", "circuit.telephony_tripped", { reason });
+  emitMetric(env, { accountId, event: "circuit", transport: "sms", outcome: "tripped", detail: reason });
+}
 
 export async function runCron(cron: string, env: Env, now: number) {
   if (cron === "17 3 * * *") {
     await meterRent(env, now);
     await reconcile(env, now);
     await checkTwilioPrices(env);
+    await checkProviderDivergence(env, now);
     await repriceDestinations(env, now);
     await deleteExpiredFiles(env, now);
     // Device codes live 10 minutes; approved ones are kept a day for the device's last poll.
@@ -42,6 +62,7 @@ export async function meterRent(env: Env, now: number) {
     const micros = Math.ceil(nanos / 1000);
     const r = await accountStub(env, a.id).charge(micros, `rent:${day}`, null, {}, true);
     if (r.ok) {
+      emitMetric(env, { accountId: a.id, event: "rent", sku: "device_day", revenueMicros: micros, units: a.devices + a.endpoints });
       if (a.frozen_since) {
         await env.DB.prepare("UPDATE accounts SET frozen_since = NULL WHERE id = ?").bind(a.id).run();
         await invalidateAccount(env, a.id);
@@ -129,6 +150,52 @@ export async function checkTwilioPrices(env: Env) {
   } catch (e) {
     // Leave the circuit as it was; an open one expires after two days without a successful check.
     console.error("twilio repricing failed", e);
+  }
+}
+
+/**
+ * Compares Twilio's reported spend for the prior UTC day against settled metered revenue in
+ * ledger_journal (PLAN §8). If provider spend exceeds what our minimum margin allows, trips the
+ * global telephony circuit breaker so SMS and voice stop until investigated.
+ */
+export async function checkProviderDivergence(env: Env, now: number): Promise<{ tripped: boolean; twilioMicros: number; revenueMicros: number } | null> {
+  if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN) return null;
+  const base = (env.TWILIO_API_BASE || "https://api.twilio.com").replace(/\/+$/, "");
+  const headers = { authorization: `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`)}` };
+  try {
+    const r = await fetch(`${base}/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Usage/Records/Yesterday.json`, { headers });
+    if (!r.ok) throw new Error(`twilio usage HTTP ${r.status}`);
+    const data = (await r.json()) as { usage_records?: { category?: string; price?: string | number }[] };
+    const totalUsd = (data.usage_records ?? [])
+      .filter((u) => u.category === "totalprice")
+      .reduce((n, u) => n + Math.max(0, Number(u.price ?? 0)), 0)
+      || (data.usage_records ?? [])
+        .filter((u) => /^(sms|mms|calls|phonenumbers)/.test(u.category ?? ""))
+        .reduce((n, u) => n + Math.max(0, Number(u.price ?? 0)), 0);
+    const twilioMicros = Math.round(totalUsd * 1e6);
+
+    const todayStart = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate());
+    const yestStart = todayStart - 86_400_000;
+    // In ledger_journal: reserve is -amount and settle/release is +released, so SUM(-amount) is net charged.
+    const row = await env.DB.prepare(
+      `SELECT COALESCE(SUM(-amount), 0) AS net
+         FROM ledger_journal
+        WHERE time >= ? AND time < ? AND kind IN ('reserve', 'settle')
+          AND (ref LIKE 'dlv:%' OR ref LIKE 'verify:%' OR ref LIKE 'test:%' OR ref LIKE 'insms:%')`,
+    ).bind(yestStart, todayStart).first<{ net: number }>();
+    const revenueMicros = Math.max(0, Number(row?.net ?? 0));
+
+    const maxAllowedSpend = revenueMicros * (1 - PRICES.min_margin);
+    if (twilioMicros > DIVERGENCE_NOISE_MICROS && twilioMicros > maxAllowedSpend) {
+      const reason = `provider spend divergence (twilio $${(twilioMicros / 1e6).toFixed(2)} vs metered $${(revenueMicros / 1e6).toFixed(2)})`;
+      await env.CACHE.put(CIRCUIT_KEY, `open: ${reason}`, { expirationTtl: 2 * 86_400 });
+      emitMetric(env, { accountId: "system", event: "circuit", transport: "sms", outcome: "divergence", detail: reason, revenueMicros, providerCostMicros: twilioMicros });
+      return { tripped: true, twilioMicros, revenueMicros };
+    }
+    return { tripped: false, twilioMicros, revenueMicros };
+  } catch (e) {
+    console.error("provider divergence check failed", e);
+    return null;
   }
 }
 

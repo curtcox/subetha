@@ -14,7 +14,7 @@ import { audit } from "./accounts.ts";
 import { requireAdmin } from "./auth.ts";
 import { accountStub } from "./durable/account.ts";
 import { ApiError } from "./errors.ts";
-import { CIRCUIT_KEY } from "./cron.ts";
+import { checkTelephonyCircuit } from "./cron.ts";
 import { telephonyUnitPrice } from "./control.ts";
 import { senders } from "./delivery/index.ts";
 import { loadEndpoint } from "./delivery/senders.ts";
@@ -83,7 +83,7 @@ export function registerInspectorRoutes(app: Hono<Vars>, principal: PrincipalFn)
     const ep = await loadEndpoint(c.env, row.id);
     const message = testMessage(body);
     const telephony = ep.kind === "sms" || ep.kind === "voice";
-    if (telephony && (await c.env.CACHE.get(CIRCUIT_KEY))) throw new ApiError("provider_unavailable", "SMS and voice are temporarily paused");
+    if (telephony && (await checkTelephonyCircuit(c.env, accountId))) throw new ApiError("provider_unavailable", "SMS and voice are temporarily paused");
     const send = senders[ep.kind];
     const sku = skuForTransport(PRICES, ep.kind);
     if (!send || !sku) throw new ApiError("bad_request", `${ep.kind} endpoints can't be tested`);
