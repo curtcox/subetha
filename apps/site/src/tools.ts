@@ -166,6 +166,7 @@ export interface SimInput {
   deny?: Transport[];
   tokenTransports?: Transport[];
   maxCostUsd?: number;
+  deadlineS?: number;
   nowMs?: number;
 }
 
@@ -212,6 +213,7 @@ export function simulate(input: SimInput, prices: PriceTable = PRICES): SimResul
     denyLists: [input.deny?.length ? input.deny : null],
     policy,
     maxCostMicros: input.maxCostUsd !== undefined && input.maxCostUsd !== null && !Number.isNaN(input.maxCostUsd) ? Math.round(input.maxCostUsd * 1e6) : null,
+    deadlineS: input.deadlineS !== undefined && input.deadlineS !== null && !Number.isNaN(input.deadlineS) && input.deadlineS >= 1 ? Math.floor(input.deadlineS) : null,
     prices,
     tier,
     nowMs,

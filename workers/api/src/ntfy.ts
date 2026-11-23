@@ -61,7 +61,7 @@ export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 export interface ParsedPublish {
   file?: { name: string; bytes: Uint8Array; type: string };
   envelope: Envelope;
-  route: { mode: RouteMode; maxCost: number | null; deny: Transport[]; allow: Transport[] | null };
+  route: { mode: RouteMode; maxCost: number | null; deny: Transport[]; allow: Transport[] | null; deadlineS: number | null };
   dryRun: boolean;
   idempotencyKey: string | null;
 }
@@ -76,10 +76,17 @@ function parseRoute(req: Request, url: URL, env: Envelope) {
     if (!Number.isFinite(usd) || usd < 0) throw new ApiError("bad_request", "invalid X-Max-Cost");
     maxCost = Math.floor(usd * 1e6);
   }
+  const deadlineHdr = header(req, url, "X-Deadline");
+  let deadlineS: number | null = env.route?.deadline_s ?? null;
+  if (deadlineHdr !== null) {
+    const s = Number(deadlineHdr);
+    if (!Number.isSafeInteger(s) || s < 1) throw new ApiError("bad_request", "invalid X-Deadline");
+    deadlineS = s;
+  }
   const deny = [...transports(header(req, url, "X-Deny")), ...(env.route?.deny ?? [])];
   const allowHdr = header(req, url, "X-Allow");
   const allow = allowHdr ? transports(allowHdr) : env.route?.allow ?? null;
-  return { mode: modeRaw as RouteMode, maxCost, deny, allow };
+  return { mode: modeRaw as RouteMode, maxCost, deny, allow, deadlineS };
 }
 
 /** Publish via PUT/POST /<topic> with ntfy headers. */

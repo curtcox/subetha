@@ -137,6 +137,7 @@ export function mountSimulator(root: HTMLElement, opts: { consoleUrl?: string } 
         <div><label for="s_prio">Priority</label><select id="s_prio">${[1, 2, 3, 4, 5].map((p) => `<option${p === 5 ? " selected" : ""}>${p}</option>`).join("")}</select></div>
         <div><label for="s_mode">Route mode</label><select id="s_mode">${MODES.map((m) => `<option>${m}</option>`).join("")}</select></div>
         <div><label for="s_max">Max cost (USD)</label><input id="s_max" type="number" min="0" step="any" placeholder="none"></div>
+        <div><label for="s_deadline">Deadline (s)</label><input id="s_deadline" type="number" min="1" step="1" placeholder="none"></div>
       </div>
       <div class="row">
         <div><label for="s_allow">X-Allow</label><input id="s_allow" placeholder="all"></div>
@@ -179,6 +180,7 @@ export function mountSimulator(root: HTMLElement, opts: { consoleUrl?: string } 
     const now = new Date();
     now.setUTCHours(hh ?? 12, mm ?? 0, 0, 0);
     const maxRaw = $<HTMLInputElement>("s_max").value.trim();
+    const deadlineRaw = $<HTMLInputElement>("s_deadline").value.trim();
     const input: SimInput = {
       tier: $<HTMLSelectElement>("s_tier").value,
       mode: $<HTMLSelectElement>("s_mode").value as RouteMode,
@@ -194,6 +196,7 @@ export function mountSimulator(root: HTMLElement, opts: { consoleUrl?: string } 
       deny: list($<HTMLInputElement>("s_deny").value) as Transport[],
       tokenTransports: list($<HTMLInputElement>("s_tok").value) as Transport[],
       maxCostUsd: maxRaw === "" ? undefined : Number(maxRaw),
+      deadlineS: deadlineRaw === "" ? undefined : Number(deadlineRaw),
       nowMs: now.getTime(),
     };
     const r = simulate(input);

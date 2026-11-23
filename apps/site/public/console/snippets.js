@@ -1,7 +1,7 @@
 // "Copy as …" for the message composer (PLAN §10): the same publish in curl and every SDK.
 // Pure: takes the composer's fields, returns source text. Tested in apps/site/test/snippets.test.ts.
 
-/** @typedef {{ baseUrl: string, topic: string, message: string, title?: string, priority?: number, tags?: string[], click?: string, mode?: string, maxCostUsd?: number, deny?: string[] }} Pub */
+/** @typedef {{ baseUrl: string, topic: string, message: string, title?: string, priority?: number, tags?: string[], click?: string, mode?: string, maxCostUsd?: number, deadlineS?: number, deny?: string[] }} Pub */
 
 export const LANGUAGES = ["curl", "js", "python", "swift", "kotlin", "dart"];
 export const LANGUAGE_NAMES = { curl: "curl", js: "JavaScript", python: "Python", swift: "Swift", kotlin: "Kotlin", dart: "Dart" };
@@ -24,6 +24,7 @@ function norm(p) {
     click: p.click || undefined,
     mode: p.mode && p.mode !== "any" ? p.mode : undefined,
     maxCostUsd: typeof p.maxCostUsd === "number" && !Number.isNaN(p.maxCostUsd) ? p.maxCostUsd : undefined,
+    deadlineS: typeof p.deadlineS === "number" && Number.isInteger(p.deadlineS) && p.deadlineS >= 1 ? p.deadlineS : undefined,
     deny: (p.deny ?? []).filter(Boolean),
   };
 }
@@ -32,7 +33,7 @@ function norm(p) {
 export function snippet(lang, pub) {
   const p = norm(pub);
   const custom = p.baseUrl !== DEFAULT_BASE;
-  const hasRoute = p.mode || p.maxCostUsd !== undefined || p.deny.length;
+  const hasRoute = p.mode || p.maxCostUsd !== undefined || p.deadlineS !== undefined || p.deny.length;
   switch (lang) {
     case "curl": {
       const parts = ["curl", `-H "Authorization: Bearer $SUBETHA_TOKEN"`];
@@ -42,6 +43,7 @@ export function snippet(lang, pub) {
       if (p.click) parts.push(`-H ${sq(`X-Click: ${p.click}`)}`);
       if (p.mode) parts.push(`-H "X-Route-Mode: ${p.mode}"`);
       if (p.maxCostUsd !== undefined) parts.push(`-H "X-Max-Cost: ${p.maxCostUsd}"`);
+      if (p.deadlineS !== undefined) parts.push(`-H "X-Deadline: ${p.deadlineS}"`);
       if (p.deny.length) parts.push(`-H "X-Deny: ${p.deny.join(",")}"`);
       parts.push(`-d ${sq(p.message)}`, sq(`${p.baseUrl}/${p.topic}`));
       return parts.join(" \\\n  ");
@@ -56,6 +58,7 @@ export function snippet(lang, pub) {
         const r = [];
         if (p.mode) r.push(`mode: ${dq(p.mode)}`);
         if (p.maxCostUsd !== undefined) r.push(`maxCostUsd: ${p.maxCostUsd}`);
+        if (p.deadlineS !== undefined) r.push(`deadlineS: ${p.deadlineS}`);
         if (p.deny.length) r.push(`deny: ${JSON.stringify(p.deny)}`);
         o.push(`route: { ${r.join(", ")} }`);
       }
@@ -74,6 +77,7 @@ await se.publish(${dq(p.topic)}, ${dq(p.message)}${o.length ? `, { ${o.join(", "
         const r = [];
         if (p.mode) r.push(`"mode": ${py(p.mode)}`);
         if (p.maxCostUsd !== undefined) r.push(`"max_cost_usd_micros": ${Math.floor(p.maxCostUsd * 1e6)}`);
+        if (p.deadlineS !== undefined) r.push(`"deadline_s": ${p.deadlineS}`);
         if (p.deny.length) r.push(`"deny": ${JSON.stringify(p.deny)}`);
         a.push(`route={${r.join(", ")}}`);
       }
@@ -93,6 +97,7 @@ c.publish(${a.join(", ")})`;
         const r = [];
         if (p.mode) r.push(`mode: .${p.mode}`);
         if (p.maxCostUsd !== undefined) r.push(`maxCostUSD: ${p.maxCostUsd}`);
+        if (p.deadlineS !== undefined) r.push(`deadlineSeconds: ${p.deadlineS}`);
         if (p.deny.length) r.push(`deny: ${JSON.stringify(p.deny)}`);
         o.push(`route: Route(${r.join(", ")})`);
       }
@@ -111,6 +116,7 @@ try await client.publish(${dq(p.topic)}, ${dq(p.message)}${o.length ? `, Publish
         const r = [];
         if (p.mode) r.push(`mode = RouteMode.${p.mode.toUpperCase()}`);
         if (p.maxCostUsd !== undefined) r.push(`maxCostUsd = ${p.maxCostUsd}`);
+        if (p.deadlineS !== undefined) r.push(`deadlineS = ${p.deadlineS}`);
         if (p.deny.length) r.push(`deny = listOf(${p.deny.map(kt).join(", ")})`);
         o.push(`route = Route(${r.join(", ")})`);
       }
@@ -129,6 +135,7 @@ client.publish(${kt(p.topic)}, ${kt(p.message)}${o.length ? `, PublishOptions(${
         const r = [];
         if (p.mode) r.push(`mode: RouteMode.${p.mode}`);
         if (p.maxCostUsd !== undefined) r.push(`maxCostUsd: ${p.maxCostUsd}`);
+        if (p.deadlineS !== undefined) r.push(`deadlineS: ${p.deadlineS}`);
         if (p.deny.length) r.push(`deny: [${p.deny.map(dartStr).join(", ")}]`);
         o.push(`route: Route(${r.join(", ")})`);
       }

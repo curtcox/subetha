@@ -25,7 +25,7 @@ const HELP = `subetha — send and receive messages over any transport (https://
 
 Usage:
   subetha pub <topic> [message] [-t title] [-p priority] [--tags a,b] [--click URL] [--markdown]
-                                 [--file PATH] [--mode any|fast|all|cheap]
+                                 [--file PATH] [--mode any|fast|all|cheap] [--deadline SECONDS]
                                  [--max-cost USD] [--deny sms,voice] [--allow ws,webpush] [--idem KEY]
   subetha sub <topic>[,<topic>…] [--since all|10m|<id>] [--json] [--priority 4,5] [--tags a]
   subetha tail <topic>           alias for sub --since all
@@ -92,12 +92,13 @@ function pubOptions(flags: Record<string, string | true>): PublishOptions {
   if (flags.tags) o.tags = list(flags.tags);
   if (typeof flags.click === "string") o.click = flags.click;
   if (flags.markdown) o.contentType = "text/markdown";
-  if (flags.mode || flags["max-cost"] || flags.deny || flags.allow) {
+  if (flags.mode || flags["max-cost"] || flags.deny || flags.allow || flags.deadline) {
     o.route = {};
     if (typeof flags.mode === "string") o.route.mode = flags.mode as NonNullable<PublishOptions["route"]>["mode"];
     if (typeof flags["max-cost"] === "string") o.route.maxCostUsd = Number(flags["max-cost"]);
     if (flags.deny) o.route.deny = list(flags.deny) as Transport[];
     if (flags.allow) o.route.allow = list(flags.allow) as Transport[];
+    if (typeof flags.deadline === "string") o.route.deadlineS = Number(flags.deadline);
   }
   if (typeof flags.idem === "string") o.idempotencyKey = flags.idem;
   return o;

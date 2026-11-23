@@ -18,9 +18,9 @@ describe("CLI", () => {
     const fetchMock = vi.fn(async (_u: string, init: RequestInit) => new Response(JSON.stringify({ ...JSON.parse(init.body as string), id: "01JD0000000000000000000001" })));
     vi.stubGlobal("fetch", fetchMock);
     const t = io({ SUBETHA_TOKEN: "se_x", SUBETHA_URL: "https://x.test" });
-    expect(await main(["pub", "@me/door", "opened", "now", "-t", "Door", "-p", "high", "--tags", "a,b", "--mode", "all", "--deny", "sms"], t.io, async () => "")).toBe(0);
+    expect(await main(["pub", "@me/door", "opened", "now", "-t", "Door", "-p", "high", "--tags", "a,b", "--mode", "all", "--deny", "sms", "--deadline", "60"], t.io, async () => "")).toBe(0);
     const body = JSON.parse(fetchMock.mock.calls[0]![1].body as string);
-    expect(body).toEqual({ topic: "@me/door", message: "opened now", title: "Door", priority: 4, tags: ["a", "b"], route: { mode: "all", deny: ["sms"] } });
+    expect(body).toEqual({ topic: "@me/door", message: "opened now", title: "Door", priority: 4, tags: ["a", "b"], route: { mode: "all", deny: ["sms"], deadline_s: 60 } });
     expect(t.out[0]).toBe("published 01JD0000000000000000000001 to @me/door");
     vi.unstubAllGlobals();
   });

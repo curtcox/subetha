@@ -187,8 +187,10 @@ function pubOpts() {
   const tags = $("pubTags").value.split(",").map((s) => s.trim()).filter(Boolean);
   const deny = $("pubDeny").value.split(",").map((s) => s.trim()).filter(Boolean);
   const maxRaw = $("pubMaxCost").value.trim();
+  const deadlineRaw = $("pubDeadline").value.trim();
   const route = { mode: $("pubMode").value };
   if (maxRaw !== "") route.maxCostUsd = Number(maxRaw);
+  if (deadlineRaw !== "") route.deadlineS = Math.floor(Number(deadlineRaw));
   if (deny.length) route.deny = deny;
   const o = {
     title: $("pubTitle").value || undefined,
@@ -242,7 +244,7 @@ $("copyLang").onchange = () => store("subetha.copyLang", $("copyLang").value);
 $("curlBtn").onclick = async () => {
   try {
     const o = pubOpts();
-    const text = snippet($("copyLang").value, { baseUrl: location.origin, topic: $("pubTopic").value.trim(), message: $("pubMsg").value || "triggered", title: o.title, priority: o.priority, tags: o.tags, click: o.click, mode: o.route.mode, maxCostUsd: o.route.maxCostUsd, deny: o.route.deny });
+    const text = snippet($("copyLang").value, { baseUrl: location.origin, topic: $("pubTopic").value.trim(), message: $("pubMsg").value || "triggered", title: o.title, priority: o.priority, tags: o.tags, click: o.click, mode: o.route.mode, maxCostUsd: o.route.maxCostUsd, deadlineS: o.route.deadlineS, deny: o.route.deny });
     $("pubOut").hidden = false; $("pubOut").textContent = text;
     await navigator.clipboard?.writeText(text).catch(() => {});
   } catch (e) { $("pubOut").hidden = false; $("pubOut").textContent = `${e.code ?? "error"}: ${e.message}`; }

@@ -98,7 +98,7 @@ export interface PublishInput {
   dryRun: boolean;
   /** Size of an attachment uploaded with this publish (charged upload + retention to the publisher). */
   attachmentBytes?: number;
-  route: { mode: RouteMode; maxCost: number | null; deny: Transport[]; allow: Transport[] | null };
+  route: { mode: RouteMode; maxCost: number | null; deny: Transport[]; allow: Transport[] | null; deadlineS?: number | null };
 }
 
 export interface PublishResult {
@@ -119,4 +119,6 @@ export interface DeliveryJob {
   attempt: number;
   /** The planned SKU (e.g. MMS_SKU for an SMS subscriber getting an MMS); absent on older jobs. */
   sku?: string | null;
+  /** Epoch ms after which the job should be skipped rather than delivered (`route.deadline_s`). */
+  deadline_ms?: number;
 }

@@ -264,6 +264,7 @@ export class SubEtha {
     if (o.route?.maxCostUsd !== undefined) h["x-max-cost"] = String(o.route.maxCostUsd);
     if (o.route?.deny?.length) h["x-deny"] = o.route.deny.join(",");
     if (o.route?.allow?.length) h["x-allow"] = o.route.allow.join(",");
+    if (o.route?.deadlineS) h["x-deadline"] = String(o.route.deadlineS);
     if (o.idempotencyKey) h["idempotency-key"] = o.idempotencyKey;
     return this.headers(h);
   }

@@ -41,5 +41,23 @@ describe("escalation", () => {
     const job: DeliveryJob = { topic: "@alarm/smoke", owner: a.account_id, message: { topic: "@alarm/smoke", id: msg.id, message: "SMOKE", priority: 5 }, sub: { id: "s", transport: "sms", endpoint: sms.id, after_s: 60 }, reservation: { ref, micros: 20_000 }, attempt: 0 };
     expect(await processJob(job, E)).toBe("skipped");
     expect(await balance(a.token)).toBe(before + 20_000);
+
+    // X-Deadline drops escalation steps scheduled at or after the deadline from the plan.
+    const withDeadline = (await (await publish("@alarm/smoke", "SMOKE", auth(a.token, { "X-Dry-Run": "1", "X-Priority": "5", "X-Deadline": "120" }))).json()) as { plan: { transport: string; after_s: number }[] };
+    expect(withDeadline.plan.map((d) => [d.transport, d.after_s])).toEqual([["webhook", 0], ["sms", 60]]);
+
+    // A queued job that arrives after its deadline is skipped and its reservation is released.
+    const ref2 = await reserve(E, a.account_id, 15_000);
+    const before2 = await balance(a.token);
+    const lateJob: DeliveryJob = {
+      topic: "@alarm/smoke", owner: a.account_id,
+      message: { topic: "@alarm/smoke", id: msg.id, message: "SMOKE", priority: 5 },
+      sub: { id: "s2", transport: "webhook", endpoint: hook.id },
+      reservation: { ref: ref2, micros: 15_000 },
+      attempt: 0,
+      deadline_ms: Date.now() - 1_000,
+    };
+    expect(await processJob(lateJob, E)).toBe("skipped");
+    expect(await balance(a.token)).toBe(before2 + 15_000);
   });
 });

@@ -13,7 +13,7 @@ const has = (cmd: string) => {
   }
 };
 
-const tricky = { baseUrl: "http://localhost:8787/", topic: "@me/door", message: `It's "open" $HOME \\ ok\nline2`, title: "Front's $door", priority: 5, tags: ["door", "warn"], click: "https://example.com/cam", mode: "all", maxCostUsd: 0.05, deny: ["sms"] };
+const tricky = { baseUrl: "http://localhost:8787/", topic: "@me/door", message: `It's "open" $HOME \\ ok\nline2`, title: "Front's $door", priority: 5, tags: ["door", "warn"], click: "https://example.com/cam", mode: "all", maxCostUsd: 0.05, deadlineS: 60, deny: ["sms"] };
 const plain = { baseUrl: "https://subetha.us", topic: "@me/door", message: "hi", priority: 3, mode: "any" };
 
 describe("copy as …", () => {
@@ -28,10 +28,15 @@ describe("copy as …", () => {
 
   it("carries every field", () => {
     expect(snippet("curl", tricky)).toContain(`-H "X-Max-Cost: 0.05"`);
+    expect(snippet("curl", tricky)).toContain(`-H "X-Deadline: 60"`);
     expect(snippet("curl", tricky)).toContain(`-H 'X-Click: https://example.com/cam'`);
     expect(snippet("python", tricky)).toContain(`"max_cost_usd_micros": 50000`);
+    expect(snippet("python", tricky)).toContain(`"deadline_s": 60`);
     expect(snippet("python", tricky)).toContain(`click="https://example.com/cam"`);
-    expect(snippet("swift", tricky)).toContain("Route(mode: .all, maxCostUSD: 0.05");
+    expect(snippet("swift", tricky)).toContain("Route(mode: .all, maxCostUSD: 0.05, deadlineSeconds: 60");
+    expect(snippet("kotlin", tricky)).toContain("deadlineS = 60");
+    expect(snippet("dart", tricky)).toContain("deadlineS: 60");
+    expect(snippet("js", tricky)).toContain("deadlineS: 60");
     expect(snippet("kotlin", tricky)).toContain("RouteMode.ALL");
     expect(snippet("kotlin", tricky)).toContain(`"Front's \\$door"`);
     expect(snippet("dart", tricky)).toContain(`'Front\\'s \\$door'`);

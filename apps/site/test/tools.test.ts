@@ -88,6 +88,9 @@ describe("route simulator", () => {
     const all = simulate({ ...base, mode: "all", priority: 5, subscriptions: subs });
     expect(all.steps.every((s) => s.after_s === 0)).toBe(true);
     expect(all.ackedMicros).toBe(all.worstCaseMicros);
+    const deadline = simulate({ ...base, priority: 5, deadlineS: 60, subscriptions: subs });
+    expect(deadline.steps.map((s) => s.transport)).toEqual(["ws", "webpush"]);
+    expect(deadline.plan.dropped).toEqual([{ subscriber: "sub_2_sms", transport: "sms", reason: "past deadline" }]);
   });
 
   it("bills an SMS subscriber one MMS when the message has a picture", () => {

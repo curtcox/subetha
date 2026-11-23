@@ -57,4 +57,12 @@ describe("planDeliveries", () => {
     const p = planDeliveries({ ...base, queued, priority: 5, policy: { quiet_hours: { start: "11:00", end: "13:00" } } });
     expect(p.deliveries.map((d) => d.subscriber)).toEqual(["c1"]);
   });
+  it("drops escalation steps scheduled at or after deadlineS", () => {
+    const p = planDeliveries({ ...base, queued, priority: 5, deadlineS: 120 });
+    expect(p.deliveries.map((d) => [d.subscriber, d.after_s])).toEqual([["c1", 0], ["push", 0], ["sms", 60]]);
+    expect(p.dropped).toEqual([{ subscriber: "voice", transport: "voice", reason: "past deadline" }]);
+    const tight = planDeliveries({ ...base, queued, priority: 5, deadlineS: 60 });
+    expect(tight.deliveries.map((d) => d.subscriber)).toEqual(["c1", "push"]);
+    expect(tight.dropped.map((d) => [d.subscriber, d.reason])).toEqual([["sms", "past deadline"], ["voice", "past deadline"]]);
+  });
 });

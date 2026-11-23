@@ -14,6 +14,8 @@ export interface PlanInput {
   denyLists: (Transport[] | null | undefined)[];
   policy: TopicPolicy;
   maxCostMicros: number | null;
+  /** Drop queued escalation steps scheduled at or after this many seconds (PLAN §4). */
+  deadlineS?: number | null;
   prices: PriceTable;
   tier: string;
   nowMs: number;
@@ -82,6 +84,11 @@ export function planDeliveries(input: PlanInput): Plan {
       dropped.push({ subscriber: sub.id, transport: t, reason: why });
       continue;
     }
+    const after = input.mode === "all" ? 0 : input.mode === "fast" ? Math.min(sub.after_s ?? 0, 5) : sub.after_s ?? 0;
+    if (input.deadlineS != null && after >= input.deadlineS) {
+      dropped.push({ subscriber: sub.id, transport: t, reason: "past deadline" });
+      continue;
+    }
     let { sku, cost } = price(t);
     if (sub.country) {
       const unit = input.destPrice?.(t, sub.country) ?? null;
@@ -95,7 +102,6 @@ export function planDeliveries(input: PlanInput): Plan {
       sku = MMS_SKU;
       cost = actionPriceMicros(input.prices, MMS_SKU, input.tier);
     }
-    const after = input.mode === "all" ? 0 : input.mode === "fast" ? Math.min(sub.after_s ?? 0, 5) : sub.after_s ?? 0;
     deliveries.push({ subscriber: sub.id, transport: t, sku, cost_micros: cost, after_s: after });
   }
 

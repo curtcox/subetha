@@ -367,6 +367,7 @@ export class TopicDO extends DurableObject<Env> {
       denyLists: [input.route.deny],
       policy: meta.policy,
       maxCostMicros: input.route.maxCost,
+      deadlineS: input.route.deadlineS ?? null,
       prices: PRICES,
       tier: this.tier(),
       nowMs,
@@ -464,7 +465,8 @@ export class TopicDO extends DurableObject<Env> {
         await this.recordDelivery(env.id!, { sub: sub.id, transport: d.transport, result: "not sent", error: r.code });
         continue;
       }
-      jobs.push({ body: { topic: meta.name, owner: meta.owner, message: env, sub, reservation: { ref, micros: d.cost_micros }, attempt: 0, sku: d.sku }, delaySeconds: d.after_s || undefined });
+      const deadline_ms = input.route.deadlineS ? nowMs + input.route.deadlineS * 1000 : undefined;
+      jobs.push({ body: { topic: meta.name, owner: meta.owner, message: env, sub, reservation: { ref, micros: d.cost_micros }, attempt: 0, sku: d.sku, ...(deadline_ms ? { deadline_ms } : {}) }, delaySeconds: d.after_s || undefined });
     }
     if (jobs.length && this.env.DELIVERY) await this.env.DELIVERY.sendBatch(jobs);
     } catch (e) {

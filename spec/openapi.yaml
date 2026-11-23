@@ -1841,8 +1841,8 @@ components:
     XDeadline:
       name: X-Deadline
       in: header
-      description: Reserved (seconds). Not yet enforced by the relay.
-      schema: { type: integer }
+      description: Delivery deadline in seconds (≥ 1). Escalation steps scheduled at or after this deadline are dropped from the plan, and queued jobs past the deadline are skipped with their reservations released.
+      schema: { type: integer, minimum: 1 }
     IdempotencyKey:
       name: Idempotency-Key
       in: header

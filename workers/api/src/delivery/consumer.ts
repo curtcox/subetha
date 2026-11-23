@@ -16,6 +16,11 @@ export async function processJob(job: DeliveryJob, env: Env): Promise<"delivered
     await topic.recordDelivery(job.message.id!, { sub: job.sub.id, transport: job.sub.transport, result: "skipped: acked" });
     return "skipped";
   }
+  if (job.deadline_ms && Date.now() > job.deadline_ms) {
+    await account.release(job.reservation.ref);
+    await topic.recordDelivery(job.message.id!, { sub: job.sub.id, transport: job.sub.transport, result: "skipped: past deadline" });
+    return "skipped";
+  }
   // A retry after a successful send (bookkeeping failed, or the worker died before acking) must
   // not send again: the send is marked before any bookkeeping.
   if (await topic.wasSent(job.reservation.ref)) {
@@ -39,7 +44,8 @@ export async function processJob(job: DeliveryJob, env: Env): Promise<"delivered
     return "delivered";
   } catch (e) {
     if (sent) return "retry"; // bookkeeping failed after sending; the retry only settles
-    const permanent = e instanceof PermanentError || job.attempt + 1 >= MAX_ATTEMPTS;
+    const pastDeadline = !!job.deadline_ms && Date.now() >= job.deadline_ms;
+    const permanent = e instanceof PermanentError || pastDeadline || job.attempt + 1 >= MAX_ATTEMPTS;
     await topic.recordDelivery(job.message.id!, { sub: job.sub.id, transport: job.sub.transport, result: permanent ? "failed" : "retrying", error: String((e as Error).message ?? e), attempt: job.attempt }).catch(() => {});
     if (permanent) {
       await account.release(job.reservation.ref).catch(() => {});
