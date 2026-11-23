@@ -158,7 +158,7 @@ export function callerOf(p: Principal): Caller {
     case "anonymous": return { accountId: null, tokenId: null, deviceId: null, caps: { daily: null, total: null }, transports: null };
     case "token": return { accountId: p.accountId, tokenId: p.tokenId, deviceId: null, caps: p.caps, transports: p.transports };
     case "user": return { accountId: p.accountId, tokenId: null, deviceId: null, caps: { daily: null, total: null }, transports: null };
-    case "device": return { accountId: p.accountId, tokenId: null, deviceId: p.deviceId, caps: { daily: null, total: null }, transports: null };
+    case "device": return { accountId: p.accountId, tokenId: null, deviceId: p.deviceId, caps: { daily: null, total: null }, transports: p.transports, denyTransports: p.denyTransports };
   }
 }
 

@@ -1339,6 +1339,31 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
   /v1/devices/{id}:
+    patch:
+      tags: [devices]
+      operationId: updateDevice
+      summary: Rename, pause/resume (kill switch), or set transport allow/deny policies for an enrolled device
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, pattern: "^dev_[a-z2-7]{52}$" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 64 }
+                paused: { type: boolean, description: Device kill switch. Paused devices cannot sign requests until resumed. }
+                allow_transports: { type: [array, "null"], items: { $ref: "#/components/schemas/Transport" } }
+                deny_transports: { type: [array, "null"], items: { $ref: "#/components/schemas/Transport" } }
+      responses:
+        "200":
+          description: Updated device.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
     delete:
       tags: [devices]
       operationId: revokeDevice
@@ -2198,6 +2223,9 @@ components:
         id: { type: string, pattern: "^dev_[a-z2-7]{52}$" }
         name: { type: string }
         capabilities: { type: array, items: { type: string } }
+        paused: { type: boolean }
+        allow_transports: { type: [array, "null"], items: { $ref: "#/components/schemas/Transport" } }
+        deny_transports: { type: [array, "null"], items: { $ref: "#/components/schemas/Transport" } }
         created_at: { type: integer }
         last_seen_at: { type: [integer, "null"] }
         revoked_at: { type: [integer, "null"] }

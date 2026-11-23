@@ -77,7 +77,7 @@ export type Principal =
   | { kind: "anonymous" }
   | { kind: "token"; accountId: string; tokenId: string; scopes: string[]; caps: { daily: number | null; total: number | null }; transports: Transport[] | null }
   | { kind: "user"; accountId: string | null; clerkId: string }
-  | { kind: "device"; accountId: string; deviceId: string };
+  | { kind: "device"; accountId: string; deviceId: string; transports: Transport[] | null; denyTransports: Transport[] | null };
 
 /** The part of a principal that crosses into Durable Objects. */
 export interface Caller {
@@ -86,6 +86,7 @@ export interface Caller {
   deviceId: string | null;
   caps: { daily: number | null; total: number | null };
   transports: Transport[] | null;
+  denyTransports?: Transport[] | null;
 }
 
 export interface PublishInput {

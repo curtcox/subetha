@@ -16,9 +16,9 @@
 // is still accepted for requests that carry no covered header, so it can't be used to alter a
 // request's content or routing.
 import type { Context, Hono } from "hono";
-import { base64urlDecode, COVERED_REQUEST_HEADERS, DEVICE_ID_RE, parseSignedHeaders, publicKeyFromDeviceId, requestSigningInputV2, utf8 } from "@subetha/sdk/protocol";
+import { base64urlDecode, COVERED_REQUEST_HEADERS, DEVICE_ID_RE, parseSignedHeaders, publicKeyFromDeviceId, requestSigningInputV2, utf8, type Transport } from "@subetha/sdk/protocol";
 import { audit } from "./accounts.ts";
-import { requireAdmin } from "./auth.ts";
+import { requireAdmin, validateTransports } from "./auth.ts";
 import { randomBase32, sha256Hex } from "./crypto.ts";
 import { ApiError } from "./errors.ts";
 import { accountStub } from "./durable/account.ts";
@@ -84,11 +84,18 @@ export async function authenticateDevice(req: Request, env: Env, nowSec = Math.f
   if (!DEVICE_ID_RE.test(id) || !/^\d+$/.test(time) || Math.abs(nowSec - Number(time)) > SKEW_S || !/^[A-Za-z0-9_-]{16,64}$/.test(nonce)) throw new ApiError("unauthorized", "bad device signature headers");
   const body = new Uint8Array(await req.clone().arrayBuffer());
   if (!(await ed25519Verify(id, sig, await signingInput(req, time, nonce, body)))) throw new ApiError("unauthorized", "bad device signature");
-  const row = await env.DB.prepare("SELECT account_id FROM devices WHERE id = ? AND revoked_at IS NULL").bind(id).first<{ account_id: string }>();
+  const row = await env.DB.prepare("SELECT account_id, paused, allow_transports, deny_transports FROM devices WHERE id = ? AND revoked_at IS NULL").bind(id).first<{ account_id: string; paused: number; allow_transports: string | null; deny_transports: string | null }>();
   if (!row) throw new ApiError("unauthorized", "device not enrolled");
+  if (row.paused) throw new ApiError("topic_paused", "device is paused");
   if (!(await accountStub(env, row.account_id).claimNonce(`sig:${await sha256Hex(sig)}`, 2 * SKEW_S * 1000))) throw new ApiError("unauthorized", "replayed device signature");
   env.DB.prepare("UPDATE devices SET last_seen_at = ? WHERE id = ?").bind(Date.now(), id).run().catch(() => {});
-  return { kind: "device", accountId: row.account_id, deviceId: id };
+  return {
+    kind: "device",
+    accountId: row.account_id,
+    deviceId: id,
+    transports: row.allow_transports ? (JSON.parse(row.allow_transports) as Transport[]) : null,
+    denyTransports: row.deny_transports ? (JSON.parse(row.deny_transports) as Transport[]) : null,
+  };
 }
 
 /** Name and capabilities are stored per device; keep them small (they're user-supplied). */
@@ -119,11 +126,53 @@ function userCode(): string {
   return `${s.slice(0, 4)}-${s.slice(4)}`;
 }
 
+function publicDevice(d: Record<string, unknown>) {
+  return {
+    id: d.id,
+    name: d.name,
+    capabilities: JSON.parse((d.capabilities as string) || "[]"),
+    paused: !!d.paused,
+    allow_transports: d.allow_transports ? JSON.parse(d.allow_transports as string) : null,
+    deny_transports: d.deny_transports ? JSON.parse(d.deny_transports as string) : null,
+    created_at: d.created_at,
+    last_seen_at: d.last_seen_at ?? null,
+    revoked_at: d.revoked_at ?? null,
+  };
+}
+
 export function registerDeviceRoutes(app: Hono<Vars>, principal: PrincipalFn) {
   app.get("/v1/devices", async (c) => {
     const id = requireAdmin(await principal(c));
-    const { results } = await c.env.DB.prepare("SELECT id, name, capabilities, created_at, last_seen_at, revoked_at FROM devices WHERE account_id = ? ORDER BY created_at DESC").bind(id).all();
-    return c.json({ devices: results.map((d) => ({ ...d, capabilities: JSON.parse(d.capabilities as string) })) });
+    const { results } = await c.env.DB.prepare("SELECT id, name, capabilities, paused, allow_transports, deny_transports, created_at, last_seen_at, revoked_at FROM devices WHERE account_id = ? ORDER BY created_at DESC").bind(id).all();
+    return c.json({ devices: results.map(publicDevice) });
+  });
+
+  app.patch("/v1/devices/:id", async (c) => {
+    const p = await principal(c);
+    const accountId = requireAdmin(p);
+    const id = c.req.param("id");
+    const existing = await c.env.DB.prepare("SELECT id FROM devices WHERE id = ? AND account_id = ? AND revoked_at IS NULL").bind(id, accountId).first();
+    if (!existing) throw new ApiError("not_found");
+    const body = (await c.req.json()) as { name?: unknown; paused?: unknown; allow_transports?: unknown; deny_transports?: unknown };
+    if (body.name !== undefined) {
+      if (typeof body.name !== "string" || body.name.length > 64) throw new ApiError("bad_request", "name must be a string of up to 64 characters");
+      await c.env.DB.prepare("UPDATE devices SET name = ? WHERE id = ?").bind(body.name, id).run();
+    }
+    if (body.paused !== undefined) {
+      if (typeof body.paused !== "boolean") throw new ApiError("bad_request", "paused must be a boolean");
+      await c.env.DB.prepare("UPDATE devices SET paused = ? WHERE id = ?").bind(body.paused ? 1 : 0, id).run();
+    }
+    if (body.allow_transports !== undefined) {
+      const list = validateTransports(body.allow_transports);
+      await c.env.DB.prepare("UPDATE devices SET allow_transports = ? WHERE id = ?").bind(list?.length ? JSON.stringify(list) : null, id).run();
+    }
+    if (body.deny_transports !== undefined) {
+      const list = validateTransports(body.deny_transports);
+      await c.env.DB.prepare("UPDATE devices SET deny_transports = ? WHERE id = ?").bind(list?.length ? JSON.stringify(list) : null, id).run();
+    }
+    await audit(c.env, accountId, p.kind, "device.update", { id, ...body });
+    const updated = await c.env.DB.prepare("SELECT id, name, capabilities, paused, allow_transports, deny_transports, created_at, last_seen_at, revoked_at FROM devices WHERE id = ?").bind(id).first();
+    return c.json(publicDevice(updated!));
   });
 
   app.post("/v1/devices", async (c) => {

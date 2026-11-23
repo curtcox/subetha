@@ -382,7 +382,7 @@ export class TopicDO extends DurableObject<Env> {
       mode: input.route.mode,
       priority: env.priority ?? 3,
       allowLists: [input.route.allow, caller.transports, this.accountTransports.allow],
-      denyLists: [input.route.deny, this.accountTransports.deny],
+      denyLists: [input.route.deny, caller.denyTransports, this.accountTransports.deny],
       policy: meta.policy,
       maxCostMicros: input.route.maxCost,
       deadlineS: input.route.deadlineS ?? null,
