@@ -10,7 +10,7 @@ from functools import partial
 from typing import Any
 
 from subetha import SubEthaError
-from subetha.protocol import Deduper, ulid
+from subetha.protocol import Deduper, is_ulid, ulid
 
 from .ports import LxmfMessage, LxmfPort, RelayPort
 from .store import SubscriberStore
@@ -26,6 +26,7 @@ HELP = """SubEtha gateway for {topic}
 Send any text to publish it to the topic.
 /subscribe    receive the topic's messages here
 /unsubscribe  stop receiving them
+/ack <id>     acknowledge a message to stop escalation
 /status       show whether you are subscribed
 /help         this text
 
@@ -168,7 +169,8 @@ class Bridge:
             self._reply(mapping, source, f"Publish failed: {e.__class__.__name__}")
 
     def _command(self, mapping: TopicMapping, source: str, text: str) -> None:
-        cmd = text.split()[0].lower()
+        parts = text.split()
+        cmd = parts[0].lower()
         topic = mapping.topic
         if cmd == "/subscribe":
             if not mapping.deliver:
@@ -182,6 +184,19 @@ class Bridge:
                 reply = f"Unsubscribed from {topic}."
             else:
                 reply = f"You were not subscribed to {topic}."
+        elif cmd == "/ack":
+            if len(parts) != 2 or not is_ulid(parts[1]):
+                reply = "Usage: /ack <26-character message id>"
+            else:
+                msg_id = parts[1].upper()
+                try:
+                    self.relay.ack(topic, msg_id, via="lxmf")
+                    reply = f"Acknowledged {msg_id}."
+                except SubEthaError as e:
+                    reply = f"Ack failed: {e.code}" + (f": {e.message}" if e.message else "")
+                except Exception as e:  # noqa: BLE001
+                    log.exception("ack of %s on %s failed", msg_id, topic)
+                    reply = f"Ack failed: {e.__class__.__name__}"
         elif cmd == "/status":
             state = "subscribed" if self.store.is_subscribed(topic, source) else "not subscribed"
             reply = f"You are {state} to {topic}."

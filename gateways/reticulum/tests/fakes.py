@@ -56,6 +56,7 @@ class FakeRelay(RelayPort):
     def __init__(self, echo: bool = True) -> None:
         self.echo = echo
         self.published: list[dict[str, Any]] = []
+        self.acked: list[tuple[str, str, str]] = []
         self.handlers: dict[str, RelayHandler] = {}
         self.since: dict[str, str | None] = {}
         self.fail_with: Exception | None = None
@@ -81,6 +82,11 @@ class FakeRelay(RelayPort):
     def subscribe(self, topic, handler, since=None):
         self.handlers[topic] = handler
         self.since[topic] = since
+
+    def ack(self, topic, message_id, via="lxmf"):
+        if self.fail_with is not None:
+            raise self.fail_with
+        self.acked.append((topic, message_id, via))
 
     def emit(self, msg: dict[str, Any]) -> None:
         self.handlers[msg["topic"]](msg)

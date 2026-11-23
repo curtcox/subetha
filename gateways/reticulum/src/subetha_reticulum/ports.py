@@ -76,3 +76,7 @@ class RelayPort(ABC):
     @abstractmethod
     def subscribe(self, topic: str, handler: RelayHandler, since: str | None = None) -> None:
         """Starts delivering the topic's messages to ``handler`` (from any thread)."""
+
+    def ack(self, topic: str, message_id: str, via: str = "lxmf") -> None:
+        """Acknowledges a message on the relay to stop escalation."""
+        raise NotImplementedError("ack is not supported by this relay port")

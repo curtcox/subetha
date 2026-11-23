@@ -226,3 +226,19 @@ def test_unverified_sender_rejected_on_allow_listed_topic():
     _, lxmf2, relay2 = make(echo=False)
     lxmf2.handler(LxmfMessage(dest_hash(TOPIC), BOB, "hi", verified=False))
     assert relay2.published[0]["lxmf_from"] == BOB
+
+
+def test_ack_command_acknowledges_message_and_handles_errors():
+    _, lxmf, relay = make(echo=False)
+    msg_id = "01JD5A2Z3K8Q9V6X7W4T1R0S2M"
+    lxmf.receive(TOPIC, ALICE, f"/ack {msg_id.lower()}")
+    assert relay.acked == [(TOPIC, msg_id, "lxmf")]
+    assert f"Acknowledged {msg_id}." in lxmf.sent[-1]["content"]
+    assert relay.published == []
+
+    lxmf.receive(TOPIC, ALICE, "/ack not-a-ulid")
+    assert "Usage: /ack" in lxmf.sent[-1]["content"]
+
+    relay.fail_with = SubEthaError("forbidden", 403, "nope")
+    lxmf.receive(TOPIC, ALICE, f"/ack {msg_id}")
+    assert "Ack failed: forbidden: nope" in lxmf.sent[-1]["content"]

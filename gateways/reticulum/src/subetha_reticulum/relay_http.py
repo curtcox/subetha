@@ -65,6 +65,12 @@ class HttpRelayPort(RelayPort):
         assert self._client is not None
         return self._client.publish(topic, message, title=title, id=id, extra=extra)
 
+    def ack(self, topic: str, message_id: str, via: str = "lxmf") -> None:
+        if self._client is None:
+            self.start()
+        assert self._client is not None
+        self._client.ack(topic, message_id, via=via)
+
     def subscribe(self, topic: str, handler: RelayHandler, since: str | None = None) -> None:
         # One client per stream so a long-lived response never starves publishes of connections.
         client = self._factory()

@@ -64,3 +64,19 @@ def test_subscribe_delivers_from_thread_and_resumes_since():
     assert got[:2] == ["one", "two"]
     assert calls[0]["since"] == "01JD5A2Z3K8Q9V6X7W4T1R0S29"
     assert calls[1]["since"] == m1["id"]
+
+
+def test_ack_posts_to_v1_ack():
+    seen = {}
+
+    def handler(req):
+        seen["req"] = req
+        return httpx.Response(200, json={"acked": True})
+
+    port = HttpRelayPort("https://relay.test", "tk", client_factory=lambda: Client(
+        "https://relay.test", token="tk", transport=httpx.MockTransport(handler)))
+    port.start()
+    port.ack(TOPIC, "01JD5A2Z3K8Q9V6X7W4T1R0S2M")
+    assert seen["req"].url.path == "/v1/ack"
+    assert json.loads(seen["req"].content) == {"topic": TOPIC, "id": "01JD5A2Z3K8Q9V6X7W4T1R0S2M", "via": "lxmf"}
+    port.stop()
