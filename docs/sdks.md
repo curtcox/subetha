@@ -28,8 +28,8 @@ Dependency-free and small enough for web pages.
 
 <!-- include: samples/ts/publish.ts -->
 
-The client also covers polling, subscriptions, dry runs, tokens, topics, traces, and billing
-(`poll`, `subscribe`, `estimate`, `createToken`, `configureTopic`, `trace`, `balance`, `checkout`),
+The client also covers attachments, polling, subscriptions, dry runs, tokens, topics, traces, and billing
+(`publishFile`, `estimateFile`, `poll`, `subscribe`, `estimate`, `createToken`, `configureTopic`, `trace`, `balance`, `checkout`),
 plus `request()` for any other route. Useful options:
 
 | Option | Effect |
@@ -67,7 +67,7 @@ they're visible to anyone who views the page.
 
 <!-- include: samples/cli/cli.sh -->
 
-`SUBETHA_TOKEN` and `SUBETHA_URL` override the saved login.
+`SUBETHA_TOKEN` and `SUBETHA_URL` override the saved login. Running `subetha login` with no token starts the device-code flow and saves a device key so the CLI signs requests without storing a bearer token. `subetha pub --file PATH` uploads an attachment, and `subetha trace` / `subetha ack` inspect or acknowledge messages.
 
 ## Python
 

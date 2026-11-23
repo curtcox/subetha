@@ -45,11 +45,7 @@ curl -H "Authorization: Bearer $SUBETHA_TOKEN" https://subetha.us/@me/backups/js
   test (`spec/openapi.yaml`), `llms.txt`, GitHub Pages (with a sample apps page: the live web
   sample, the Expo sample's web build, and Android APKs) and deploy workflows, infrastructure notes
   (`infra/`), legal drafts (`docs/legal/`).
-- **Web console and tools** (`apps/site`): the console (send/receive, topics, endpoints and
-  escalation subscriptions, an endpoint inspector (test deliveries showing the signed webhook request and response, plus an in-browser signature checker), Slack, devices, E2EE topic keys (make, wrap to devices, use in the browser), tokens, billing, usage chart and limits, traces, audit log, and an
-  OpenAPI-driven API explorer; "copy as" curl/JS/Python/Swift/Kotlin/Dart), plus a pricing
-  calculator and an offline route simulator at `/tools/` that bundle the relay's own price table
-  and planner, and the Edge lab (sound, animated QR, and Bluetooth between nearby browsers).
+- **Web console and tools** (`apps/site`): the console (send/receive with attachments, full ntfy fields, inbox priority/tag filters, and direct trace links; topics with aggregate subscriber counts and structured policy controls; endpoints, Slack channel bindings, escalation subscriptions, and an endpoint inspector showing the signed webhook request/response plus an in-browser signature checker; devices including "this browser" as an enrolled device; E2EE topic keys to make, wrap, and unwrap in the browser; tokens with daily/total caps, expiry, origins, and IP allow-lists; billing with top-up, auto-recharge settings, payment receipts, usage chart, and limits; structured trace viewer; audit log; OpenAPI-driven API explorer; "copy as" curl/JS/Python/Swift/Kotlin/Dart), plus a pricing calculator and an offline route simulator at `/tools/` that bundle the relay's own price table and planner, and the Edge lab (sound, animated QR, and Bluetooth between nearby browsers).
 
 ## Repository layout
 

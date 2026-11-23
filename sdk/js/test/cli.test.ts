@@ -41,6 +41,66 @@ describe("CLI", () => {
     expect(t.out[0]).toBe("logged in as @me (balance $1.500000)");
     vi.unstubAllGlobals();
   });
+
+  it("enrolls via device-code flow on bare `subetha login` and signs subsequent publishes", async () => {
+    let polls = 0;
+    let enrolledId = "";
+    const seenHeaders: Headers[] = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
+      if (url.endsWith("/v1/device/code")) {
+        const b = JSON.parse(init.body as string) as { device_id: string; name: string; proof: string };
+        enrolledId = b.device_id;
+        expect(b.name).toBe("my-laptop");
+        expect(b.proof).toBeTruthy();
+        return new Response(JSON.stringify({ device_code: "dc_1", user_code: "BCDF-GHJK", verification_uri: "https://x.test/console/#device", verification_uri_complete: "https://x.test/console/#device=BCDF-GHJK", interval: 1, expires_in: 600 }));
+      }
+      if (url.endsWith("/v1/device/token")) {
+        polls++;
+        if (polls === 1) return new Response(JSON.stringify({ error: "authorization_pending" }), { status: 400 });
+        return new Response(JSON.stringify({ device_id: enrolledId, account_id: "acct_1" }));
+      }
+      seenHeaders.push(new Headers(init.headers));
+      return new Response(JSON.stringify({ ...JSON.parse(init.body as string), id: "01JD0000000000000000000009" }));
+    });
+    const t = io();
+    const richIo = { ...t.io, sleep: async () => {} };
+    expect(await main(["login", "--url", "https://x.test", "--name", "my-laptop"], richIo, async () => "")).toBe(0);
+    expect(polls).toBe(2);
+    expect(t.out[0]).toContain("BCDF-GHJK");
+    expect(t.out[1]).toContain(`enrolled device ${enrolledId}`);
+    expect(t.cfg.deviceId).toBe(enrolledId);
+    expect(t.cfg.deviceSeed).toMatch(/^[A-Za-z0-9_-]{43}$/);
+
+    // Subsequent publish uses device signatures, not Bearer auth.
+    expect(await main(["pub", "@me/door", "hello"], richIo, async () => "")).toBe(0);
+    expect(seenHeaders[0]!.get("x-device-id")).toBe(enrolledId);
+    expect(seenHeaders[0]!.get("x-device-signature")).toBeTruthy();
+    expect(seenHeaders[0]!.get("authorization")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("uploads a file with --file and supports trace and ack", async () => {
+    const calls: { url: string; method?: string; headers?: HeadersInit }[] = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
+      calls.push({ url, method: init.method, headers: init.headers });
+      if (url.includes("/v1/traces/")) return new Response(JSON.stringify({ id: "01JD0000000000000000000001", ack: null }));
+      if (url.endsWith("/v1/ack")) return new Response(JSON.stringify({ acked: true }));
+      return new Response(JSON.stringify({ id: "01JD0000000000000000000002", topic: "@me/pics", message: "snap" }));
+    });
+    const t = io({ SUBETHA_TOKEN: "se_x", SUBETHA_URL: "https://x.test" });
+    const richIo = { ...t.io, readFile: async () => ({ name: "photo.jpg", bytes: new Uint8Array([1, 2, 3]) }) };
+    expect(await main(["pub", "@me/pics", "snap", "--file", "/tmp/photo.jpg"], richIo, async () => "")).toBe(0);
+    expect(calls[0]!.method).toBe("PUT");
+    expect((calls[0]!.headers as Record<string, string>)["x-filename"]).toBe("photo.jpg");
+    expect((calls[0]!.headers as Record<string, string>)["content-type"]).toBe("image/jpeg");
+
+    expect(await main(["trace", "@me/pics", "01JD0000000000000000000001"], richIo, async () => "")).toBe(0);
+    expect(t.out[1]).toContain("01JD0000000000000000000001");
+
+    expect(await main(["ack", "@me/pics", "01JD0000000000000000000001"], richIo, async () => "")).toBe(0);
+    expect(t.out[2]).toBe("acked 01JD0000000000000000000001 on @me/pics");
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("CLI lan", async () => {

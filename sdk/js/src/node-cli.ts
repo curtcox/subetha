@@ -1,7 +1,7 @@
 // Node entry point for the CLI.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { homedir, hostname } from "node:os";
+import { basename, join } from "node:path";
 import { main, type Config } from "./cli.ts";
 import { startLan } from "./edge/lan-node.ts";
 
@@ -12,6 +12,8 @@ const code = await main(process.argv.slice(2), {
   out: (s) => process.stdout.write(s + "\n"),
   err: (s) => process.stderr.write(s + "\n"),
   env: process.env,
+  hostname: hostname(),
+  readFile: async (p) => ({ name: basename(p), bytes: new Uint8Array(await readFile(p)) }),
   readConfig: async () => { try { return JSON.parse(await readFile(file, "utf8")) as Config; } catch { return {}; } },
   writeConfig: async (c) => { await mkdir(dir, { recursive: true }); await writeFile(file, JSON.stringify(c, null, 2), { mode: 0o600 }); },
   startLan,
