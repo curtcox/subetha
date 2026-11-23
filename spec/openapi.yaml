@@ -766,6 +766,7 @@ paths:
                       properties:
                         name: { type: string }
                         policy: { $ref: "#/components/schemas/TopicPolicy" }
+                        endpoint_subscriptions: { type: integer, description: Aggregate count of verified endpoint subscriptions on this topic. }
                         created_at: { type: integer }
   /v1/topics/{topic}:
     parameters:
@@ -2148,6 +2149,12 @@ components:
         policy: { $ref: "#/components/schemas/TopicPolicy" }
         created_at: { type: integer }
         tier: { type: string }
+        subscribers:
+          type: object
+          description: Aggregate subscriber counts (live streams/WebSockets and verified queued endpoints).
+          properties:
+            live: { type: integer }
+            queued: { type: integer }
 
     Endpoint:
       type: object

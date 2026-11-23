@@ -59,4 +59,17 @@ describe("console read APIs", () => {
     const eps = (await (await get(a.token, "/v1/endpoints")).json()) as { endpoints: { id: string }[] };
     expect(eps.endpoints.some((e) => e.id === endpoint_id)).toBe(false);
   });
+
+  it("reports aggregate subscriber counts on GET /v1/topics and GET /v1/topics/:topic", async () => {
+    const a = await bootstrap("counter");
+    const topic = "@counter/bell";
+    await SELF.fetch(`${BASE}/v1/topics/${topic}`, { method: "PUT", headers: auth(a.token, { "content-type": "application/json" }), body: JSON.stringify({}) });
+    const ep = (await (await SELF.fetch(`${BASE}/v1/endpoints`, { method: "POST", headers: auth(a.token, { "content-type": "application/json" }), body: JSON.stringify({ kind: "webhook", address: "https://example.com/hook" }) })).json()) as { id: string };
+    expect((await SELF.fetch(`${BASE}/v1/subscriptions`, { method: "POST", headers: auth(a.token, { "content-type": "application/json" }), body: JSON.stringify({ topic, endpoint_id: ep.id }) })).status).toBe(201);
+
+    const list = (await (await get(a.token, "/v1/topics")).json()) as { topics: { name: string; endpoint_subscriptions: number }[] };
+    expect(list.topics.find((t) => t.name === topic)?.endpoint_subscriptions).toBe(1);
+    const detail = (await (await get(a.token, `/v1/topics/${topic}`)).json()) as { subscribers: { live: number; queued: number } };
+    expect(detail.subscribers).toEqual({ live: 0, queued: 1 });
+  });
 });

@@ -109,6 +109,11 @@ export class TopicDO extends DurableObject<Env> {
     return this.meta;
   }
 
+  /** Aggregate subscriber counts for the topic owner (never reveals identities; PLAN §11). */
+  async subscriberCounts(): Promise<{ live: number; queued: number }> {
+    return { live: this.streams.size + this.ctx.getWebSockets().length, queued: this.queuedSubs().length };
+  }
+
   async setSubscriptions(subs: QueuedSubscription[]): Promise<void> {
     this.ctx.storage.transactionSync(() => {
       this.sql.exec("DELETE FROM subs");
@@ -725,7 +730,7 @@ export class TopicDO extends DurableObject<Env> {
 }
 
 /** Typed RPC surface (Envelope's index signature defeats the generated Rpc types). */
-export type TopicRpc = Pick<TopicDO, "configure" | "getMeta" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases">;
+export type TopicRpc = Pick<TopicDO, "configure" | "getMeta" | "subscriberCounts" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases">;
 
 export function topicStub(env: Env, topic: string): TopicRpc {
   return env.TOPIC.get(env.TOPIC.idFromName(topic)) as unknown as TopicRpc;

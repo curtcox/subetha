@@ -310,13 +310,64 @@ $("pushBtn").onclick = async () => {
   } catch (e) { say(`${e.code ?? "error"}: ${e.message}`); }
 };
 
+function syncFormFromPolicy(p) {
+  $("polPub").checked = !!p.public_publish;
+  $("polRead").checked = !!p.public_read;
+  $("polSig").checked = !!p.require_signature;
+  $("polPaused").checked = !!p.paused;
+  $("polRetentionH").value = p.retention_s != null ? String(Math.round((p.retention_s / 3600) * 100) / 100) : "";
+  $("polDailyCap").value = p.daily_cap_micros != null ? String(p.daily_cap_micros / 1e6) : "";
+  $("polMaxMsg").value = p.max_cost_per_message_micros != null ? String(p.max_cost_per_message_micros / 1e6) : "";
+  $("polQuietStart").value = p.quiet_hours?.start ?? "";
+  $("polQuietEnd").value = p.quiet_hours?.end ?? "";
+  $("polAllow").value = (p.allow_transports ?? []).join(", ");
+  $("polDeny").value = (p.deny_transports ?? []).join(", ");
+  $("polEmailSenders").value = (p.email_senders ?? []).join(", ");
+}
+function syncPolicyFromForm() {
+  let base = {};
+  try { base = JSON.parse($("topicPolicy").value || "{}"); } catch {}
+  const p = { ...base };
+  const setBool = (k, v) => { if (v) p[k] = true; else delete p[k]; };
+  const setList = (k, raw) => { const xs = raw.split(",").map((s) => s.trim()).filter(Boolean); if (xs.length) p[k] = xs; else delete p[k]; };
+  setBool("public_publish", $("polPub").checked);
+  setBool("public_read", $("polRead").checked);
+  setBool("require_signature", $("polSig").checked);
+  setBool("paused", $("polPaused").checked);
+  const ret = $("polRetentionH").value.trim();
+  if (ret !== "") p.retention_s = Math.round(Number(ret) * 3600); else delete p.retention_s;
+  const daily = $("polDailyCap").value.trim();
+  if (daily !== "") p.daily_cap_micros = Math.round(Number(daily) * 1e6); else delete p.daily_cap_micros;
+  const maxm = $("polMaxMsg").value.trim();
+  if (maxm !== "") p.max_cost_per_message_micros = Math.round(Number(maxm) * 1e6); else delete p.max_cost_per_message_micros;
+  const qs = $("polQuietStart").value.trim(), qe = $("polQuietEnd").value.trim();
+  if (qs && qe) p.quiet_hours = { start: qs, end: qe }; else delete p.quiet_hours;
+  setList("allow_transports", $("polAllow").value);
+  setList("deny_transports", $("polDeny").value);
+  setList("email_senders", $("polEmailSenders").value);
+  $("topicPolicy").value = JSON.stringify(p, null, 2);
+}
+$("polForm").addEventListener("input", syncPolicyFromForm);
+$("polForm").addEventListener("change", syncPolicyFromForm);
+$("topicPolicy").addEventListener("input", () => { try { syncFormFromPolicy(JSON.parse($("topicPolicy").value || "{}")); } catch {} });
+
 async function loadTopics() {
   const { topics } = await client.topics();
   loadKeys(topics).catch((e) => { $("keyMsg").textContent = `${e.code ?? "error"}: ${e.message}`; });
-  $("topicRows").innerHTML = topics.map((t) => `<tr><td><code>${esc(t.name)}</code></td><td><code>${esc(JSON.stringify(t.policy))}</code></td><td><button class="secondary" data-edit="${esc(t.name)}">Edit</button></td></tr>`).join("") || `<tr><td colspan=3 class="muted">No topics yet. Publishing to @${esc(me.handle)}/anything creates one.</td></tr>`;
-  document.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => {
+  $("topicRows").innerHTML = topics.map((t) => `<tr><td><code>${esc(t.name)}</code></td><td>${esc(t.endpoint_subscriptions ?? 0)}</td><td><code>${esc(JSON.stringify(t.policy))}</code></td><td><button class="secondary" data-edit="${esc(t.name)}">Edit</button></td></tr>`).join("") || `<tr><td colspan=4 class="muted">No topics yet. Publishing to @${esc(me.handle)}/anything creates one.</td></tr>`;
+  document.querySelectorAll("[data-edit]").forEach((b) => b.onclick = async () => {
     const t = topics.find((x) => x.name === b.dataset.edit);
-    $("topicName").value = t.name; $("topicPolicy").value = JSON.stringify(t.policy, null, 2);
+    $("topicName").value = t.name;
+    $("topicPolicy").value = JSON.stringify(t.policy, null, 2);
+    syncFormFromPolicy(t.policy);
+    $("topicSubs").hidden = true;
+    try {
+      const detail = await client.request("GET", `/v1/topics/${t.name}`);
+      if (detail.subscribers) {
+        $("topicSubs").hidden = false;
+        $("topicSubs").textContent = `Subscribers right now: ${detail.subscribers.live} live connection${detail.subscribers.live === 1 ? "" : "s"}, ${detail.subscribers.queued} verified endpoint${detail.subscribers.queued === 1 ? "" : "s"}.`;
+      }
+    } catch {}
   });
 }
 // ---------- E2EE topic keys (spec §5.1) ----------

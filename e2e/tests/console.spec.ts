@@ -179,3 +179,26 @@ test("the live inbox filters by priority and tags and jumps to a message trace",
   await expect(page.locator("#traceOut")).toContainText("Delivery plan");
   await expect(page.locator("#traceOut")).toContainText("deliver_live");
 });
+
+test("the topic policy controls configure retention, signatures, and the topic kill switch", async ({ page, request }) => {
+  const acct = await bootstrap(request, 1);
+  const topic = `@${acct.handle}/controlled`;
+  expect((await request.post(`/${topic}`, { headers: auth(acct.token), data: "hello" })).status()).toBe(200);
+
+  await signIn(page, acct.token);
+  await page.locator('#tabs button[data-tab="topics"]').click();
+  await page.locator(`#topicRows button[data-edit="${topic}"]`).click();
+  await expect(page.locator("#topicSubs")).toContainText("0 live connections, 0 verified endpoints");
+
+  await page.locator("#polRetentionH").fill("24");
+  await page.locator("#polPaused").check();
+  await page.locator("#topicSave").click();
+  await expect(page.locator("#topicMsg")).toHaveText("Saved.");
+  await expect(page.locator("#topicRows")).toContainText('"paused":true');
+  await expect(page.locator("#topicRows")).toContainText('"retention_s":86400');
+
+  // The relay enforces the kill switch immediately.
+  const blocked = await request.post(`/${topic}`, { headers: auth(acct.token), data: "blocked?" });
+  expect(blocked.status()).toBe(403);
+  expect(((await blocked.json()) as { error: string }).error).toBe("topic_paused");
+});

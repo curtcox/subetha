@@ -89,13 +89,40 @@
     <section data-panel="topics" hidden>
       <div class="card">
         <h3>Your topics</h3>
-        <table><thead><tr><th>Topic</th><th>Policy</th><th></th></tr></thead><tbody id="topicRows"></tbody></table>
+        <div class="scroll"><table><thead><tr><th>Topic</th><th>Endpoints</th><th>Policy</th><th></th></tr></thead><tbody id="topicRows"></tbody></table></div>
       </div>
       <div class="card">
         <h3>Create or update a topic</h3>
-        <label>Topic</label><input id="topicName" placeholder="@you/alerts or t_… (generate)">
-        <p><button id="genSecret" class="secondary">Generate secret topic name</button></p>
-        <label>Policy (JSON)</label><textarea id="topicPolicy" rows="6">{ "public_publish": false, "retention_s": 43200 }</textarea>
+        <div class="row">
+          <div><label for="topicName">Topic</label><input id="topicName" placeholder="@you/alerts or t_… (generate)"></div>
+          <button id="genSecret" type="button" class="secondary">Generate secret topic name</button>
+        </div>
+        <p id="topicSubs" class="muted" hidden></p>
+        <fieldset id="polForm">
+          <legend>Policy controls</legend>
+          <p>
+            <label class="check"><input type="checkbox" id="polPub"> Public publish</label>
+            <label class="check"><input type="checkbox" id="polRead"> Public read</label>
+            <label class="check"><input type="checkbox" id="polSig"> Require device signature</label>
+            <label class="check"><input type="checkbox" id="polPaused"> Pause topic (kill switch)</label>
+          </p>
+          <div class="row">
+            <div><label for="polRetentionH">Retention (hours, max 720)</label><input id="polRetentionH" type="number" min="0" max="720" step="1" placeholder="12"></div>
+            <div><label for="polDailyCap">Daily cap (USD)</label><input id="polDailyCap" type="number" min="0" step="0.01" placeholder="none"></div>
+            <div><label for="polMaxMsg">Max cost / message (USD)</label><input id="polMaxMsg" type="number" min="0" step="0.001" placeholder="none"></div>
+          </div>
+          <div class="row">
+            <div><label for="polQuietStart">Quiet hours UTC start</label><input id="polQuietStart" type="time"></div>
+            <div><label for="polQuietEnd">Quiet hours UTC end</label><input id="polQuietEnd" type="time"></div>
+            <div><label for="polAllow">Allow transports</label><input id="polAllow" placeholder="blank = all"></div>
+            <div><label for="polDeny">Deny transports</label><input id="polDeny" placeholder="sms,voice"></div>
+          </div>
+          <label for="polEmailSenders">Allowed inbound email senders (comma-separated, * = anyone)</label><input id="polEmailSenders" placeholder="alerts@example.com">
+        </fieldset>
+        <details>
+          <summary>Raw policy JSON</summary>
+          <textarea id="topicPolicy" rows="6">{ "public_publish": false, "retention_s": 43200 }</textarea>
+        </details>
         <p><button id="topicSave">Save</button> <span id="topicMsg" class="muted"></span></p>
       </div>
       <div class="card" id="keysCard">

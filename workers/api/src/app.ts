@@ -368,16 +368,23 @@ app.delete("/v1/tokens/:id", async (c) => {
 // ---------------- topics ----------------
 app.get("/v1/topics", async (c) => {
   const id = requireAdmin(await principal(c));
-  const { results } = await c.env.DB.prepare("SELECT name, policy, created_at FROM topics WHERE owner_account_id = ? ORDER BY name").bind(id).all();
-  return c.json({ topics: results.map((r) => ({ name: r.name, policy: JSON.parse(r.policy as string), created_at: r.created_at })) });
+  const { results } = await c.env.DB.prepare(
+    `SELECT t.name, t.policy, t.created_at,
+            (SELECT COUNT(*) FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id
+              WHERE s.topic = t.name AND e.verified_at IS NOT NULL) AS endpoint_subscriptions
+       FROM topics t WHERE t.owner_account_id = ? ORDER BY t.name`,
+  ).bind(id).all();
+  return c.json({ topics: results.map((r) => ({ name: r.name, policy: JSON.parse(r.policy as string), endpoint_subscriptions: Number(r.endpoint_subscriptions ?? 0), created_at: r.created_at })) });
 });
 
 app.get("/v1/topics/:topic{.+}", async (c) => {
   const id = requireAdmin(await principal(c));
   const name = c.req.param("topic");
-  const meta = await topicStub(c.env, name).getMeta();
+  const stub = topicStub(c.env, name);
+  const meta = await stub.getMeta();
   if (!meta || meta.owner !== id) throw new ApiError("not_found");
-  return c.json(meta);
+  const subscribers = await stub.subscriberCounts();
+  return c.json({ ...meta, subscribers });
 });
 
 app.put("/v1/topics/:topic{.+}", async (c) => {
