@@ -28,9 +28,39 @@ const rememberKeys = () => load(KEYRING) !== null;
 function saveKeyring(remember = rememberKeys()) { store(KEYRING, remember ? JSON.stringify(keyring) : null); }
 const topicKeysFor = () => Object.fromEntries(Object.entries(keyring).map(([t, k]) => [t, { kid: k.kid, key: SubEtha.protocol.base64urlDecode(k.key) }]));
 
+// "This browser" as a device (PLAN §11): an Ed25519 seed in local storage.
+const BROWSER_SEED = "subetha.browserDeviceSeed";
+let browserDeviceKey = null;
+async function loadBrowserDeviceKey() {
+  const raw = load(BROWSER_SEED);
+  if (!raw) return (browserDeviceKey = null);
+  try {
+    const seed = SubEtha.protocol.base64urlDecode(raw);
+    if (seed.length !== 32) return (browserDeviceKey = null);
+    return (browserDeviceKey = await SubEtha.protocol.deviceKeyFromSeed(seed));
+  } catch {
+    return (browserDeviceKey = null);
+  }
+}
+function browserCapabilities() {
+  const caps = ["ws"];
+  if ("PushManager" in window) caps.push("webpush");
+  if ("AudioContext" in window || "webkitAudioContext" in window) caps.push("audio");
+  if (navigator.mediaDevices) caps.push("qr");
+  if ("bluetooth" in navigator) caps.push("ble");
+  return caps;
+}
+function syncBrowserDeviceControls() {
+  $("pubSignWrap").hidden = !browserDeviceKey;
+  if (!browserDeviceKey) $("pubSign").checked = false;
+  $("keyLoadBrowser").hidden = !browserDeviceKey;
+}
+
 async function makeClient() {
   const token = await getToken();
-  return token ? new SubEtha({ baseUrl: location.origin, token, topicKeys: topicKeysFor() }) : null;
+  await loadBrowserDeviceKey();
+  syncBrowserDeviceControls();
+  return token ? new SubEtha({ baseUrl: location.origin, token, deviceKey: browserDeviceKey ?? undefined, topicKeys: topicKeysFor() }) : null;
 }
 
 async function init() {
@@ -130,7 +160,7 @@ document.querySelectorAll("#tabs button").forEach((b) => b.onclick = () => {
 
 function pubOpts() {
   const tags = $("pubTags").value.split(",").map((s) => s.trim()).filter(Boolean);
-  return { title: $("pubTitle").value || undefined, priority: Number($("pubPrio").value), tags, route: { mode: $("pubMode").value } };
+  return { title: $("pubTitle").value || undefined, priority: Number($("pubPrio").value), tags, route: { mode: $("pubMode").value }, sign: !!(browserDeviceKey && $("pubSign").checked) };
 }
 
 $("pubBtn").onclick = async () => {
@@ -228,6 +258,7 @@ async function loadKeyRows() {
 }
 function renderLocalKeys() {
   $("keyRemember").checked = rememberKeys();
+  syncBrowserDeviceControls();
   $("localKeyRows").innerHTML = Object.entries(keyring).map(([t, k]) => `<tr><td><code>${esc(t)}</code></td><td><code>${esc(k.kid)}</code></td><td><button class="secondary" data-keyforget="${esc(t)}">Forget</button></td></tr>`).join("") || `<tr><td class="muted">No keys in this browser.</td></tr>`;
   document.querySelectorAll("[data-keyforget]").forEach((b) => b.onclick = () => useKey(b.dataset.keyforget, null));
 }
@@ -501,9 +532,62 @@ $("slackBind").onclick = async () => {
 };
 
 // ---------- devices ----------
+function renderThisBrowser(devices) {
+  syncBrowserDeviceControls();
+  const mine = browserDeviceKey ? devices.find((d) => d.id === browserDeviceKey.deviceId && !d.revoked_at) : null;
+  if (mine) {
+    $("thisDevStatus").innerHTML = `<span class="ok">Enrolled</span> as <b>${esc(mine.name || "This browser")}</b> (<code>${esc(mine.id)}</code>) · capabilities: <code>${esc((mine.capabilities ?? []).join(", "))}</code>`;
+    $("thisDevSetup").hidden = true;
+    $("thisDevActions").hidden = false;
+  } else {
+    $("thisDevStatus").textContent = browserDeviceKey
+      ? "This browser has a local key, but it isn't active on this account (it may have been revoked)."
+      : `Not enrolled yet. Detected capabilities: ${browserCapabilities().join(", ")}.`;
+    $("thisDevSetup").hidden = false;
+    $("thisDevActions").hidden = true;
+  }
+}
+async function loadWrappedKeysForBrowser(say) {
+  if (!browserDeviceKey) return say("Enroll this browser as a device first.");
+  try {
+    const devClient = new SubEtha({ baseUrl: location.origin, deviceKey: browserDeviceKey, signRequests: true });
+    const loaded = await devClient.loadTopicKeys();
+    const topics = Object.keys(loaded);
+    for (const [t, k] of Object.entries(loaded)) {
+      useKey(t, { kid: k.kid, key: SubEtha.protocol.base64urlEncode(k.key) });
+    }
+    say(topics.length ? `Loaded ${topics.length} topic key${topics.length > 1 ? "s" : ""}: ${topics.join(", ")}.` : "No wrapped keys are addressed to this browser.");
+  } catch (e) { say(`${e.code ?? "error"}: ${e.message}`); }
+}
+$("thisDevEnroll").onclick = async () => {
+  const say = (t) => { $("thisDevMsg").textContent = t; };
+  try {
+    const key = await SubEtha.protocol.generateDeviceKey();
+    const proof = await SubEtha.enrollmentProof(key);
+    await client.request("POST", "/v1/devices", { ...proof, name: $("thisDevName").value.trim() || "This browser", capabilities: browserCapabilities() });
+    store(BROWSER_SEED, SubEtha.protocol.base64urlEncode(key.seed));
+    client = await makeClient();
+    say(`Enrolled ${key.deviceId}.`);
+    loadDevices();
+  } catch (e) { say(`${e.code ?? "error"}: ${e.message}`); }
+};
+$("thisDevLoadKeys").onclick = () => loadWrappedKeysForBrowser((t) => { $("thisDevMsg").textContent = t; });
+$("keyLoadBrowser").onclick = () => loadWrappedKeysForBrowser((t) => { $("keyMsg").textContent = t; });
+$("thisDevRevoke").onclick = async () => {
+  if (!browserDeviceKey) return;
+  if (!confirm("Revoke and forget this browser's device key?")) return;
+  const id = browserDeviceKey.deviceId;
+  await client.request("DELETE", `/v1/devices/${encodeURIComponent(id)}`).catch(() => {});
+  store(BROWSER_SEED, null);
+  client = await makeClient();
+  $("thisDevMsg").textContent = "Revoked and forgotten.";
+  loadDevices();
+};
+
 async function loadDevices() {
   const { devices } = await client.request("GET", "/v1/devices");
-  $("devRows").innerHTML = devices.map((d) => `<tr><td>${esc(d.name || "")}</td><td><code title="${esc(d.id)}">${esc(d.id.slice(0, 14))}…</code></td><td>${esc((d.capabilities ?? []).join(", "))}</td><td>${esc(when(d.last_seen_at))}</td><td>${d.revoked_at ? '<span class="bad">revoked</span>' : '<span class="ok">active</span>'}</td><td>${d.revoked_at ? "" : `<button class="secondary" data-devrevoke="${esc(d.id)}">Revoke</button>`}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No devices yet.</td></tr>`;
+  renderThisBrowser(devices);
+  $("devRows").innerHTML = devices.map((d) => `<tr><td>${esc(d.name || "")}${browserDeviceKey?.deviceId === d.id && !d.revoked_at ? ' <span class="muted">(this browser)</span>' : ""}</td><td><code title="${esc(d.id)}">${esc(d.id.slice(0, 14))}…</code></td><td>${esc((d.capabilities ?? []).join(", "))}</td><td>${esc(when(d.last_seen_at))}</td><td>${d.revoked_at ? '<span class="bad">revoked</span>' : '<span class="ok">active</span>'}</td><td>${d.revoked_at ? "" : `<button class="secondary" data-devrevoke="${esc(d.id)}">Revoke</button>`}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No devices yet.</td></tr>`;
   document.querySelectorAll("[data-devrevoke]").forEach((b) => b.onclick = async () => {
     if (!confirm("Revoke this device? It can no longer sign requests.")) return;
     await client.request("DELETE", `/v1/devices/${encodeURIComponent(b.dataset.devrevoke)}`).catch((e) => alert(e.message));

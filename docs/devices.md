@@ -35,7 +35,7 @@ The owner's side, and direct enrollment when the device can hand you its id and 
 
 <!-- include: samples/curl/device-flow.sh -->
 
-In the console, paste that JSON into **Devices → Enroll with a proof** within 5 minutes of making it.
+In the console, paste that JSON into **Devices → Enroll with a proof** within 5 minutes of making it. To give your current browser its own device identity (for signing messages and unwrapping E2EE topic keys directly in the console), use **Devices → This browser → Enroll this browser**.
 
 ## Signed requests
 

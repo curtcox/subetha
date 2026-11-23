@@ -50,6 +50,7 @@
             <div><label>Route</label><select id="pubMode"><option>any</option><option>fast</option><option>all</option><option>cheap</option></select></div>
             <div><label>Tags</label><input id="pubTags" placeholder="a,b"></div>
           </div>
+          <p id="pubSignWrap" hidden><label class="check"><input id="pubSign" type="checkbox"> Sign with this browser's device key</label></p>
           <p class="row"><button id="pubBtn">Publish</button><button id="dryBtn" class="secondary">Simulate route &amp; cost</button><select id="copyLang" aria-label="Copy as"></select><button id="curlBtn" class="secondary">Copy</button></p>
           <pre id="pubOut" hidden></pre>
         </div>
@@ -86,7 +87,7 @@
         <h4>Keys in this browser</h4>
         <p class="muted">These decrypt the inbox and encrypt what this console sends to the topic. Paste a key shared with you out of band to add it.</p>
         <div class="row"><input id="keyAddTopic" placeholder="@you/topic" aria-label="Topic"><input id="keyAddKid" placeholder="key id" aria-label="Key id"><input id="keyAddKey" placeholder="key (base64url, 43 characters)" aria-label="Key" autocomplete="off"><button id="keyAdd" class="secondary">Add</button></div>
-        <p><label class="check"><input type="checkbox" id="keyRemember"> Remember keys in this browser (stored unencrypted in its local storage)</label></p>
+        <p><label class="check"><input type="checkbox" id="keyRemember"> Remember keys in this browser (stored unencrypted in its local storage)</label> <button id="keyLoadBrowser" class="secondary" hidden>Load wrapped keys for this browser</button></p>
         <table><tbody id="localKeyRows"></tbody></table>
       </div>
     </section>
@@ -156,6 +157,20 @@
     </section>
 
     <section data-panel="devices" hidden>
+      <div class="card" id="thisBrowserCard">
+        <h3>This browser</h3>
+        <p class="muted">Give this browser its own Ed25519 device key (stored in local storage) so it can sign messages and unwrap E2EE topic keys addressed to it.</p>
+        <p id="thisDevStatus" class="muted">Checking…</p>
+        <div id="thisDevSetup" class="row" hidden>
+          <div><label for="thisDevName">Device name</label><input id="thisDevName" value="This browser"></div>
+          <button id="thisDevEnroll">Enroll this browser</button>
+        </div>
+        <p id="thisDevActions" class="row" hidden>
+          <button id="thisDevLoadKeys" class="secondary">Load wrapped E2EE keys</button>
+          <button id="thisDevRevoke" class="secondary">Revoke &amp; forget</button>
+        </p>
+        <p id="thisDevMsg" class="muted"></p>
+      </div>
       <div class="grid">
         <div class="card">
           <h3>Approve a device</h3>

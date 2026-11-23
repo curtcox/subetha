@@ -2,7 +2,7 @@
 //   <subetha-feed topic="@me/doorbell" token="se_…"></subetha-feed>
 //   <subetha-send topic="@me/doorbell" token="se_…"></subetha-send>
 // Use publishable (origin-bound, single-topic, capped) tokens on public pages.
-import { SubEtha } from "./client.ts";
+import { enrollmentProof, SubEtha } from "./client.ts";
 import * as protocol from "./protocol/index.ts";
 import { subscribeWebPush } from "./webpush.ts";
 
@@ -76,4 +76,4 @@ class SubEthaSend extends HTMLElement {
 if (!customElements.get("subetha-feed")) customElements.define("subetha-feed", SubEthaFeed);
 if (!customElements.get("subetha-send")) customElements.define("subetha-send", SubEthaSend);
 
-(globalThis as Record<string, unknown>).SubEtha = Object.assign(SubEtha, { protocol, subscribeWebPush });
+(globalThis as Record<string, unknown>).SubEtha = Object.assign(SubEtha, { protocol, subscribeWebPush, enrollmentProof });
