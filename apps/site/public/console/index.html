@@ -202,6 +202,12 @@
           <label><input id="capPaused" type="checkbox" style="width:auto"> Pause the account (kill switch)</label>
           <p><button id="capSave">Save limits</button> <span id="capMsg" class="muted"></span></p>
         </div>
+        <div class="card">
+          <h3>SMS &amp; voice countries</h3>
+          <p class="muted">US numbers are always allowed. Numbers elsewhere need their country enabled, and are priced daily from the carrier's current rates; a country without a price today can't be reached.</p>
+          <div id="telCountries" class="muted" style="max-height:18rem;overflow:auto">Loading…</div>
+          <p><button id="telSave">Save countries</button> <span id="telMsg" class="muted"></span></p>
+        </div>
       </div>
       <div class="card"><h3>Usage</h3><div id="usageChart" class="muted">Loading…</div></div>
       <div class="card"><h3>Ledger</h3><table><thead><tr><th>#</th><th>Kind</th><th>Amount</th><th>Available after</th><th>Ref</th><th>Time</th></tr></thead><tbody id="ledgerRows"></tbody></table></div>

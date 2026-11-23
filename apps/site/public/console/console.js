@@ -229,7 +229,28 @@ $("capSave").onclick = async () => {
   } catch (e) { $("capMsg").textContent = `${e.code}: ${e.message}`; }
 };
 
+const perUnit = (p, tier) => (p ? `$${((p[tier] ?? p.standard) / 1e6).toFixed(4)}` : "—");
+async function loadTelephonyCountries() {
+  const box = $("telCountries");
+  try {
+    const { countries, updated_at } = await client.request("GET", "/v1/prices/destinations");
+    const on = new Set(me.telephony_countries ?? []);
+    box.innerHTML = `<table><thead><tr><th></th><th>Country</th><th>SMS / segment</th><th>Voice / min</th></tr></thead><tbody>${Object.entries(countries).map(([iso, c]) =>
+      `<tr><td><input type="checkbox" data-country="${esc(iso)}" style="width:auto" ${on.has(iso) ? "checked" : ""} aria-label="${esc(c.name)}"></td><td>${esc(c.name)} <small class="muted">${esc(c.calling_code)}</small></td><td>${perUnit(c.sms_usd_micros, me.tier)}</td><td>${perUnit(c.voice_usd_micros_per_minute, me.tier)}</td></tr>`).join("")}</tbody></table>` +
+      `<small class="muted">${updated_at ? `Prices updated ${new Date(updated_at * 1000).toLocaleString()} (${esc(me.tier)} tier).` : "No prices yet today."}</small>`;
+  } catch (e) { box.textContent = `${e.code ?? "error"}: ${e.message}`; }
+}
+$("telSave").onclick = async () => {
+  try {
+    const list = [...document.querySelectorAll("[data-country]")].filter((x) => x.checked).map((x) => x.dataset.country);
+    await client.request("PATCH", "/v1/account", { telephony_countries: list });
+    me = await client.account();
+    $("telMsg").textContent = "Saved.";
+  } catch (e) { $("telMsg").textContent = `${e.code}: ${e.message}`; }
+};
+
 async function loadBilling() {
+  loadTelephonyCountries();
   client.request("GET", "/v1/usage?days=30").then((u) => renderUsageChart($("usageChart"), u)).catch((e) => { $("usageChart").textContent = `${e.code ?? "error"}: ${e.message}`; });
   $("capDaily").value = toUsdInput(me.daily_cap_micros);
   $("capOauth").value = toUsdInput(me.oauth_daily_cap_micros);
