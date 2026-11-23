@@ -1,6 +1,6 @@
-// Clerk session JWT verification (RS256 via JWKS) using WebCrypto.
+// Clerk session JWT verification (RS256 via JWKS) and Svix webhook verification using WebCrypto.
 import { base64urlDecode, utf8 } from "@subetha/sdk/protocol";
-import { b64urlJson } from "./crypto.ts";
+import { b64urlJson, timingSafeEqual } from "./crypto.ts";
 import type { Env } from "./types.ts";
 
 interface Jwk { kid: string; kty: string; n: string; e: string; alg?: string }
@@ -24,6 +24,9 @@ export interface ClerkClaims {
   nbf?: number;
   azp?: string;
   org_id?: string;
+  org_role?: string;
+  /** Clerk JWT v2 compact org claim: `{ id, rol }`. */
+  o?: { id?: string; rol?: string };
   email?: string;
   /** OAuth access tokens (RFC 9068): the client the token was issued to, its scopes, and audience. */
   client_id?: string;
@@ -31,6 +34,18 @@ export interface ClerkClaims {
   aud?: string | string[];
   /** JOSE header `typ` (`at+jwt` for OAuth access tokens). */
   typ?: string;
+}
+
+/** Extracts organization id and role from Clerk v1 (`org_id`/`org_role`) or v2 (`o.id`/`o.rol`) claims. */
+export function orgContext(claims: ClerkClaims): { orgId?: string; orgRole?: string } {
+  const orgId = claims.org_id ?? claims.o?.id;
+  const orgRole = claims.org_role ?? claims.o?.rol;
+  return { ...(orgId ? { orgId } : {}), ...(orgRole ? { orgRole } : {}) };
+}
+
+/** Whether a Clerk organization role grants admin rights on the shared org account. */
+export function isOrgAdminRole(role: string | undefined): boolean {
+  return role === "org:admin" || role === "admin";
 }
 
 /** An OAuth access token (for an MCP client or other OAuth app), as opposed to a browser session. */
@@ -58,4 +73,40 @@ export async function verifyClerkJwt(token: string, env: Env, nowSec = Math.floo
   } catch {
     return null;
   }
+}
+
+function svixSecretBytes(secret: string): Uint8Array {
+  const raw = secret.startsWith("whsec_") ? secret.slice(6) : secret;
+  return Uint8Array.from(atob(raw), (c) => c.charCodeAt(0));
+}
+
+async function svixMacBase64(secret: string, signedContent: string): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", svixSecretBytes(secret) as BufferSource, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, utf8.encode(signedContent) as BufferSource));
+  return btoa(String.fromCharCode(...mac));
+}
+
+/** Signs a Clerk/Svix webhook payload (`svix-signature` header value: `v1,<base64>`). */
+export async function signClerkWebhook(payload: string, secret: string, svixId: string, svixTimestamp: string): Promise<string> {
+  return `v1,${await svixMacBase64(secret, `${svixId}.${svixTimestamp}.${payload}`)}`;
+}
+
+/** Verifies Clerk/Svix webhook headers (`svix-id`, `svix-timestamp`, `svix-signature`) with 5-minute tolerance. */
+export async function verifyClerkWebhook(
+  payload: string,
+  headers: { id: string | null; timestamp: string | null; signature: string | null },
+  secret: string,
+  nowSec = Math.floor(Date.now() / 1000),
+): Promise<boolean> {
+  const { id, timestamp, signature } = headers;
+  if (!id || !timestamp || !signature || !/^\d+$/.test(timestamp)) return false;
+  if (Math.abs(nowSec - Number(timestamp)) > 300) return false;
+  let expected: string;
+  try {
+    expected = await svixMacBase64(secret, `${id}.${timestamp}.${payload}`);
+  } catch {
+    return false;
+  }
+  const sigs = signature.split(/\s+/).filter((s) => s.startsWith("v1,")).map((s) => s.slice(3));
+  return sigs.some((s) => timingSafeEqual(s, expected));
 }

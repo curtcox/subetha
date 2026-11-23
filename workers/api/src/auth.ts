@@ -1,6 +1,6 @@
 // Request authentication: API tokens, Clerk session JWTs, anonymous (PLAN §9).
 import { TRANSPORTS, type Transport } from "@subetha/sdk/protocol";
-import { verifyClerkJwt } from "./clerk.ts";
+import { isOrgAdminRole, orgContext, verifyClerkJwt } from "./clerk.ts";
 import { fromJwt, introspect, introspectionConfigured, oauthPrincipal } from "./oauth.ts";
 import { authenticateDevice } from "./devices.ts";
 import { randomBase32, sha256Hex, timingSafeEqual } from "./crypto.ts";
@@ -109,9 +109,10 @@ export async function authenticate(req: Request, env: Env): Promise<Principal> {
     if (!claims) throw new ApiError("unauthorized", "invalid session");
     const oauth = fromJwt(claims);
     if (oauth) return await oauthPrincipal(env, oauth, new URL(req.url).origin);
-    const clerkId = claims.org_id ?? claims.sub;
+    const { orgId, orgRole } = orgContext(claims);
+    const clerkId = orgId ?? claims.sub;
     const row = await env.DB.prepare("SELECT id FROM accounts WHERE clerk_id = ?").bind(clerkId).first<{ id: string }>();
-    return { kind: "user", accountId: row?.id ?? null, clerkId };
+    return { kind: "user", accountId: row?.id ?? null, clerkId, ...(orgId ? { orgId, orgRole } : {}) };
   }
   // Anything else may be an opaque OAuth access token from the authorization server.
   if (introspectionConfigured(env) && /^[\x21-\x7e]{16,4096}$/.test(cred)) {
@@ -172,5 +173,6 @@ export function requireAdmin(p: Principal): string {
   const id = requireAccount(p);
   if (p.kind === "device") throw new ApiError("forbidden", "devices can publish and subscribe but not manage the account");
   if (p.kind === "token" && !scopeAllows(p.scopes, "admin")) throw new ApiError("forbidden", "token lacks admin scope");
+  if (p.kind === "user" && p.orgId && !isOrgAdminRole(p.orgRole)) throw new ApiError("forbidden", "organization admin role required");
   return id;
 }

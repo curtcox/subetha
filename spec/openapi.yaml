@@ -1801,6 +1801,25 @@ paths:
         "200":
           description: OK (or the url_verification challenge).
         "401": { $ref: "#/components/responses/Error" }
+  /v1/hooks/clerk:
+    post:
+      tags: [hooks]
+      operationId: clerkWebhook
+      summary: Clerk lifecycle webhook (user.updated email sync; user.deleted and organization.deleted pause account and revoke credentials)
+      security: []
+      parameters:
+        - { name: svix-id, in: header, required: true, schema: { type: string } }
+        - { name: svix-timestamp, in: header, required: true, schema: { type: string } }
+        - { name: svix-signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Received (idempotent by svix-id).
+        "401": { $ref: "#/components/responses/Error" }
 
   # ------------------------------------------------------------------ dev
   /v1/dev/bootstrap:

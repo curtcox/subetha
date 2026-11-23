@@ -12,6 +12,7 @@ import { accountStub } from "./durable/account.ts";
 import { topicStub, type SubscribeParams } from "./durable/topic.ts";
 import { ApiError, reviveError, unwrap } from "./errors.ts";
 import { parseFilter, parseHeaderPublish, parseJsonPublish, parseTopicPath, type ParsedPublish } from "./ntfy.ts";
+import { isOrgAdminRole, verifyClerkWebhook } from "./clerk.ts";
 import { createCheckoutSession, verifyStripeSignature } from "./stripe.ts";
 import type { Env, Principal, TopicMeta } from "./types.ts";
 import { registerControlRoutes, syncAccountEndpoints } from "./control.ts";
@@ -162,6 +163,7 @@ app.get("/v1/account", async (c) => {
 app.post("/v1/account", async (c) => {
   const p = await principal(c);
   if (p.kind !== "user") throw new ApiError("unauthorized", "sign in with Clerk to create an account");
+  if (p.orgId && !isOrgAdminRole(p.orgRole)) throw new ApiError("forbidden", "organization admin role required");
   if (p.accountId) throw new ApiError("conflict", "account already exists");
   const body = (await c.req.json().catch(() => ({}))) as { handle?: string; email?: string };
   const handle = body.handle === undefined ? null : validateHandle(body.handle);
@@ -353,6 +355,66 @@ app.post("/v1/hooks/stripe", async (c) => {
     await c.env.DB.prepare("INSERT INTO stripe_events (id, type, created_at) VALUES (?, ?, ?)").bind(evt.id, evt.type, Date.now()).run();
   }
   return c.json({ received: true });
+});
+
+app.post("/v1/hooks/clerk", async (c) => {
+  if (!c.env.CLERK_WEBHOOK_SECRET) throw new ApiError("provider_unavailable");
+  const payload = await c.req.text();
+  const svixId = c.req.header("svix-id") ?? null;
+  const ok = await verifyClerkWebhook(
+    payload,
+    { id: svixId, timestamp: c.req.header("svix-timestamp") ?? null, signature: c.req.header("svix-signature") ?? null },
+    c.env.CLERK_WEBHOOK_SECRET,
+  );
+  if (!ok) throw new ApiError("unauthorized", "bad Clerk signature");
+  const dedupeKey = `clerk_evt:${svixId}`;
+  if (await c.env.CACHE.get(dedupeKey)) return c.json({ received: true, duplicate: true });
+  await c.env.CACHE.put(dedupeKey, "1", { expirationTtl: 86_400 });
+
+  let evt: { type?: string; data?: Record<string, unknown> };
+  try {
+    evt = JSON.parse(payload) as { type?: string; data?: Record<string, unknown> };
+  } catch {
+    throw new ApiError("bad_request", "invalid Clerk webhook JSON");
+  }
+  const data = evt.data ?? {};
+  const clerkId = typeof data.id === "string" ? data.id : null;
+  if (!clerkId) return c.json({ received: true, ignored: true });
+
+  const acct = await c.env.DB.prepare("SELECT id, email, daily_cap_micros, monthly_cap_micros FROM accounts WHERE clerk_id = ?")
+    .bind(clerkId)
+    .first<{ id: string; email: string | null; daily_cap_micros: number | null; monthly_cap_micros: number | null }>();
+  if (!acct) return c.json({ received: true, ignored: true });
+
+  if (evt.type === "user.updated") {
+    const emails = Array.isArray(data.email_addresses) ? (data.email_addresses as { id?: string; email_address?: string }[]) : [];
+    const primaryId = typeof data.primary_email_address_id === "string" ? data.primary_email_address_id : null;
+    const primary = (primaryId ? emails.find((e) => e.id === primaryId) : emails[0])?.email_address ?? null;
+    if (primary && primary !== acct.email) {
+      await c.env.DB.prepare("UPDATE accounts SET email = ? WHERE id = ?").bind(primary, acct.id).run();
+      await invalidateAccount(c.env, acct.id);
+      await audit(c.env, acct.id, "clerk", "account.email_updated", { via: "clerk_webhook" });
+    }
+    return c.json({ received: true });
+  }
+
+  if (evt.type === "user.deleted" || evt.type === "organization.deleted") {
+    const now = Date.now();
+    const { results: tokRows } = await c.env.DB.prepare("SELECT id FROM tokens WHERE account_id = ? AND revoked_at IS NULL").bind(acct.id).all<{ id: string }>();
+    await c.env.DB.batch([
+      c.env.DB.prepare("UPDATE accounts SET paused = 1, auto_recharge = NULL WHERE id = ?").bind(acct.id),
+      c.env.DB.prepare("UPDATE tokens SET revoked_at = ? WHERE account_id = ? AND revoked_at IS NULL").bind(now, acct.id),
+      c.env.DB.prepare("UPDATE devices SET revoked_at = ? WHERE account_id = ? AND revoked_at IS NULL").bind(now, acct.id),
+    ]);
+    for (const r of tokRows) await invalidateToken(c.env, r.id);
+    await accountStub(c.env, acct.id).setAutoRecharge(null);
+    await accountStub(c.env, acct.id).setControls({ paused: true, dailyCapMicros: acct.daily_cap_micros, monthlyCapMicros: acct.monthly_cap_micros });
+    await invalidateAccount(c.env, acct.id);
+    await audit(c.env, acct.id, "clerk", "account.clerk_deleted", { event: evt.type, revoked_tokens: tokRows.length });
+    return c.json({ received: true });
+  }
+
+  return c.json({ received: true, ignored: true });
 });
 
 // ---------------- tokens ----------------

@@ -22,6 +22,7 @@ export default defineConfig(async () => {
             DEV_BOOTSTRAP_SECRET: "test-secret",
             CLERK_ISSUER: "https://clerk.test",
             CLERK_JWKS: JSON.stringify({ keys: [pub] }),
+            CLERK_WEBHOOK_SECRET: "whsec_dGVzdC1jbGVyay13ZWJob29rLXNlY3JldA==",
             OAUTH_CLIENT_ID: "subetha-rs",
             OAUTH_CLIENT_SECRET: "rs-secret",
             WEBHOOK_SIGNING_SECRET: "test",

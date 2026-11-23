@@ -28,6 +28,7 @@ export interface Env {
   CLERK_JWKS_URL?: string;
   CLERK_JWKS?: string; // inline JWKS JSON (local/test)
   CLERK_AUTHORIZED_PARTIES?: string; // comma-separated
+  CLERK_WEBHOOK_SECRET?: string; // Svix signing secret (whsec_…)
   // OAuth resource server (MCP): RFC 7662 introspection of opaque access tokens (oauth.ts)
   OAUTH_INTROSPECTION_URL?: string; // default ${CLERK_ISSUER}/oauth/token_info
   OAUTH_CLIENT_ID?: string;
@@ -79,7 +80,7 @@ export interface TopicMeta {
 export type Principal =
   | { kind: "anonymous" }
   | { kind: "token"; accountId: string; tokenId: string; scopes: string[]; caps: { daily: number | null; total: number | null }; transports: Transport[] | null }
-  | { kind: "user"; accountId: string | null; clerkId: string }
+  | { kind: "user"; accountId: string | null; clerkId: string; orgId?: string; orgRole?: string }
   | { kind: "device"; accountId: string; deviceId: string; transports: Transport[] | null; denyTransports: Transport[] | null };
 
 /** The part of a principal that crosses into Durable Objects. */
