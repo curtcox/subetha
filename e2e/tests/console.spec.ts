@@ -109,11 +109,16 @@ test("a token made in the console is limited to its scopes", async ({ page, requ
   await page.locator('#tabs button[data-tab="tokens"]').click();
   await page.locator("#tokName").fill("doorbell only");
   await page.locator("#tokScopes").fill(`publish:@${acct.handle}/doorbell`);
+  await page.locator("#tokDaily").fill("0.50");
+  await page.locator("#tokTotal").fill("2.00");
+  await page.locator("#tokExpires").fill("24");
   await page.locator("#tokCreate").click();
   await expect(page.locator("#tokOut")).toContainText("Shown once");
   const token = ((await page.locator("#tokOut").textContent()) ?? "").split("\n")[0]?.trim() ?? "";
   expect(token).toMatch(/^se_/);
   await expect(page.locator("#tokenRows")).toContainText("doorbell only");
+  await expect(page.locator("#tokenRows")).toContainText("$0.50/day");
+  await expect(page.locator("#tokenRows")).toContainText("$2.00 total");
 
   expect((await request.post(`/@${acct.handle}/doorbell`, { headers: auth(token), data: "ding" })).status()).toBe(200);
   expect((await request.post(`/@${acct.handle}/garage`, { headers: auth(token), data: "ding" })).status()).toBe(403);
@@ -171,4 +176,6 @@ test("the live inbox filters by priority and tags and jumps to a message trace",
   await item.getByRole("button", { name: "Trace" }).click();
   await expect(page.locator('[data-panel="traces"]')).toBeVisible();
   await expect(page.locator("#traceOut")).toContainText(id);
+  await expect(page.locator("#traceOut")).toContainText("Delivery plan");
+  await expect(page.locator("#traceOut")).toContainText("deliver_live");
 });

@@ -3,6 +3,7 @@ import { LANGUAGES, LANGUAGE_NAMES, snippet } from "./snippets.js";
 import { buildRequest, operations, toCurl } from "./explorer.js";
 import { renderUsageChart } from "./usage-chart.js";
 import { renderInspection, verifyWebhookSignature } from "./inspector.js";
+import { renderTrace } from "./trace.js";
 
 const $ = (id) => document.getElementById(id);
 const usd = (micros) => `$${(micros / 1e6).toFixed(micros < 10000 ? 6 : 2)}`;
@@ -399,22 +400,34 @@ $("topicSave").onclick = async () => {
 
 async function loadTokens() {
   const { tokens } = await client.listTokens();
-  $("tokenRows").innerHTML = tokens.map((t) => `<tr><td>${esc(t.name || t.id)}</td><td><code>${esc(t.scopes.join(" "))}</code></td><td>${t.daily_cap_micros != null ? usd(t.daily_cap_micros) + "/day" : ""}</td><td>${t.revoked_at ? '<span class="bad">revoked</span>' : '<span class="ok">active</span>'}</td><td>${t.revoked_at ? "" : `<button class="secondary" data-revoke="${esc(t.id)}">Revoke</button>`}</td></tr>`).join("");
+  const capsOf = (t) => [
+    t.daily_cap_micros != null ? `${usd(t.daily_cap_micros)}/day` : "",
+    t.total_cap_micros != null ? `${usd(t.total_cap_micros)} total` : "",
+    t.transports?.length ? `transports: ${t.transports.join(",")}` : "",
+    t.origins?.length ? `origins: ${t.origins.join(",")}` : "",
+    t.ips?.length ? `ips: ${t.ips.join(",")}` : "",
+  ].filter(Boolean).join(" · ");
+  const statusOf = (t) => t.revoked_at ? '<span class="bad">revoked</span>' : (t.expires_at && t.expires_at < Date.now() ? '<span class="bad">expired</span>' : '<span class="ok">active</span>');
+  $("tokenRows").innerHTML = tokens.map((t) => `<tr><td>${esc(t.name || t.id)}</td><td><code>${esc(t.scopes.join(" "))}</code></td><td>${esc(capsOf(t))}</td><td>${esc(t.expires_at ? when(t.expires_at) : "never")}</td><td>${statusOf(t)}</td><td>${t.revoked_at ? "" : `<button class="secondary" data-revoke="${esc(t.id)}">Revoke</button>`}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No API tokens yet.</td></tr>`;
   document.querySelectorAll("[data-revoke]").forEach((b) => b.onclick = async () => { await client.revokeToken(b.dataset.revoke); loadTokens(); });
 }
 $("tokCreate").onclick = async () => {
   const list = (v) => v.split(",").map((s) => s.trim()).filter(Boolean);
   const out = $("tokOut"); out.hidden = false;
   try {
+    const expHours = $("tokExpires").value.trim();
     const t = await client.createToken({
       name: $("tokName").value || undefined,
       scopes: list($("tokScopes").value),
       daily_cap_usd: $("tokDaily").value ? Number($("tokDaily").value) : undefined,
+      total_cap_usd: $("tokTotal").value ? Number($("tokTotal").value) : undefined,
+      expires_in_s: expHours ? Math.round(Number(expHours) * 3600) : undefined,
       transports: $("tokTransports").value ? list($("tokTransports").value) : undefined,
       origins: $("tokOrigins").value ? list($("tokOrigins").value) : undefined,
       ips: $("tokIps").value ? list($("tokIps").value) : undefined,
     });
-    out.textContent = `${t.token}\n\nShown once. Example:\ncurl -H "Authorization: Bearer ${t.token}" -d hi ${location.origin}/<topic>`;
+    const topicHint = t.scopes[0]?.includes(":") ? t.scopes[0].split(":").slice(1).join(":").replace(/\*$/, "test") : "<topic>";
+    out.textContent = `${t.token}\n\nShown once. Example:\ncurl -H "Authorization: Bearer ${t.token}" -d hi ${location.origin}/${topicHint}`;
     loadTokens();
   } catch (e) { out.textContent = `${e.code}: ${e.message}`; }
 };
@@ -521,8 +534,8 @@ $("topupBtn").onclick = async () => {
 
 $("traceBtn").onclick = async () => {
   const out = $("traceOut"); out.hidden = false;
-  try { out.textContent = JSON.stringify(await client.trace($("traceTopic").value.trim(), $("traceId").value.trim()), null, 2); }
-  catch (e) { out.textContent = `${e.code}: ${e.message}`; }
+  try { out.innerHTML = renderTrace(await client.trace($("traceTopic").value.trim(), $("traceId").value.trim())); }
+  catch (e) { out.innerHTML = `<p class="bad">${esc(e.code ?? "error")}: ${esc(e.message)}</p>`; }
 };
 
 // ---------- endpoints, subscriptions, Slack ----------
@@ -531,10 +544,11 @@ const PLACEHOLDER = { email: "you@example.com", sms: "+15551234567", voice: "+15
 $("epKind").onchange = () => { $("epAddr").placeholder = PLACEHOLDER[$("epKind").value] ?? ""; };
 let endpoints = [];
 async function loadEndpoints() {
-  const [eps, subs, teams] = await Promise.all([
+  const [eps, subs, teams, bindings] = await Promise.all([
     client.request("GET", "/v1/endpoints"),
     client.request("GET", "/v1/subscriptions"),
     client.request("GET", "/v1/slack/teams").catch(() => ({ teams: [] })),
+    client.request("GET", "/v1/slack/bindings").catch(() => ({ bindings: [] })),
   ]);
   endpoints = eps.endpoints;
   $("epRows").innerHTML = endpoints.map((e) => `<tr><td>${esc(e.kind)}</td><td><code>${esc(e.address)}</code>${e.name ? ` <span class="muted">${esc(e.name)}</span>` : ""}${e.inbound_topic ? `<br><span class="muted">texts in → <code>${esc(e.inbound_topic)}</code></span>` : ""}</td><td>${e.verified ? '<span class="ok">verified</span>' : `<span class="row"><input data-code="${esc(e.id)}" placeholder="6-digit code" inputmode="numeric" maxlength="6" aria-label="Verification code"><button class="secondary" data-verify="${esc(e.id)}">Verify</button></span>`}</td><td>${e.verified && e.kind !== "webpush" ? `<button class="secondary" data-eptest="${esc(e.id)}">Test</button> ` : ""}${e.verified && e.kind === "sms" ? `<button class="secondary" data-epinbound="${esc(e.id)}">Texts in…</button> ` : ""}<button class="secondary" data-epdel="${esc(e.id)}">Delete</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">No endpoints yet. "Notify this browser" on Send / receive adds a Web Push one.</td></tr>`;
@@ -543,6 +557,13 @@ async function loadEndpoints() {
   $("subRows").innerHTML = subs.subscriptions.map((s) => `<tr><td><code>${esc(s.topic)}</code></td><td>${esc(label(s.endpoint_id))}</td><td>${s.after_s ? `${s.after_s}s` : "now"}</td><td>${s.min_priority ?? ""}</td><td><code>${esc([s.filter?.tags?.length ? `tags ${s.filter.tags.join(",")}` : "", s.filter?.priority?.length ? `priority ${s.filter.priority.join(",")}` : ""].filter(Boolean).join("; "))}</code></td><td><button class="secondary" data-subdel="${esc(s.id)}">Remove</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">No endpoint subscriptions.</td></tr>`;
   $("slackTeam").innerHTML = teams.teams.map((t) => `<option value="${esc(t.team_id)}">${esc(t.team_name || t.team_id)}</option>`).join("") || `<option value="">Install the app first</option>`;
   if (slackTeamHint && teams.teams.some((t) => t.team_id === slackTeamHint)) $("slackTeam").value = slackTeamHint;
+  $("slackBindingRows").innerHTML = (bindings.bindings ?? []).map((b) => `<tr><td>${esc(b.team_name || b.team_id)}</td><td><code>${esc(b.channel)}</code></td><td><code>${esc(b.topic)}</code></td><td><button class="secondary" data-slackunbind-team="${esc(b.team_id)}" data-slackunbind-ch="${esc(b.channel)}">Unbind</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">No bound channels.</td></tr>`;
+  document.querySelectorAll("[data-slackunbind-ch]").forEach((b) => b.onclick = async () => {
+    if (!confirm("Unbind this Slack channel?")) return;
+    const q = new URLSearchParams({ team_id: b.dataset.slackunbindTeam, channel: b.dataset.slackunbindCh });
+    await client.request("DELETE", `/v1/slack/bindings?${q}`).catch((e) => alert(e.message));
+    loadEndpoints();
+  });
   const h = me?.handle ? `@${me.handle}/` : "";
   $("subTopicNew").value ||= $("pubTopic").value || `${h}alerts`;
   $("slackTopic").value ||= $("subTopicNew").value;

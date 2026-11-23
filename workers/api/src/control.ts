@@ -431,6 +431,35 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     return c.json({ teams: results });
   });
 
+  /** List Slack channel ↔ topic bindings for this account. */
+  app.get("/v1/slack/bindings", async (c) => {
+    const accountId = requireAdmin(await principal(c));
+    const { results } = await c.env.DB.prepare(
+      `SELECT b.team_id, t.team_name, b.channel, b.topic, b.endpoint_id, b.created_at
+         FROM slack_bindings b LEFT JOIN slack_teams t ON t.team_id = b.team_id AND t.account_id = b.account_id
+        WHERE b.account_id = ? ORDER BY b.created_at DESC`,
+    ).bind(accountId).all<{ team_id: string; team_name: string | null; channel: string; topic: string; endpoint_id: string | null; created_at: number }>();
+    return c.json({ bindings: results });
+  });
+
+  /** Unbind a Slack channel from its topic (and remove the outbound endpoint if one was created). */
+  app.delete("/v1/slack/bindings", async (c) => {
+    const p = await principal(c);
+    const accountId = requireAdmin(p);
+    const teamId = c.req.query("team_id") ?? "", channel = c.req.query("channel") ?? "";
+    if (!teamId || !channel) throw new ApiError("bad_request", "team_id and channel query parameters are required");
+    const row = await c.env.DB.prepare("SELECT topic, endpoint_id FROM slack_bindings WHERE team_id = ? AND channel = ? AND account_id = ?").bind(teamId, channel, accountId).first<{ topic: string; endpoint_id: string | null }>();
+    if (!row) throw new ApiError("not_found");
+    await c.env.DB.prepare("DELETE FROM slack_bindings WHERE team_id = ? AND channel = ? AND account_id = ?").bind(teamId, channel, accountId).run();
+    if (row.endpoint_id) {
+      await c.env.DB.prepare("DELETE FROM subscriptions WHERE endpoint_id = ?").bind(row.endpoint_id).run();
+      await c.env.DB.prepare("DELETE FROM endpoints WHERE id = ? AND account_id = ?").bind(row.endpoint_id, accountId).run();
+      await syncTopicSubscriptions(c.env, row.topic);
+    }
+    await audit(c.env, accountId, p.kind, "slack.unbind", { team_id: teamId, channel, topic: row.topic });
+    return c.json({ deleted: true });
+  });
+
   /** Bind a Slack channel to a topic: messages flow both ways (topic → channel via an endpoint; channel → topic via Events). */
   app.post("/v1/slack/bindings", async (c) => {
     const accountId = requireAdmin(await principal(c));

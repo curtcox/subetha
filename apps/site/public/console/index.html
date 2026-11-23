@@ -160,6 +160,7 @@
             <div><label for="slackTopic">Topic</label><input id="slackTopic"></div>
           </div>
           <p><button id="slackBind">Bind channel</button> <span id="slackMsg" class="muted"></span></p>
+          <div class="scroll"><table><thead><tr><th>Workspace</th><th>Channel</th><th>Topic</th><th></th></tr></thead><tbody id="slackBindingRows"></tbody></table></div>
         </div>
       </div>
       <div class="card">
@@ -218,19 +219,23 @@
     <section data-panel="tokens" hidden>
       <div class="card">
         <h3>API tokens</h3>
-        <table><thead><tr><th>Name</th><th>Scopes</th><th>Caps</th><th>Status</th><th></th></tr></thead><tbody id="tokenRows"></tbody></table>
+        <div class="scroll"><table><thead><tr><th>Name</th><th>Scopes</th><th>Caps &amp; restrictions</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody id="tokenRows"></tbody></table></div>
       </div>
       <div class="card">
         <h3>Token builder</h3>
         <div class="row">
-          <div><label>Name</label><input id="tokName"></div>
-          <div><label>Scopes (comma-separated)</label><input id="tokScopes" placeholder="publish:@you/*, subscribe:@you/doorbell"></div>
+          <div><label for="tokName">Name</label><input id="tokName"></div>
+          <div><label for="tokScopes">Scopes (comma-separated)</label><input id="tokScopes" placeholder="publish:@you/*, subscribe:@you/doorbell"></div>
         </div>
         <div class="row">
-          <div><label>Daily cap (USD)</label><input id="tokDaily" type="number" step="0.01"></div>
-          <div><label>Transports (blank = all)</label><input id="tokTransports" placeholder="ws,webpush"></div>
-          <div><label>Origins (publishable token)</label><input id="tokOrigins" placeholder="https://example.com"></div>
-          <div><label>Client IPs (blank = any)</label><input id="tokIps" placeholder="203.0.113.0/24"></div>
+          <div><label for="tokDaily">Daily cap (USD)</label><input id="tokDaily" type="number" min="0" step="0.01"></div>
+          <div><label for="tokTotal">Total cap (USD)</label><input id="tokTotal" type="number" min="0" step="0.01"></div>
+          <div><label for="tokExpires">Expires in (hours, blank = never)</label><input id="tokExpires" type="number" min="1" step="1"></div>
+        </div>
+        <div class="row">
+          <div><label for="tokTransports">Transports (blank = all)</label><input id="tokTransports" placeholder="ws,webpush"></div>
+          <div><label for="tokOrigins">Origins (publishable token)</label><input id="tokOrigins" placeholder="https://example.com"></div>
+          <div><label for="tokIps">Client IPs (blank = any)</label><input id="tokIps" placeholder="203.0.113.0/24"></div>
         </div>
         <p><button id="tokCreate">Create token</button></p>
         <pre id="tokOut" hidden></pre>
@@ -302,8 +307,9 @@
     <section data-panel="traces" hidden>
       <div class="card">
         <h3>Message trace</h3>
+        <p class="muted">Delivery plan, cost breakdown, escalation events, and ack status for one message.</p>
         <div class="row"><input id="traceTopic" placeholder="@you/doorbell"><input id="traceId" placeholder="message id"><button id="traceBtn">Show</button></div>
-        <pre id="traceOut" hidden></pre>
+        <div id="traceOut" hidden></div>
       </div>
     </section>
   </div>
