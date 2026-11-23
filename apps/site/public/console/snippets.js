@@ -1,7 +1,7 @@
 // "Copy as …" for the message composer (PLAN §10): the same publish in curl and every SDK.
 // Pure: takes the composer's fields, returns source text. Tested in apps/site/test/snippets.test.ts.
 
-/** @typedef {{ baseUrl: string, topic: string, message: string, title?: string, priority?: number, tags?: string[], click?: string, mode?: string, maxCostUsd?: number, deadlineS?: number, deny?: string[] }} Pub */
+/** @typedef {{ baseUrl: string, topic: string, message: string, title?: string, priority?: number, tags?: string[], click?: string, icon?: string, markdown?: boolean, idempotencyKey?: string, mode?: string, maxCostUsd?: number, deadlineS?: number, deny?: string[], allow?: string[] }} Pub */
 
 export const LANGUAGES = ["curl", "js", "python", "swift", "kotlin", "dart"];
 export const LANGUAGE_NAMES = { curl: "curl", js: "JavaScript", python: "Python", swift: "Swift", kotlin: "Kotlin", dart: "Dart" };
@@ -22,10 +22,14 @@ function norm(p) {
     priority: p.priority && p.priority !== 3 ? p.priority : undefined,
     tags: (p.tags ?? []).filter(Boolean),
     click: p.click || undefined,
+    icon: p.icon || undefined,
+    markdown: !!p.markdown,
+    idempotencyKey: p.idempotencyKey || undefined,
     mode: p.mode && p.mode !== "any" ? p.mode : undefined,
     maxCostUsd: typeof p.maxCostUsd === "number" && !Number.isNaN(p.maxCostUsd) ? p.maxCostUsd : undefined,
     deadlineS: typeof p.deadlineS === "number" && Number.isInteger(p.deadlineS) && p.deadlineS >= 1 ? p.deadlineS : undefined,
     deny: (p.deny ?? []).filter(Boolean),
+    allow: (p.allow ?? []).filter(Boolean),
   };
 }
 
@@ -33,7 +37,7 @@ function norm(p) {
 export function snippet(lang, pub) {
   const p = norm(pub);
   const custom = p.baseUrl !== DEFAULT_BASE;
-  const hasRoute = p.mode || p.maxCostUsd !== undefined || p.deadlineS !== undefined || p.deny.length;
+  const hasRoute = p.mode || p.maxCostUsd !== undefined || p.deadlineS !== undefined || p.deny.length || p.allow.length;
   switch (lang) {
     case "curl": {
       const parts = ["curl", `-H "Authorization: Bearer $SUBETHA_TOKEN"`];
@@ -41,10 +45,14 @@ export function snippet(lang, pub) {
       if (p.priority) parts.push(`-H "X-Priority: ${p.priority}"`);
       if (p.tags.length) parts.push(`-H ${sq(`X-Tags: ${p.tags.join(",")}`)}`);
       if (p.click) parts.push(`-H ${sq(`X-Click: ${p.click}`)}`);
+      if (p.icon) parts.push(`-H ${sq(`X-Icon: ${p.icon}`)}`);
+      if (p.markdown) parts.push(`-H "X-Markdown: 1"`);
+      if (p.idempotencyKey) parts.push(`-H ${sq(`Idempotency-Key: ${p.idempotencyKey}`)}`);
       if (p.mode) parts.push(`-H "X-Route-Mode: ${p.mode}"`);
       if (p.maxCostUsd !== undefined) parts.push(`-H "X-Max-Cost: ${p.maxCostUsd}"`);
       if (p.deadlineS !== undefined) parts.push(`-H "X-Deadline: ${p.deadlineS}"`);
       if (p.deny.length) parts.push(`-H "X-Deny: ${p.deny.join(",")}"`);
+      if (p.allow.length) parts.push(`-H "X-Allow: ${p.allow.join(",")}"`);
       parts.push(`-d ${sq(p.message)}`, sq(`${p.baseUrl}/${p.topic}`));
       return parts.join(" \\\n  ");
     }
@@ -54,12 +62,16 @@ export function snippet(lang, pub) {
       if (p.priority) o.push(`priority: ${p.priority}`);
       if (p.tags.length) o.push(`tags: ${JSON.stringify(p.tags)}`);
       if (p.click) o.push(`click: ${dq(p.click)}`);
+      if (p.icon) o.push(`icon: ${dq(p.icon)}`);
+      if (p.markdown) o.push(`contentType: "text/markdown"`);
+      if (p.idempotencyKey) o.push(`idempotencyKey: ${dq(p.idempotencyKey)}`);
       if (hasRoute) {
         const r = [];
         if (p.mode) r.push(`mode: ${dq(p.mode)}`);
         if (p.maxCostUsd !== undefined) r.push(`maxCostUsd: ${p.maxCostUsd}`);
         if (p.deadlineS !== undefined) r.push(`deadlineS: ${p.deadlineS}`);
         if (p.deny.length) r.push(`deny: ${JSON.stringify(p.deny)}`);
+        if (p.allow.length) r.push(`allow: ${JSON.stringify(p.allow)}`);
         o.push(`route: { ${r.join(", ")} }`);
       }
       return `import { SubEtha } from "@subetha/sdk";
@@ -73,12 +85,16 @@ await se.publish(${dq(p.topic)}, ${dq(p.message)}${o.length ? `, { ${o.join(", "
       if (p.priority) a.push(`priority=${p.priority}`);
       if (p.tags.length) a.push(`tags=${JSON.stringify(p.tags)}`);
       if (p.click) a.push(`click=${py(p.click)}`);
+      if (p.icon) a.push(`icon=${py(p.icon)}`);
+      if (p.markdown) a.push(`content_type="text/markdown"`);
+      if (p.idempotencyKey) a.push(`idempotency_key=${py(p.idempotencyKey)}`);
       if (hasRoute) {
         const r = [];
         if (p.mode) r.push(`"mode": ${py(p.mode)}`);
         if (p.maxCostUsd !== undefined) r.push(`"max_cost_usd_micros": ${Math.floor(p.maxCostUsd * 1e6)}`);
         if (p.deadlineS !== undefined) r.push(`"deadline_s": ${p.deadlineS}`);
         if (p.deny.length) r.push(`"deny": ${JSON.stringify(p.deny)}`);
+        if (p.allow.length) r.push(`"allow": ${JSON.stringify(p.allow)}`);
         a.push(`route={${r.join(", ")}}`);
       }
       return `import os
@@ -93,12 +109,15 @@ c.publish(${a.join(", ")})`;
       if (p.priority) o.push(`priority: ${p.priority}`);
       if (p.tags.length) o.push(`tags: ${JSON.stringify(p.tags)}`);
       if (p.click) o.push(`click: ${dq(p.click)}`);
+      if (p.markdown) o.push(`contentType: "text/markdown"`);
+      if (p.idempotencyKey) o.push(`idempotencyKey: ${dq(p.idempotencyKey)}`);
       if (hasRoute) {
         const r = [];
         if (p.mode) r.push(`mode: .${p.mode}`);
         if (p.maxCostUsd !== undefined) r.push(`maxCostUSD: ${p.maxCostUsd}`);
         if (p.deadlineS !== undefined) r.push(`deadlineSeconds: ${p.deadlineS}`);
         if (p.deny.length) r.push(`deny: ${JSON.stringify(p.deny)}`);
+        if (p.allow.length) r.push(`allow: ${JSON.stringify(p.allow)}`);
         o.push(`route: Route(${r.join(", ")})`);
       }
       return `import SubEtha
@@ -112,12 +131,15 @@ try await client.publish(${dq(p.topic)}, ${dq(p.message)}${o.length ? `, Publish
       if (p.priority) o.push(`priority = ${p.priority}`);
       if (p.tags.length) o.push(`tags = listOf(${p.tags.map(kt).join(", ")})`);
       if (p.click) o.push(`click = ${kt(p.click)}`);
+      if (p.markdown) o.push(`contentType = "text/markdown"`);
+      if (p.idempotencyKey) o.push(`idempotencyKey = ${kt(p.idempotencyKey)}`);
       if (hasRoute) {
         const r = [];
         if (p.mode) r.push(`mode = RouteMode.${p.mode.toUpperCase()}`);
         if (p.maxCostUsd !== undefined) r.push(`maxCostUsd = ${p.maxCostUsd}`);
         if (p.deadlineS !== undefined) r.push(`deadlineS = ${p.deadlineS}`);
         if (p.deny.length) r.push(`deny = listOf(${p.deny.map(kt).join(", ")})`);
+        if (p.allow.length) r.push(`allow = listOf(${p.allow.map(kt).join(", ")})`);
         o.push(`route = Route(${r.join(", ")})`);
       }
       return `import us.subetha.*
@@ -131,12 +153,15 @@ client.publish(${kt(p.topic)}, ${kt(p.message)}${o.length ? `, PublishOptions(${
       if (p.priority) o.push(`priority: ${p.priority}`);
       if (p.tags.length) o.push(`tags: [${p.tags.map(dartStr).join(", ")}]`);
       if (p.click) o.push(`click: ${dartStr(p.click)}`);
+      if (p.markdown) o.push(`contentType: 'text/markdown'`);
+      if (p.idempotencyKey) o.push(`idempotencyKey: ${dartStr(p.idempotencyKey)}`);
       if (hasRoute) {
         const r = [];
         if (p.mode) r.push(`mode: RouteMode.${p.mode}`);
         if (p.maxCostUsd !== undefined) r.push(`maxCostUsd: ${p.maxCostUsd}`);
         if (p.deadlineS !== undefined) r.push(`deadlineS: ${p.deadlineS}`);
         if (p.deny.length) r.push(`deny: [${p.deny.map(dartStr).join(", ")}]`);
+        if (p.allow.length) r.push(`allow: [${p.allow.map(dartStr).join(", ")}]`);
         o.push(`route: Route(${r.join(", ")})`);
       }
       return `import 'dart:io';

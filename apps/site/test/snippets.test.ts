@@ -13,7 +13,7 @@ const has = (cmd: string) => {
   }
 };
 
-const tricky = { baseUrl: "http://localhost:8787/", topic: "@me/door", message: `It's "open" $HOME \\ ok\nline2`, title: "Front's $door", priority: 5, tags: ["door", "warn"], click: "https://example.com/cam", mode: "all", maxCostUsd: 0.05, deadlineS: 60, deny: ["sms"] };
+const tricky = { baseUrl: "http://localhost:8787/", topic: "@me/door", message: `It's "open" $HOME \\ ok\nline2`, title: "Front's $door", priority: 5, tags: ["door", "warn"], click: "https://example.com/cam", icon: "https://example.com/bell.png", markdown: true, idempotencyKey: "k-123", mode: "all", maxCostUsd: 0.05, deadlineS: 60, deny: ["sms"], allow: ["ws", "webpush"] };
 const plain = { baseUrl: "https://subetha.us", topic: "@me/door", message: "hi", priority: 3, mode: "any" };
 
 describe("copy as …", () => {
@@ -40,6 +40,13 @@ describe("copy as …", () => {
     expect(snippet("kotlin", tricky)).toContain("RouteMode.ALL");
     expect(snippet("kotlin", tricky)).toContain(`"Front's \\$door"`);
     expect(snippet("dart", tricky)).toContain(`'Front\\'s \\$door'`);
+    expect(snippet("curl", tricky)).toContain(`-H "X-Allow: ws,webpush"`);
+    expect(snippet("curl", tricky)).toContain(`-H "X-Markdown: 1"`);
+    expect(snippet("curl", tricky)).toContain(`-H 'Idempotency-Key: k-123'`);
+    expect(snippet("js", tricky)).toContain(`allow: ["ws","webpush"]`);
+    expect(snippet("js", tricky)).toContain(`contentType: "text/markdown"`);
+    expect(snippet("python", tricky)).toContain(`"allow": ["ws","webpush"]`);
+    expect(snippet("python", tricky)).toContain(`content_type="text/markdown"`);
     expect(snippet("js", tricky)).toContain(`baseUrl: "http://localhost:8787"`);
   });
 

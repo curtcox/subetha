@@ -186,12 +186,14 @@ function parseActionsInput(raw) {
 function pubOpts() {
   const tags = $("pubTags").value.split(",").map((s) => s.trim()).filter(Boolean);
   const deny = $("pubDeny").value.split(",").map((s) => s.trim()).filter(Boolean);
+  const allow = $("pubAllow").value.split(",").map((s) => s.trim()).filter(Boolean);
   const maxRaw = $("pubMaxCost").value.trim();
   const deadlineRaw = $("pubDeadline").value.trim();
   const route = { mode: $("pubMode").value };
   if (maxRaw !== "") route.maxCostUsd = Number(maxRaw);
   if (deadlineRaw !== "") route.deadlineS = Math.floor(Number(deadlineRaw));
   if (deny.length) route.deny = deny;
+  if (allow.length) route.allow = allow;
   const o = {
     title: $("pubTitle").value || undefined,
     priority: Number($("pubPrio").value),
@@ -244,7 +246,12 @@ $("copyLang").onchange = () => store("subetha.copyLang", $("copyLang").value);
 $("curlBtn").onclick = async () => {
   try {
     const o = pubOpts();
-    const text = snippet($("copyLang").value, { baseUrl: location.origin, topic: $("pubTopic").value.trim(), message: $("pubMsg").value || "triggered", title: o.title, priority: o.priority, tags: o.tags, click: o.click, mode: o.route.mode, maxCostUsd: o.route.maxCostUsd, deadlineS: o.route.deadlineS, deny: o.route.deny });
+    const text = snippet($("copyLang").value, {
+      baseUrl: location.origin, topic: $("pubTopic").value.trim(), message: $("pubMsg").value || "triggered",
+      title: o.title, priority: o.priority, tags: o.tags, click: o.click, icon: o.icon,
+      markdown: o.contentType === "text/markdown", idempotencyKey: o.idempotencyKey,
+      mode: o.route.mode, maxCostUsd: o.route.maxCostUsd, deadlineS: o.route.deadlineS, deny: o.route.deny, allow: o.route.allow,
+    });
     $("pubOut").hidden = false; $("pubOut").textContent = text;
     await navigator.clipboard?.writeText(text).catch(() => {});
   } catch (e) { $("pubOut").hidden = false; $("pubOut").textContent = `${e.code ?? "error"}: ${e.message}`; }
@@ -534,7 +541,8 @@ async function loadTokens() {
   const capsOf = (t) => [
     t.daily_cap_micros != null ? `${usd(t.daily_cap_micros)}/day` : "",
     t.total_cap_micros != null ? `${usd(t.total_cap_micros)} total` : "",
-    t.transports?.length ? `transports: ${t.transports.join(",")}` : "",
+    t.transports?.length ? `allow: ${t.transports.join(",")}` : "",
+    t.deny_transports?.length ? `deny: ${t.deny_transports.join(",")}` : "",
     t.origins?.length ? `origins: ${t.origins.join(",")}` : "",
     t.ips?.length ? `ips: ${t.ips.join(",")}` : "",
   ].filter(Boolean).join(" · ");
@@ -554,6 +562,7 @@ $("tokCreate").onclick = async () => {
       total_cap_usd: $("tokTotal").value ? Number($("tokTotal").value) : undefined,
       expires_in_s: expHours ? Math.round(Number(expHours) * 3600) : undefined,
       transports: $("tokTransports").value ? list($("tokTransports").value) : undefined,
+      deny_transports: $("tokDenyTransports").value ? list($("tokDenyTransports").value) : undefined,
       origins: $("tokOrigins").value ? list($("tokOrigins").value) : undefined,
       ips: $("tokIps").value ? list($("tokIps").value) : undefined,
     });
@@ -562,7 +571,8 @@ $("tokCreate").onclick = async () => {
     const embed = origins.length
       ? `\n\nWeb embed (publishable token for ${origins.join(", ")}):\n<script src="${location.origin}/sdk.js"></script>\n<${t.scopes[0]?.startsWith("subscribe:") ? "subetha-feed" : "subetha-send"} topic="${topicHint}" token="${t.token}"></${t.scopes[0]?.startsWith("subscribe:") ? "subetha-feed" : "subetha-send"}>`
       : "";
-    out.textContent = `${t.token}\n\nShown once. Example:\ncurl -H "Authorization: Bearer ${t.token}" -d hi ${location.origin}/${topicHint}${embed}`;
+    const sdkJs = `\n\nJavaScript:\nimport { SubEtha } from "@subetha/sdk";\nconst se = new SubEtha({ baseUrl: ${JSON.stringify(location.origin)}, token: ${JSON.stringify(t.token)} });\nawait se.publish(${JSON.stringify(topicHint)}, "hi");`;
+    out.textContent = `${t.token}\n\nShown once. Example:\ncurl -H "Authorization: Bearer ${t.token}" -d hi ${location.origin}/${topicHint}${sdkJs}${embed}`;
     loadTokens();
   } catch (e) { out.textContent = `${e.code}: ${e.message}`; }
 };
