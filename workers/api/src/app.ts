@@ -299,6 +299,14 @@ app.post("/v1/hooks/stripe", async (c) => {
   const seen = await c.env.DB.prepare("SELECT 1 FROM stripe_events WHERE id = ?").bind(evt.id).first();
   if (seen) return c.json({ received: true, duplicate: true });
   const obj = evt.data.object;
+  const unfreezeIfNeeded = async (accountId: string) => {
+    const r = await c.env.DB.prepare("UPDATE accounts SET frozen_since = NULL WHERE id = ? AND frozen_since IS NOT NULL").bind(accountId).run();
+    if (r.meta.changes) {
+      await invalidateAccount(c.env, accountId);
+      await syncAccountEndpoints(c.env, accountId);
+      await audit(c.env, accountId, "stripe", "account.unfrozen");
+    }
+  };
   if (evt.type === "checkout.session.completed" && obj.payment_status === "paid") {
     const meta = obj.metadata as { account_id?: string } | undefined;
     const accountId = meta?.account_id;
@@ -324,6 +332,7 @@ app.post("/v1/hooks/stripe", async (c) => {
       const nextTier = tierFor(PRICES, (prev?.topups_12mo_micros ?? 0) + amountMicros);
       if (nextTier !== prevTier) await syncAccountTier(c.env, accountId, nextTier);
     }
+    await unfreezeIfNeeded(accountId);
     await invalidateAccount(c.env, accountId);
   } else if ((evt.type === "payment_intent.succeeded" || evt.type === "payment_intent.payment_failed") && (obj.metadata as Record<string, string> | undefined)?.auto_recharge === "1") {
     const accountId = (obj.metadata as Record<string, string>).account_id!;
@@ -334,6 +343,7 @@ app.post("/v1/hooks/stripe", async (c) => {
       emitMetric(c.env, { accountId, event: "topup", revenueMicros: feeMicros, detail: "auto_recharge" });
       await c.env.DB.prepare("INSERT OR IGNORE INTO stripe_payments (payment_intent, account_id, amount_micros, fee_micros, kind, created_at) VALUES (?, ?, ?, ?, 'auto_recharge', ?)").bind(String(obj.id), accountId, amountMicros, feeMicros, Date.now()).run();
       await recomputeAccountTopups12mo(c.env, accountId);
+      await unfreezeIfNeeded(accountId);
     } else {
       await accountStub(c.env, accountId).autoRechargeFailed("card declined");
       await c.env.DB.prepare("UPDATE accounts SET auto_recharge = NULL WHERE id = ?").bind(accountId).run();

@@ -185,6 +185,17 @@ export class Ledger {
     return { ok: true, available: this.available };
   }
 
+  /** Roll back previously tracked token spend when the accompanying operation fails. */
+  refundTokenSpend(tokenId: string, amount: number): void {
+    assertAmount(amount);
+    if (amount === 0) return;
+    const today = day(this.now());
+    const d = Math.min(amount, this.s.getSpend(`t:${tokenId}`, today));
+    const t = Math.min(amount, this.s.getSpend(`t:${tokenId}`, "total"));
+    if (d) this.s.addSpend(`t:${tokenId}`, today, -d);
+    if (t) this.s.addSpend(`t:${tokenId}`, "total", -t);
+  }
+
   /**
    * Grant a credit lease to a hot path (TopicDO). Like a reservation, but settled by the
    * holder returning what it didn't spend. Grants at most `max` and at least `min`.

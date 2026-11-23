@@ -1,7 +1,8 @@
 // Analytics Engine telemetry (PLAN §7) and global / per-account telephony circuit breakers (PLAN §8).
 import { env, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { accountCircuitKey, checkProviderDivergence, checkTelephonyCircuit, CIRCUIT_KEY, tripAccountTelephonyCircuit } from "../src/cron.ts";
+import { accountCircuitKey, checkProviderDivergence, checkTelephonyCircuit, checkTwilioPrices, CIRCUIT_KEY, reconcile, tripAccountTelephonyCircuit } from "../src/cron.ts";
+import { accountStub } from "../src/durable/account.ts";
 import { processJob } from "../src/delivery/consumer.ts";
 import { hmacSha256Hex } from "../src/crypto.ts";
 import { emitMetric, estimatedCostMicros } from "../src/telemetry.ts";
@@ -158,5 +159,39 @@ describe("global and per-account telephony circuit breakers (PLAN §8)", () => {
     const hook = await SELF.fetch(`${BASE}/v1/hooks/stripe`, { method: "POST", headers: { "stripe-signature": sig, "content-type": "application/json" }, body: evt });
     expect(hook.status).toBe(200);
     expect(await E.CACHE.get(accountCircuitKey(b.account_id))).toContain("chargeback dispute");
+  });
+
+  it("credits back released and unused telephony hold reservations and preserves divergence circuit across price checks", async () => {
+    const a = await bootstrap("telhold", 10);
+    const acct = accountStub(E, a.account_id);
+    // Reserve $4 under the $5 new-funds hold, then release -> should still allow another $4 reservation.
+    expect((await acct.reserve(4_000_000, "tel:r1", null, {}, "telephony")).ok).toBe(true);
+    await acct.release("tel:r1");
+    expect((await acct.reserve(4_000_000, "tel:r2", null, {}, "telephony")).ok).toBe(true);
+    // Settle $1 of the $4 reservation -> $3 freed back into the $5 hold, so $4 more fits ($1 + $4 = $5).
+    await acct.settle("tel:r2", 1_000_000);
+    expect((await acct.reserve(4_000_000, "tel:r3", null, {}, "telephony")).ok).toBe(true);
+    // Another $1 now exceeds the $5 hold cap.
+    const over = await acct.reserve(1_000_000, "tel:r4", null, {}, "telephony");
+    expect(over.ok).toBe(false);
+
+    // checkTwilioPrices with healthy list prices does NOT wipe out an active spend-divergence circuit breaker.
+    await E.CACHE.put(CIRCUIT_KEY, "open: provider spend divergence (twilio $2.00 vs metered $1.00)");
+    const envTwilio = { ...E, TWILIO_ACCOUNT_SID: "ACtest", TWILIO_AUTH_TOKEN: "tok" } as Env;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("Messaging")) return Response.json({ outbound_sms_prices: [{ prices: [{ current_price: "0.0079" }] }] });
+      return Response.json({ outbound_prefix_prices: [{ current_price: "0.013" }] });
+    });
+    await checkTwilioPrices(envTwilio);
+    expect(await E.CACHE.get(CIRCUIT_KEY)).toContain("provider spend divergence");
+
+    // reconcile catches missing auto-recharge topups.
+    const now = Date.UTC(2026, 10, 22, 3, 17);
+    await E.DB.prepare("INSERT INTO stripe_events (id, type, account_id, amount_micros, created_at) VALUES (?, 'payment_intent.succeeded', ?, 5000000, ?)")
+      .bind("evt_reconcile_ar", a.account_id, now - 4 * 3_600_000).run();
+    await reconcile(E, now);
+    const missed = await E.DB.prepare("SELECT action FROM audit_log WHERE account_id = ? AND action = 'reconcile.missing_topup'").bind(a.account_id).first<{ action: string }>();
+    expect(missed?.action).toBe("reconcile.missing_topup");
   });
 });

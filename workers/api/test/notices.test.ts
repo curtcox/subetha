@@ -1,5 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { hmacSha256Hex } from "../src/crypto.ts";
 import { meterRent } from "../src/cron.ts";
 import type { Env } from "../src/types.ts";
 import { auth, BASE, bootstrap } from "./helpers.ts";
@@ -58,6 +59,8 @@ describe("frozen-account emails", () => {
     expect(mine()[2]!.subject).toMatch(/were deleted/);
     const eps = await E.DB.prepare("SELECT COUNT(*) AS n FROM endpoints WHERE account_id = ?").bind(a.account_id).first<{ n: number }>();
     expect(eps?.n).toBe(0);
+    const rowAfter = await E.DB.prepare("SELECT frozen_since FROM accounts WHERE id = ?").bind(a.account_id).first<{ frozen_since: number | null }>();
+    expect(rowAfter?.frozen_since).toBeNull();
 
     const { results } = await E.DB.prepare("SELECT detail FROM audit_log WHERE account_id = ? AND action = 'account.notice' ORDER BY id").bind(a.account_id).all<{ detail: string }>();
     expect(results.map((r) => JSON.parse(r.detail).kind)).toEqual(["frozen", "deletion_warning", "deleted"]);
@@ -76,5 +79,25 @@ describe("frozen-account emails", () => {
     await frozenAccount("notice3", null);
     await meterRent(E, t0 + 2 * DAY);
     expect(sent.length).toBe(before);
+  });
+
+  it("unfreezes an account immediately on Stripe checkout top-up", async () => {
+    stubSes();
+    const a = await frozenAccount("unfreeze1", "unfreeze@example.com");
+    await meterRent(E, Date.UTC(2027, 5, 1));
+    const frozen = await E.DB.prepare("SELECT frozen_since FROM accounts WHERE id = ?").bind(a.account_id).first<{ frozen_since: number | null }>();
+    expect(frozen?.frozen_since).not.toBeNull();
+
+    const evt = JSON.stringify({
+      id: "evt_unfreeze_1",
+      type: "checkout.session.completed",
+      data: { object: { id: "cs_unfreeze_1", payment_status: "paid", amount_total: 500, payment_intent: "pi_unfreeze_1", metadata: { account_id: a.account_id } } },
+    });
+    const ts = Math.floor(Date.now() / 1000);
+    const sig = `t=${ts},v1=${await hmacSha256Hex(E.STRIPE_WEBHOOK_SECRET!, `${ts}.${evt}`)}`;
+    const hook = await SELF.fetch(`${BASE}/v1/hooks/stripe`, { method: "POST", headers: { "stripe-signature": sig, "content-type": "application/json" }, body: evt });
+    expect(hook.status).toBe(200);
+    const unfrozen = await E.DB.prepare("SELECT frozen_since FROM accounts WHERE id = ?").bind(a.account_id).first<{ frozen_since: number | null }>();
+    expect(unfrozen?.frozen_since).toBeNull();
   });
 });

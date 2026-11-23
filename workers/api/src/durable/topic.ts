@@ -466,6 +466,7 @@ export class TopicDO extends DurableObject<Env> {
     if (anonymous) this.bump(anonKey, ownerAll);
     this.kvPut(topicKey, topicSpent + ownerTotal);
     this.kvPut(topicMonthKey, topicMonthSpent + ownerTotal);
+    let trackedTokenSpend = 0;
     const rollback = () => {
       if (anonymous) this.bump(anonKey, -ownerAll);
       this.bump(topicKey, -ownerTotal);
@@ -475,8 +476,10 @@ export class TopicDO extends DurableObject<Env> {
 
     // A token of the owner's own account is capped on everything it causes, not just the publish.
     if (caller.tokenId && caller.accountId === meta.owner) {
-      const r = await accountStub(this.env, meta.owner).trackTokenSpend(caller.tokenId, ownerTotal + Math.ceil(retentionNanos / 1000), { tokenDaily: caller.caps.daily, tokenTotal: caller.caps.total });
+      const amt = ownerTotal + Math.ceil(retentionNanos / 1000);
+      const r = await accountStub(this.env, meta.owner).trackTokenSpend(caller.tokenId, amt, { tokenDaily: caller.caps.daily, tokenTotal: caller.caps.total });
       if (!r.ok && r.code === "spend_cap_exceeded") throw rpcError("spend_cap_exceeded", `spend cap reached: ${r.cap}`, { cap: r.cap, remaining_usd_micros: r.remaining });
+      trackedTokenSpend = amt;
     }
 
     // Pay: owner first (lease), then the publisher (direct, with token caps).
@@ -493,6 +496,9 @@ export class TopicDO extends DurableObject<Env> {
     }
     } catch (e) {
       rollback();
+      if (trackedTokenSpend > 0 && caller.tokenId) {
+        await accountStub(this.env, meta.owner).refundTokenSpend(caller.tokenId, trackedTokenSpend).catch(() => {});
+      }
       throw e;
     }
 

@@ -14,6 +14,7 @@ class SqlLedgerStore implements LedgerStore {
       CREATE TABLE IF NOT EXISTS refs (ref TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS entries (seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, amount INTEGER, ref TEXT, available_after INTEGER, reserved_after INTEGER, time INTEGER, meta TEXT);
       CREATE TABLE IF NOT EXISTS spend (key TEXT, period TEXT, amount INTEGER NOT NULL, PRIMARY KEY (key, period));
+      CREATE TABLE IF NOT EXISTS telephony_refs (ref TEXT PRIMARY KEY, amount INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS entries_time ON entries(time);`);
   }
   private get(k: string): number {
@@ -50,6 +51,15 @@ class SqlLedgerStore implements LedgerStore {
   }
   addSpend(key: string, period: string, delta: number) {
     this.sql.exec("INSERT INTO spend (key, period, amount) VALUES (?, ?, ?) ON CONFLICT(key, period) DO UPDATE SET amount = amount + excluded.amount", key, period, delta);
+  }
+  putTelephonyRef(ref: string, amount: number) {
+    this.sql.exec("INSERT OR REPLACE INTO telephony_refs (ref, amount) VALUES (?, ?)", ref, amount);
+  }
+  takeTelephonyRef(ref: string): number | null {
+    const r = this.sql.exec<{ amount: number }>("SELECT amount FROM telephony_refs WHERE ref = ?", ref).toArray()[0];
+    if (!r) return null;
+    this.sql.exec("DELETE FROM telephony_refs WHERE ref = ?", ref);
+    return r.amount;
   }
 }
 
@@ -166,7 +176,10 @@ export class AccountDO extends DurableObject<Env> {
         }
       }
       const r = this.ledger.reserve(amount, ref, { tokenId, caps });
-      if (r.ok && category === "telephony") this.store.addSpend("telephony", "total", amount);
+      if (r.ok && category === "telephony") {
+        this.store.putTelephonyRef(ref, amount);
+        this.store.addSpend("telephony", "total", amount);
+      }
       return r;
     });
   }
@@ -175,12 +188,32 @@ export class AccountDO extends DurableObject<Env> {
     return this.tx(() => this.ledger.trackTokenSpend(tokenId, amount, caps));
   }
 
+  async refundTokenSpend(tokenId: string, amount: number): Promise<void> {
+    this.tx(() => this.ledger.refundTokenSpend(tokenId, amount));
+  }
+
   async settle(ref: string, actual: number) {
-    return this.tx(() => this.ledger.settle(ref, actual));
+    return this.tx(() => {
+      const res = this.ledger.settle(ref, actual);
+      const tel = this.store.takeTelephonyRef(ref);
+      if (tel !== null && res.released > 0) {
+        const back = Math.min(res.released, this.store.getSpend("telephony", "total"));
+        if (back > 0) this.store.addSpend("telephony", "total", -back);
+      }
+      return res;
+    });
   }
 
   async release(ref: string) {
-    return this.tx(() => this.ledger.release(ref));
+    return this.tx(() => {
+      const released = this.ledger.release(ref);
+      const tel = this.store.takeTelephonyRef(ref);
+      if (tel !== null && released > 0) {
+        const back = Math.min(released, this.store.getSpend("telephony", "total"));
+        if (back > 0) this.store.addSpend("telephony", "total", -back);
+      }
+      return released;
+    });
   }
 
   async lease(min: number, max: number, ref: string) {
@@ -270,7 +303,7 @@ export class AccountDO extends DurableObject<Env> {
   }
 }
 
-export type AccountRpc = Pick<AccountDO, "usage" | "balance" | "topup" | "charge" | "reserve" | "settle" | "release" | "lease" | "returnLease" | "adjust" | "entries" | "setAccountId" | "setAutoRecharge" | "autoRechargeFailed" | "trackTokenSpend" | "setControls" | "claimNonce">;
+export type AccountRpc = Pick<AccountDO, "usage" | "balance" | "topup" | "charge" | "reserve" | "settle" | "release" | "lease" | "returnLease" | "adjust" | "entries" | "setAccountId" | "setAutoRecharge" | "autoRechargeFailed" | "trackTokenSpend" | "refundTokenSpend" | "setControls" | "claimNonce">;
 
 export function accountStub(env: Env, accountId: string): AccountRpc {
   return env.ACCOUNT.get(env.ACCOUNT.idFromName(accountId)) as unknown as AccountRpc;

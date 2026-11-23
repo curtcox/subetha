@@ -91,7 +91,9 @@ export async function meterRent(env: Env, now: number) {
         env.DB.prepare("DELETE FROM subscriptions WHERE endpoint_id IN (SELECT id FROM endpoints WHERE account_id = ?)").bind(a.id),
         env.DB.prepare("DELETE FROM endpoints WHERE account_id = ?").bind(a.id),
         env.DB.prepare("UPDATE devices SET revoked_at = ? WHERE account_id = ? AND revoked_at IS NULL").bind(now, a.id),
+        env.DB.prepare("UPDATE accounts SET frozen_since = NULL WHERE id = ?").bind(a.id),
       ]);
+      await invalidateAccount(env, a.id);
       await audit(env, a.id, "cron", "account.resources_deleted", { after_days: GRACE_DAYS });
       await sendAccountNotice(env, a, "deleted", a.frozen_since, GRACE_DAYS);
     } else {
@@ -104,15 +106,37 @@ export async function meterRent(env: Env, now: number) {
   }
 }
 
-/** Compares Stripe top-ups recorded from webhooks with ledger top-ups journaled from AccountDOs. */
+/** Compares Stripe top-ups, refunds, and disputes recorded from webhooks with ledger entries journaled from AccountDOs. */
 export async function reconcile(env: Env, now: number) {
   const since = now - 2 * 86_400_000;
+  const cutoff = now - 3_600_000;
   const { results } = await env.DB.prepare(
     `SELECT s.account_id, SUM(s.amount_micros) AS stripe,
-       (SELECT COUNT(*) FROM ledger_journal j WHERE j.account_id = s.account_id AND j.kind = 'topup' AND j.time >= ?) AS topups
-     FROM stripe_events s WHERE s.type = 'checkout.session.completed' AND s.created_at >= ? AND s.created_at < ? GROUP BY s.account_id`)
-    .bind(since, since, now - 3_600_000).all<{ account_id: string; stripe: number; topups: number }>();
-  for (const r of results) if (r.topups === 0) await audit(env, r.account_id, "cron", "reconcile.missing_topup", { stripe_micros: r.stripe });
+       (SELECT COUNT(*) FROM ledger_journal j WHERE j.account_id = s.account_id AND j.kind = 'topup' AND j.time >= ?) AS topups,
+       (SELECT COALESCE(SUM(j.amount), 0) FROM ledger_journal j WHERE j.account_id = s.account_id AND j.kind = 'topup' AND j.time >= ?) AS credited
+     FROM stripe_events s
+     WHERE s.type IN ('checkout.session.completed', 'payment_intent.succeeded') AND s.account_id IS NOT NULL AND s.created_at >= ? AND s.created_at < ?
+     GROUP BY s.account_id`)
+    .bind(since, since, since, cutoff).all<{ account_id: string; stripe: number; topups: number; credited: number }>();
+  for (const r of results) {
+    if (r.topups === 0) {
+      await audit(env, r.account_id, "cron", "reconcile.missing_topup", { stripe_micros: r.stripe });
+    } else if (r.credited > r.stripe) {
+      await audit(env, r.account_id, "cron", "reconcile.topup_overcredit", { stripe_micros: r.stripe, credited_micros: r.credited });
+    }
+  }
+  const { results: adjEvents } = await env.DB.prepare(
+    `SELECT s.account_id, SUM(s.amount_micros) AS stripe_deducted,
+       (SELECT COUNT(*) FROM ledger_journal j WHERE j.account_id = s.account_id AND j.kind IN ('refund', 'adjust') AND j.time >= ?) AS adjustments
+     FROM stripe_events s
+     WHERE s.type IN ('charge.refunded', 'charge.dispute.created') AND s.account_id IS NOT NULL AND s.amount_micros > 0 AND s.created_at >= ? AND s.created_at < ?
+     GROUP BY s.account_id`)
+    .bind(since, since, cutoff).all<{ account_id: string; stripe_deducted: number; adjustments: number }>();
+  for (const r of adjEvents) {
+    if (r.adjustments === 0) {
+      await audit(env, r.account_id, "cron", "reconcile.missing_adjustment", { stripe_deducted_micros: r.stripe_deducted });
+    }
+  }
 }
 
 /**
@@ -153,7 +177,8 @@ export async function checkTwilioPrices(env: Env) {
       const why = bad.map((c) => (c.max === 0 ? `twilio US ${c.name} price unknown` : `twilio US ${c.name} ${c.max} > ${c.ceiling.toFixed(5)}`)).join("; ");
       await env.CACHE.put(CIRCUIT_KEY, `open: ${why}`, { expirationTtl: 2 * 86_400 });
     } else {
-      await env.CACHE.delete(CIRCUIT_KEY);
+      const existing = await env.CACHE.get(CIRCUIT_KEY);
+      if (existing && !existing.includes("provider spend divergence")) await env.CACHE.delete(CIRCUIT_KEY);
     }
   } catch (e) {
     // Leave the circuit as it was; an open one expires after two days without a successful check.
@@ -185,11 +210,13 @@ export async function checkProviderDivergence(env: Env, now: number): Promise<{ 
     const todayStart = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate());
     const yestStart = todayStart - 86_400_000;
     // In ledger_journal: reserve is -amount and settle/release is +released, so SUM(-amount) is net charged.
+    // Exclude non-telephony deliveries tagged with a non-telephony sku in meta so webhook/email/push revenue cannot mask Twilio losses.
     const row = await env.DB.prepare(
       `SELECT COALESCE(SUM(-amount), 0) AS net
          FROM ledger_journal
         WHERE time >= ? AND time < ? AND kind IN ('reserve', 'settle')
-          AND (ref LIKE 'dlv:%' OR ref LIKE 'verify:%' OR ref LIKE 'test:%' OR ref LIKE 'insms:%')`,
+          AND (ref LIKE 'dlv:%' OR ref LIKE 'verify:%' OR ref LIKE 'test:%' OR ref LIKE 'insms:%')
+          AND (meta IS NULL OR meta NOT LIKE 'sku=%' OR meta LIKE 'sku=deliver_sms%' OR meta LIKE 'sku=deliver_mms%' OR meta LIKE 'sku=deliver_voice%' OR meta LIKE 'sku=deliver_whatsapp%')`,
     ).bind(yestStart, todayStart).first<{ net: number }>();
     const revenueMicros = Math.max(0, Number(row?.net ?? 0));
 
