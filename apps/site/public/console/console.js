@@ -301,7 +301,7 @@ async function loadEndpoints() {
     client.request("GET", "/v1/slack/teams").catch(() => ({ teams: [] })),
   ]);
   endpoints = eps.endpoints;
-  $("epRows").innerHTML = endpoints.map((e) => `<tr><td>${esc(e.kind)}</td><td><code>${esc(e.address)}</code>${e.name ? ` <span class="muted">${esc(e.name)}</span>` : ""}</td><td>${e.verified ? '<span class="ok">verified</span>' : `<span class="row"><input data-code="${esc(e.id)}" placeholder="6-digit code" inputmode="numeric" maxlength="6" aria-label="Verification code"><button class="secondary" data-verify="${esc(e.id)}">Verify</button></span>`}</td><td>${e.verified && e.kind !== "webpush" ? `<button class="secondary" data-eptest="${esc(e.id)}">Test</button> ` : ""}<button class="secondary" data-epdel="${esc(e.id)}">Delete</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">No endpoints yet. "Notify this browser" on Send / receive adds a Web Push one.</td></tr>`;
+  $("epRows").innerHTML = endpoints.map((e) => `<tr><td>${esc(e.kind)}</td><td><code>${esc(e.address)}</code>${e.name ? ` <span class="muted">${esc(e.name)}</span>` : ""}${e.inbound_topic ? `<br><span class="muted">texts in → <code>${esc(e.inbound_topic)}</code></span>` : ""}</td><td>${e.verified ? '<span class="ok">verified</span>' : `<span class="row"><input data-code="${esc(e.id)}" placeholder="6-digit code" inputmode="numeric" maxlength="6" aria-label="Verification code"><button class="secondary" data-verify="${esc(e.id)}">Verify</button></span>`}</td><td>${e.verified && e.kind !== "webpush" ? `<button class="secondary" data-eptest="${esc(e.id)}">Test</button> ` : ""}${e.verified && e.kind === "sms" ? `<button class="secondary" data-epinbound="${esc(e.id)}">Texts in…</button> ` : ""}<button class="secondary" data-epdel="${esc(e.id)}">Delete</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">No endpoints yet. "Notify this browser" on Send / receive adds a Web Push one.</td></tr>`;
   const label = (id) => { const e = endpoints.find((x) => x.id === id); return e ? `${e.kind} ${e.address}` : id; };
   $("subEp").innerHTML = endpoints.filter((e) => e.verified).map((e) => `<option value="${esc(e.id)}">${esc(label(e.id))}</option>`).join("") || `<option value="">No verified endpoints</option>`;
   $("subRows").innerHTML = subs.subscriptions.map((s) => `<tr><td><code>${esc(s.topic)}</code></td><td>${esc(label(s.endpoint_id))}</td><td>${s.after_s ? `${s.after_s}s` : "now"}</td><td>${s.min_priority ?? ""}</td><td><code>${esc([s.filter?.tags?.length ? `tags ${s.filter.tags.join(",")}` : "", s.filter?.priority?.length ? `priority ${s.filter.priority.join(",")}` : ""].filter(Boolean).join("; "))}</code></td><td><button class="secondary" data-subdel="${esc(s.id)}">Remove</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">No endpoint subscriptions.</td></tr>`;
@@ -315,6 +315,13 @@ async function loadEndpoints() {
     const code = document.querySelector(`[data-code="${CSS.escape(id)}"]`).value.trim();
     try { await client.request("POST", `/v1/endpoints/${encodeURIComponent(id)}/verify`, { code }); loadEndpoints(); }
     catch (e) { alert(`${e.code}: ${e.message}`); }
+  });
+  document.querySelectorAll("[data-epinbound]").forEach((b) => b.onclick = async () => {
+    const e = endpoints.find((x) => x.id === b.dataset.epinbound);
+    const topic = prompt("Topic that texts from this number publish to (one you own). Leave empty to turn texting in off.", e?.inbound_topic ?? $("subTopicNew").value);
+    if (topic === null) return;
+    try { await client.request("PATCH", `/v1/endpoints/${encodeURIComponent(b.dataset.epinbound)}`, { inbound_topic: topic.trim() || null }); loadEndpoints(); }
+    catch (err) { alert(`${err.code}: ${err.message}`); }
   });
   document.querySelectorAll("[data-epdel]").forEach((b) => b.onclick = async () => {
     if (!confirm("Delete this endpoint and its subscriptions?")) return;

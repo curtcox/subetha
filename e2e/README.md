@@ -35,6 +35,8 @@ What's covered:
   2 s and to a voice call after 4 s (verification codes for both are read back from the mock
   Twilio), a signed keypress callback acks it, and the call-status callback settles the call;
   the same alarm received live by a console is acked over the WebSocket, so both steps are skipped;
+- texting in: the Endpoints tab routes a verified number's texts to a topic, a signed inbound
+  SMS publishes there, and clearing the topic turns it off;
 - the endpoint inspector: a test delivery to a webhook shows the signed request, and the
   in-browser checker verifies its signature with the endpoint's secret;
 - the Edge lab's sound transport: a signed envelope modulated into a WAV file is played into

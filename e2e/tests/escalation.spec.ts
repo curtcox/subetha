@@ -2,48 +2,8 @@
 // escalates to SMS and then to a voice call through the real delivery queue and its delays; one
 // that reaches a listening console over the WebSocket is acked there, which stops the chain. Twilio is a local mock (mock-twilio.mjs);
 // the test plays Twilio's part for the keypress and the call-status callback, signed like Twilio.
-import { createHmac } from "node:crypto";
 import { expect, test, type APIRequestContext } from "@playwright/test";
-import { auth, bootstrap, signIn } from "./helpers.ts";
-
-const TWILIO = `http://localhost:${Number(process.env.E2E_PORT ?? 8788) + 2}`;
-const TWILIO_TOKEN = "e2e-twilio-token"; // serve.mjs
-const BASE = `http://localhost:${process.env.E2E_PORT ?? 8788}`;
-
-interface MockCall { kind: "sms" | "voice"; to: string; body?: string; twiml?: string; status_callback?: string; auth?: string }
-
-/** A US number no other test uses, so the shared mock's records stay apart. */
-const uniqueNumber = () => `+1415${String(2 + Math.floor(Math.random() * 8))}${String(Math.floor(Math.random() * 1e6)).padStart(6, "0")}`;
-
-async function callsTo(request: APIRequestContext, to: string): Promise<MockCall[]> {
-  return (await (await request.get(`${TWILIO}/__calls?to=${encodeURIComponent(to)}`)).json()) as MockCall[];
-}
-
-function twilioSignature(url: string, params: Record<string, string>): string {
-  const data = url + Object.keys(params).sort().map((k) => k + params[k]).join("");
-  return createHmac("sha1", TWILIO_TOKEN).update(data).digest("base64");
-}
-
-/** POSTs a form to the relay as Twilio would, with X-Twilio-Signature. */
-async function asTwilio(request: APIRequestContext, url: string, params: Record<string, string>) {
-  return request.post(url, { form: params, headers: { "X-Twilio-Signature": twilioSignature(url, params) } });
-}
-
-/** Adds an SMS or voice endpoint and verifies it with the code the relay sent through the mock. */
-async function verifiedPhone(request: APIRequestContext, token: string, kind: "sms" | "voice"): Promise<{ id: string; number: string }> {
-  const number = uniqueNumber();
-  const r = await request.post("/v1/endpoints", { headers: auth(token), data: { kind, address: number } });
-  expect(r.status()).toBe(201);
-  const ep = (await r.json()) as { id: string };
-  const [sent] = await callsTo(request, number);
-  expect(sent?.kind).toBe(kind);
-  const text = kind === "sms" ? sent!.body! : /code is ([^.]*)\./.exec(sent!.twiml!)![1]!;
-  const code = text.replace(/\D/g, "").slice(0, 6);
-  expect(code).toMatch(/^\d{6}$/);
-  const v = await request.post(`/v1/endpoints/${ep.id}/verify`, { headers: auth(token), data: { code } });
-  expect(v.ok()).toBe(true);
-  return { id: ep.id, number };
-}
+import { asTwilio, auth, BASE, bootstrap, callsTo, signIn, verifiedPhone, type MockCall } from "./helpers.ts";
 
 async function alarmSetup(request: APIRequestContext) {
   const acct = await bootstrap(request, 1);
