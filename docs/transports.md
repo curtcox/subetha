@@ -13,8 +13,8 @@ entirely on devices and never touch the relay.
 | Webhook | `webhook` | relay | `https://` URL | no (signed; secret shown once) |
 | Email | `email` | relay, in/out | email address | **yes** |
 | Slack | `slack` | relay, in/out | channel (via the Slack app) | OAuth install |
-| SMS (US) | `sms` | relay, in/out | `+1NXXNXXXXXX` | **yes** |
-| Voice (US) | `voice` | relay | `+1NXXNXXXXXX` | **yes** |
+| SMS | `sms` | relay, in/out | E.164, US or an opt-in country | **yes** |
+| Voice | `voice` | relay | E.164, US or an opt-in country | **yes** |
 | MCP | `mcp` | live (agents) | – | – |
 | Reticulum / LXMF | `lxmf` | gateway | 32-hex LXMF destination | no |
 | Bluetooth LE, audio, QR, LAN | `ble`, `audio`, `qr`, `lan` | edge | – | – (free, SDK only) |
@@ -157,12 +157,16 @@ and Event Subscriptions (`message.channels`, `message.groups`) sent to
 `https://subetha.org/v1/hooks/slack/events`. Set `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and
 `SLACK_SIGNING_SECRET`.
 
-## SMS and voice (US only)
+## SMS and voice
 
 SMS and voice calls are for things that matter: alarms and escalation. Limits that keep them safe
 for everyone:
 
-- **US numbers only** for now (`+1NXXNXXXXXX`), each verified with a code sent to it.
+- **US numbers by default** (`+1NXXNXXXXXX`), each verified with a code sent to it.
+  Premium-rate (`+1 900`) and non-geographic codes are never served, and numbers in Canada, Puerto
+  Rico, and the Caribbean are not US numbers (Twilio prices them separately).
+- **Other countries are opt-in, one at a time**, and priced per destination: see
+  [below](#numbers-outside-the-us).
 - **Recipients stay in control.** Replying `STOP` (or `UNSUBSCRIBE`, `CANCEL`, `END`, `QUIT`)
   unverifies the number for SMS and voice on every account. `HELP` gets the help message. Replying
   `ACK <message id>` acknowledges a message; pressing 1 on a call does the same.
@@ -172,6 +176,30 @@ for everyone:
   voice pause (`GET /v1/status` shows `telephony_circuit`) until prices are regenerated.
 - SMS bodies are cut to 459 characters (3 segments) and billed per segment; calls are billed per
   started minute. A topic policy can require a minimum priority (`"min_priority": {"sms": 4}`).
+
+### Numbers outside the US
+
+Enable each country you want to reach on the account, then add numbers there as usual:
+
+```bash
+curl -X PATCH -H "Authorization: Bearer $SUBETHA_TOKEN" -d '{"telephony_countries":["CA","GB"]}' \
+  https://subetha.org/v1/account
+curl https://subetha.org/v1/prices/destinations   # today's per-country prices (public)
+```
+
+- Countries on offer: CA, GB, IE, DE, FR, NL, BE, ES, IT, PT, AT, CH, SE, NO, DK, FI, PL, AU, NZ,
+  JP, SG, MX, BR, IN, IL, ZA, and PR. Adding a number in a country that isn't enabled fails with
+  `forbidden`.
+- **Live prices.** A daily job reads Twilio's current prices for each country and prices SMS
+  segments and call minutes from the highest of them (the `deliver_sms_intl` and
+  `deliver_voice_intl` SKUs: same margin floor as every other SKU). Prices go in
+  `GET /v1/prices/destinations` per tier.
+- **Unknown means no.** A country with no current price (Twilio didn't report one, the price is
+  above $0.50 a unit, or the table is more than three days old) can't get new endpoints
+  (`provider_unavailable`), and its numbers drop out of delivery plans with the reason
+  `destination price unknown` in the trace.
+- Removing a country from `telephony_countries` stops deliveries to its numbers at once; the
+  endpoints stay, and deliver again if you re-enable it.
 
 ### Escalation
 

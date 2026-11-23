@@ -17,7 +17,10 @@ and are free.
    and CI fails if any margin drops below 15%. The live table is at `GET /v1/prices`.
 4. **State costs rent.** Retained messages, attachments, enrolled devices, verified endpoints, and
    open connections are metered by time.
-5. **Volume tiers** lower prices as trailing-12-month top-ups grow (`standard`, `bulk` from $500,
+5. **Live prices where providers' prices vary.** SMS and voice outside the US are priced per
+   country every day from Twilio's current prices (`GET /v1/prices/destinations`); a destination
+   without a current price is rejected. See [Transports](transports.md#numbers-outside-the-us).
+6. **Volume tiers** lower prices as trailing-12-month top-ups grow (`standard`, `bulk` from $500,
    `volume` from $5,000), without ever crossing the margin floor.
 
 ## Prices
