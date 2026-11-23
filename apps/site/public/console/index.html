@@ -114,10 +114,15 @@
             <div><label for="polMaxMsg">Max cost / message (USD)</label><input id="polMaxMsg" type="number" min="0" step="0.001" placeholder="none"></div>
           </div>
           <div class="row">
-            <div><label for="polQuietStart">Quiet hours UTC start</label><input id="polQuietStart" type="time"></div>
-            <div><label for="polQuietEnd">Quiet hours UTC end</label><input id="polQuietEnd" type="time"></div>
+            <div><label for="polQuietStart">Quiet hours start</label><input id="polQuietStart" type="time"></div>
+            <div><label for="polQuietEnd">Quiet hours end</label><input id="polQuietEnd" type="time"></div>
+            <div><label for="polQuietTz">Quiet hours timezone</label><input id="polQuietTz" placeholder="UTC or America/Chicago"></div>
+          </div>
+          <div class="row">
             <div><label for="polAllow">Allow transports</label><input id="polAllow" placeholder="blank = all"></div>
             <div><label for="polDeny">Deny transports</label><input id="polDeny" placeholder="sms,voice"></div>
+            <div><label for="polRate">Rate / min</label><input id="polRate" type="number" min="1" step="1" placeholder="unlimited"></div>
+            <div><label for="polBurst">Burst</label><input id="polBurst" type="number" min="1" step="1" placeholder="same as rate"></div>
           </div>
           <div class="row">
             <div><label for="polAnonRate">Anon rate / min</label><input id="polAnonRate" type="number" min="0" step="1" placeholder="60"></div>
@@ -214,6 +219,32 @@
           <button id="subAdd">Add</button>
         </div>
         <p id="subMsg" class="muted"></p>
+      </div>
+      <div class="card">
+        <h3>BYO push credentials (APNs / FCM)</h3>
+        <p class="muted">Upload your own Apple APNs <code>.p8</code> key or Firebase service-account JSON to push to your own mobile app. Private keys are verified on upload and never shown again.</p>
+        <div class="scroll"><table><thead><tr><th>Kind</th><th>Name</th><th>App / Project</th><th>Default</th><th></th></tr></thead><tbody id="pushCredRows"></tbody></table></div>
+        <details>
+          <summary>Add push credential</summary>
+          <div class="row">
+            <div><label for="pcKind">Kind</label><select id="pcKind"><option value="apns">apns</option><option value="fcm">fcm</option></select></div>
+            <div><label for="pcName">Name</label><input id="pcName" placeholder="My iOS app"></div>
+          </div>
+          <div id="pcApnsFields">
+            <div class="row">
+              <div><label for="pcKeyId">Key ID (10 chars)</label><input id="pcKeyId" maxlength="10" placeholder="ABC123DEFG"></div>
+              <div><label for="pcTeamId">Team ID (10 chars)</label><input id="pcTeamId" maxlength="10" placeholder="TEAM123456"></div>
+              <div><label for="pcTopic">Bundle ID (apns-topic)</label><input id="pcTopic" placeholder="com.example.app"></div>
+            </div>
+            <label for="pcKeyP8">APNs .p8 private key (PEM)</label><textarea id="pcKeyP8" rows="4" placeholder="-----BEGIN PRIVATE KEY-----" autocomplete="off" spellcheck="false"></textarea>
+            <p><label class="check"><input id="pcSandbox" type="checkbox"> Sandbox (<code>api.sandbox.push.apple.com</code>)</label></p>
+          </div>
+          <div id="pcFcmFields" hidden>
+            <label for="pcServiceAccount">Firebase service-account JSON</label><textarea id="pcServiceAccount" rows="5" placeholder='{"type":"service_account","project_id":"…","client_email":"…","private_key":"…"}' autocomplete="off" spellcheck="false"></textarea>
+          </div>
+          <p><label class="check"><input id="pcDefault" type="checkbox" checked> Set as account default for this kind</label></p>
+          <p><button id="pcAdd" class="secondary">Save credential</button> <span id="pcMsg" class="muted"></span></p>
+        </details>
       </div>
     </section>
 

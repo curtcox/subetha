@@ -323,8 +323,11 @@ function syncFormFromPolicy(p) {
   $("polMaxMsg").value = p.max_cost_per_message_micros != null ? String(p.max_cost_per_message_micros / 1e6) : "";
   $("polQuietStart").value = p.quiet_hours?.start ?? "";
   $("polQuietEnd").value = p.quiet_hours?.end ?? "";
+  $("polQuietTz").value = p.quiet_hours?.tz ?? "";
   $("polAllow").value = (p.allow_transports ?? []).join(", ");
   $("polDeny").value = (p.deny_transports ?? []).join(", ");
+  $("polRate").value = p.rate_per_min != null ? String(p.rate_per_min) : "";
+  $("polBurst").value = p.burst != null ? String(p.burst) : "";
   $("polAnonRate").value = p.anon_rate_per_min != null ? String(p.anon_rate_per_min) : "";
   $("polAnonCap").value = p.anon_daily_cap_micros != null ? String(p.anon_daily_cap_micros / 1e6) : "";
   $("polMinPrio").value = p.min_priority ? Object.entries(p.min_priority).map(([k, v]) => `${k}:${v}`).join(", ") : "";
@@ -350,10 +353,14 @@ function syncPolicyFromForm() {
   if (monthly !== "") p.monthly_cap_micros = Math.round(Number(monthly) * 1e6); else delete p.monthly_cap_micros;
   const maxm = $("polMaxMsg").value.trim();
   if (maxm !== "") p.max_cost_per_message_micros = Math.round(Number(maxm) * 1e6); else delete p.max_cost_per_message_micros;
-  const qs = $("polQuietStart").value.trim(), qe = $("polQuietEnd").value.trim();
-  if (qs && qe) p.quiet_hours = { start: qs, end: qe }; else delete p.quiet_hours;
+  const qs = $("polQuietStart").value.trim(), qe = $("polQuietEnd").value.trim(), qtz = $("polQuietTz").value.trim();
+  if (qs && qe) p.quiet_hours = qtz ? { start: qs, end: qe, tz: qtz } : { start: qs, end: qe }; else delete p.quiet_hours;
   setList("allow_transports", $("polAllow").value);
   setList("deny_transports", $("polDeny").value);
+  const rate = $("polRate").value.trim();
+  if (rate !== "") p.rate_per_min = Math.round(Number(rate)); else delete p.rate_per_min;
+  const burst = $("polBurst").value.trim();
+  if (burst !== "") p.burst = Math.round(Number(burst)); else delete p.burst;
   const anonRate = $("polAnonRate").value.trim();
   if (anonRate !== "") p.anon_rate_per_min = Math.round(Number(anonRate)); else delete p.anon_rate_per_min;
   const anonCap = $("polAnonCap").value.trim();
@@ -380,7 +387,12 @@ $("topicPolicy").addEventListener("input", () => { try { syncFormFromPolicy(JSON
 async function loadTopics() {
   const { topics } = await client.topics();
   loadKeys(topics).catch((e) => { $("keyMsg").textContent = `${e.code ?? "error"}: ${e.message}`; });
-  $("topicRows").innerHTML = topics.map((t) => `<tr><td><code>${esc(t.name)}</code></td><td>${esc(t.endpoint_subscriptions ?? 0)}</td><td><code>${esc(JSON.stringify(t.policy))}</code></td><td><button class="secondary" data-edit="${esc(t.name)}">Edit</button></td></tr>`).join("") || `<tr><td colspan=4 class="muted">No topics yet. Publishing to @${esc(me.handle)}/anything creates one.</td></tr>`;
+  $("topicRows").innerHTML = topics.map((t) => `<tr><td><code>${esc(t.name)}</code></td><td>${esc(t.endpoint_subscriptions ?? 0)}</td><td><code>${esc(JSON.stringify(t.policy))}</code></td><td><button class="secondary" data-edit="${esc(t.name)}">Edit</button> <button class="secondary" data-topicdel="${esc(t.name)}">Delete</button></td></tr>`).join("") || `<tr><td colspan=4 class="muted">No topics yet. Publishing to @${esc(me.handle)}/anything creates one.</td></tr>`;
+  document.querySelectorAll("[data-topicdel]").forEach((b) => b.onclick = async () => {
+    const name = b.dataset.topicdel;
+    if (!confirm(`Delete topic ${name}? This closes live connections and deletes its retained messages, subscriptions, and wrapped keys.`)) return;
+    try { await client.deleteTopic(name); loadTopics(); } catch (e) { alert(`${e.code ?? "error"}: ${e.message}`); }
+  });
   document.querySelectorAll("[data-edit]").forEach((b) => b.onclick = async () => {
     const t = topics.find((x) => x.name === b.dataset.edit);
     $("topicName").value = t.name;
@@ -647,17 +659,27 @@ const PLACEHOLDER = { email: "you@example.com", sms: "+15551234567", voice: "+15
 $("epKind").onchange = () => { $("epAddr").placeholder = PLACEHOLDER[$("epKind").value] ?? ""; };
 let endpoints = [];
 async function loadEndpoints() {
-  const [eps, subs, teams, bindings] = await Promise.all([
+  const [eps, subs, teams, bindings, pcreds] = await Promise.all([
     client.request("GET", "/v1/endpoints"),
     client.request("GET", "/v1/subscriptions"),
     client.request("GET", "/v1/slack/teams").catch(() => ({ teams: [] })),
     client.request("GET", "/v1/slack/bindings").catch(() => ({ bindings: [] })),
+    client.listPushCredentials().catch(() => ({ credentials: [] })),
   ]);
   endpoints = eps.endpoints;
   $("epRows").innerHTML = endpoints.map((e) => `<tr><td>${esc(e.kind)}</td><td><code>${esc(e.address)}</code>${e.name ? ` <span class="muted">${esc(e.name)}</span>` : ""}${e.inbound_topic ? `<br><span class="muted">texts in → <code>${esc(e.inbound_topic)}</code></span>` : ""}</td><td>${e.verified ? '<span class="ok">verified</span>' : `<span class="row"><input data-code="${esc(e.id)}" placeholder="6-digit code" inputmode="numeric" maxlength="6" aria-label="Verification code"><button class="secondary" data-verify="${esc(e.id)}">Verify</button></span>`}</td><td>${e.verified && e.kind !== "webpush" ? `<button class="secondary" data-eptest="${esc(e.id)}">Test</button> ` : ""}${e.verified && e.kind === "sms" ? `<button class="secondary" data-epinbound="${esc(e.id)}">Texts in…</button> ` : ""}<button class="secondary" data-epdel="${esc(e.id)}">Delete</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">No endpoints yet. "Notify this browser" on Send / receive adds a Web Push one.</td></tr>`;
   const label = (id) => { const e = endpoints.find((x) => x.id === id); return e ? `${e.kind} ${e.address}` : id; };
   $("subEp").innerHTML = endpoints.filter((e) => e.verified).map((e) => `<option value="${esc(e.id)}">${esc(label(e.id))}</option>`).join("") || `<option value="">No verified endpoints</option>`;
-  $("subRows").innerHTML = subs.subscriptions.map((s) => `<tr><td><code>${esc(s.topic)}</code></td><td>${esc(label(s.endpoint_id))}</td><td>${s.after_s ? `${s.after_s}s` : "now"}</td><td>${s.min_priority ?? ""}</td><td><code>${esc([s.filter?.tags?.length ? `tags ${s.filter.tags.join(",")}` : "", s.filter?.priority?.length ? `priority ${s.filter.priority.join(",")}` : ""].filter(Boolean).join("; "))}</code></td><td><button class="secondary" data-subdel="${esc(s.id)}">Remove</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">No endpoint subscriptions.</td></tr>`;
+  $("subRows").innerHTML = subs.subscriptions.map((s) => `<tr><td><code>${esc(s.topic)}</code>${s.paused ? ' <span class="bad">paused</span>' : ""}</td><td>${esc(label(s.endpoint_id))}</td><td>${s.after_s ? `${s.after_s}s` : "now"}</td><td>${s.min_priority ?? ""}</td><td><code>${esc([s.filter?.tags?.length ? `tags ${s.filter.tags.join(",")}` : "", s.filter?.priority?.length ? `priority ${s.filter.priority.join(",")}` : ""].filter(Boolean).join("; "))}</code></td><td><button class="secondary" data-subtoggle="${esc(s.id)}" data-subpaused="${s.paused ? "1" : ""}">${s.paused ? "Resume" : "Pause"}</button> <button class="secondary" data-subdel="${esc(s.id)}">Remove</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">No endpoint subscriptions.</td></tr>`;
+  $("pushCredRows").innerHTML = (pcreds.credentials ?? []).map((c) => {
+    const info = c.kind === "apns" ? `${c.topic}${c.sandbox ? " (sandbox)" : ""} · ${c.team_id}/${c.key_id}` : `${c.project_id} · ${c.client_email}`;
+    return `<tr><td>${esc(c.kind)}</td><td>${esc(c.name || "—")}</td><td><code>${esc(info)}</code></td><td>${c.is_default ? '<span class="ok">default</span>' : ""}</td><td><button class="secondary" data-pcdel="${esc(c.id)}">Delete</button></td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="muted">No BYO push credentials configured (using relay defaults if any).</td></tr>`;
+  document.querySelectorAll("[data-pcdel]").forEach((b) => b.onclick = async () => {
+    if (!confirm("Delete this push credential?")) return;
+    await client.deletePushCredential(b.dataset.pcdel).catch((e) => alert(e.message));
+    loadEndpoints();
+  });
   $("slackTeam").innerHTML = teams.teams.map((t) => `<option value="${esc(t.team_id)}">${esc(t.team_name || t.team_id)}</option>`).join("") || `<option value="">Install the app first</option>`;
   if (slackTeamHint && teams.teams.some((t) => t.team_id === slackTeamHint)) $("slackTeam").value = slackTeamHint;
   $("slackBindingRows").innerHTML = (bindings.bindings ?? []).map((b) => `<tr><td>${esc(b.team_name || b.team_id)}</td><td><code>${esc(b.channel)}</code></td><td><code>${esc(b.topic)}</code></td><td><button class="secondary" data-slackunbind-team="${esc(b.team_id)}" data-slackunbind-ch="${esc(b.channel)}">Unbind</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">No bound channels.</td></tr>`;
@@ -700,11 +722,34 @@ async function loadEndpoints() {
     } catch (e) { out.innerHTML = `<p class="bad">${esc(e.code)}: ${esc(e.message)}</p>`; }
     finally { b.disabled = false; $("inspector").scrollIntoView({ block: "nearest" }); }
   });
+  document.querySelectorAll("[data-subtoggle]").forEach((b) => b.onclick = async () => {
+    try { await client.updateSubscription(b.dataset.subtoggle, { paused: !b.dataset.subpaused }); loadEndpoints(); }
+    catch (e) { alert(`${e.code ?? "error"}: ${e.message}`); }
+  });
   document.querySelectorAll("[data-subdel]").forEach((b) => b.onclick = async () => {
     await client.request("DELETE", `/v1/subscriptions/${encodeURIComponent(b.dataset.subdel)}`).catch((e) => alert(e.message));
     loadEndpoints();
   });
 }
+$("pcKind").onchange = () => {
+  const apns = $("pcKind").value === "apns";
+  $("pcApnsFields").hidden = !apns;
+  $("pcFcmFields").hidden = apns;
+};
+$("pcAdd").onclick = async () => {
+  const say = (t) => { $("pcMsg").textContent = t; };
+  try {
+    const kind = $("pcKind").value;
+    const body = kind === "apns"
+      ? { kind, name: $("pcName").value.trim(), is_default: $("pcDefault").checked, key_id: $("pcKeyId").value.trim(), team_id: $("pcTeamId").value.trim(), topic: $("pcTopic").value.trim(), key_p8: $("pcKeyP8").value.trim(), sandbox: $("pcSandbox").checked }
+      : { kind, name: $("pcName").value.trim(), is_default: $("pcDefault").checked, service_account: $("pcServiceAccount").value.trim() };
+    await client.createPushCredential(body);
+    $("pcKeyP8").value = "";
+    $("pcServiceAccount").value = "";
+    say("Saved.");
+    loadEndpoints();
+  } catch (e) { say(`${e.code ?? "error"}: ${e.message}`); }
+};
 $("sigCheck").onclick = async () => {
   const r = await verifyWebhookSignature($("sigSecret").value.trim(), $("sigHeader").value.trim(), $("sigBody").value, { toleranceS: null });
   $("sigOut").innerHTML = `<span class="${r.valid ? "ok" : "bad"}">${esc(r.reason)}</span>${r.age_s !== undefined ? ` <span class="muted">(signed ${esc(r.age_s)}s ago)</span>` : ""}`;

@@ -23,9 +23,9 @@ curl -H "Authorization: Bearer $SUBETHA_TOKEN" https://subetha.us/@me/backups/js
   `AccountDO` per account (prepaid ledger, credit leases, caps, new-funds hold), D1, KV, Queues,
   rate limits, and a daily cron for rent metering, freezing (with freeze, deletion-warning, and deletion emails), reconciliation, and Twilio price checks.
 - **Control plane** (`/v1/*`): accounts (Clerk) with daily/monthly spend caps, transport allow/deny policies, and kill switches; Stripe Checkout top-ups (and opt-in auto-recharge) and webhooks; scoped and
-  capped API tokens (including origin-bound publishable tokens and IP allow-lists); topic policies (including daily/monthly caps, quiet hours, and `X-Deadline` / `route.deadline_s` enforcement); traces, dry runs,
-  idempotency keys, payment history and receipts, wrapped E2EE topic keys for enrolled devices (`/v1/keys`), endpoints with verification codes, subscriptions with escalation, device
-  enrollment (device-code flow, request signatures, per-device pause kill switch, and transport allow/deny policies), an audit log, `/v1/status`.
+  capped API tokens (including origin-bound publishable tokens and IP allow-lists); topic policies (including daily/monthly caps, rate/burst limits, timezone-aware quiet hours, `X-Deadline` / `route.deadline_s` enforcement, and `DELETE /v1/topics/{topic}`); traces, dry runs,
+  idempotency keys, payment history and receipts, wrapped E2EE topic keys for enrolled devices (`/v1/keys`), endpoints with verification codes, BYO APNs/FCM push credentials (`/v1/push/credentials`), subscriptions with escalation and pause/update (`PATCH /v1/subscriptions/{id}`), device
+  enrollment (device-code flow, request signatures, per-device pause kill switch, and transport allow/deny policies), Analytics Engine usage/cost telemetry, global & per-account telephony circuit breakers (list price, Twilio spend divergence, and chargeback protection), an audit log, `/v1/status`.
 - **Transports**: live WS/SSE/poll; Web Push, FCM, APNs; HMAC-signed webhooks; email out
   (Cloudflare Email Service or SES) and in (Email Routing); Slack (OAuth install, both
   directions); Twilio SMS and voice (US, plus opt-in countries priced daily per destination, with STOP/HELP/ACK and DTMF ack); remote MCP server at
