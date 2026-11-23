@@ -17,6 +17,7 @@ export interface TokenRow {
   name: string;
   scopes: string;
   transports: string | null;
+  deny_transports?: string | null;
   daily_cap_micros: number | null;
   total_cap_micros: number | null;
   origins: string | null;
@@ -102,6 +103,7 @@ export async function authenticate(req: Request, env: Env): Promise<Principal> {
       scopes: JSON.parse(row.scopes),
       caps: { daily: row.daily_cap_micros, total: row.total_cap_micros },
       transports: row.transports ? (JSON.parse(row.transports) as Transport[]) : null,
+      denyTransports: row.deny_transports ? (JSON.parse(row.deny_transports) as Transport[]) : null,
     };
   }
   if (cred.startsWith("eyJ")) {
@@ -157,7 +159,7 @@ export function validateTransports(t: unknown): Transport[] | null {
 export function callerOf(p: Principal): Caller {
   switch (p.kind) {
     case "anonymous": return { accountId: null, tokenId: null, deviceId: null, caps: { daily: null, total: null }, transports: null };
-    case "token": return { accountId: p.accountId, tokenId: p.tokenId, deviceId: null, caps: p.caps, transports: p.transports };
+    case "token": return { accountId: p.accountId, tokenId: p.tokenId, deviceId: null, caps: p.caps, transports: p.transports, denyTransports: p.denyTransports ?? null };
     case "user": return { accountId: p.accountId, tokenId: null, deviceId: null, caps: { daily: null, total: null }, transports: null };
     case "device": return { accountId: p.accountId, tokenId: null, deviceId: p.deviceId, caps: { daily: null, total: null }, transports: p.transports, denyTransports: p.denyTransports };
   }

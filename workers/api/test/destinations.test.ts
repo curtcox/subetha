@@ -131,7 +131,7 @@ describe("international endpoints", () => {
       units: { sms: 2 },
       destPrice: (_t, c) => (c === "GB" ? 70_000 : null),
     });
-    expect(p.deliveries.map((d) => [d.subscriber, d.sku, d.cost_micros])).toEqual([["s1", "deliver_sms_intl", 140_000], ["s3", "deliver_sms_us", 2 * P.skus.deliver_sms_us!.price_nanos.standard! / 1000]]);
+    expect(p.deliveries.map((d) => [d.subscriber, d.sku, d.cost_micros])).toEqual([["s3", "deliver_sms_us", 2 * P.skus.deliver_sms_us!.price_nanos.standard! / 1000], ["s1", "deliver_sms_intl", 140_000]]);
     expect(p.dropped).toEqual([{ subscriber: "s2", transport: "sms", reason: "destination price unknown" }]);
   });
 });

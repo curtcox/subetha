@@ -34,7 +34,7 @@ pub const COVERED_REQUEST_HEADERS: &[&str] = &[
     "x-email", "email", "e", "x-call", "call",
     "x-cache", "cache", "x-firebase", "firebase", "x-unifiedpush", "unifiedpush", "up",
     "x-poll-id", "poll-id",
-    "x-sender", "x-signature", "x-message-id", "x-time", "x-expires",
+    "x-sender", "x-signature", "x-message-id", "x-time", "x-expires", "x-content-type", "x-hops",
     "x-route-mode", "x-max-cost", "x-deny", "x-allow", "x-deadline", "x-dry-run",
 ];
 

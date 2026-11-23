@@ -126,7 +126,27 @@ export async function parseHeaderPublish(req: Request, topic: string): Promise<P
   const attach = header(req, url, "X-Attach", "Attach", "a");
   if (attach) env.attachment = { name: url.searchParams.get("filename") ?? attach.split("/").pop() ?? "file", url: attach };
   const md = header(req, url, "X-Markdown", "Markdown", "md");
-  if (md && ["1", "yes", "true"].includes(md.toLowerCase())) env.content_type = "text/markdown";
+  const ctHdr = header(req, url, "X-Content-Type");
+  if (md && ["1", "yes", "true"].includes(md.toLowerCase())) {
+    env.content_type = "text/markdown";
+  } else if (ctHdr) {
+    const norm = ctHdr.split(";")[0]!.trim().toLowerCase();
+    if (!["text/plain", "text/markdown", "application/json", "application/octet-stream"].includes(norm)) {
+      throw new ApiError("invalid_message", "unsupported X-Content-Type");
+    }
+    env.content_type = norm as Envelope["content_type"];
+  } else if (!file) {
+    const rawCt = req.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+    if (rawCt && ["text/markdown", "application/json", "application/octet-stream"].includes(rawCt)) {
+      env.content_type = rawCt as Envelope["content_type"];
+    }
+  }
+  const hopsHdr = header(req, url, "X-Hops");
+  if (hopsHdr !== null) {
+    const h = Number(hopsHdr);
+    if (!Number.isSafeInteger(h) || h < 0 || h > 16) throw new ApiError("invalid_message", "X-Hops must be an integer 0..16");
+    env.hops = h;
+  }
   const actions = header(req, url, "X-Actions", "Actions");
   if (actions) env.actions = parseActions(actions);
   const sender = header(req, url, "X-Sender"), sig = header(req, url, "X-Signature"), id = header(req, url, "X-Message-Id"), time = header(req, url, "X-Time");
@@ -199,7 +219,7 @@ export async function parseJsonPublish(req: Request): Promise<ParsedPublish> {
     }
   }
   if (body.delay !== undefined) throw new ApiError("unsupported", "scheduled delivery is not supported in v0");
-  return { envelope: env, route: parseRoute(req, url, env), dryRun: ["1", "true"].includes((req.headers.get("x-dry-run") ?? "").toLowerCase()), idempotencyKey: req.headers.get("idempotency-key") };
+  return { envelope: env, route: parseRoute(req, url, env), dryRun: ["1", "true", "yes"].includes((header(req, url, "X-Dry-Run") ?? "").toLowerCase()), idempotencyKey: req.headers.get("idempotency-key") };
 }
 
 export function parseFilter(url: URL): SubscriptionFilter {

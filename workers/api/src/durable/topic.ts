@@ -6,7 +6,7 @@ import { ulid, verifyEnvelope, type Envelope, type Transport } from "@subetha/sd
 import { actionPriceMicros, rentNanos, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { asResult, rpcError, type RpcResult } from "../errors.ts";
-import { planDeliveries } from "../routing.ts";
+import { planDeliveries, transportAllowed } from "../routing.ts";
 import { mmsMedia, smsBody, smsSegments, voiceMinutes } from "../delivery/twilio.ts";
 import { renderText } from "../delivery/senders.ts";
 import { DEST_PRICES_KEY, destUnitPrice, type DestinationPrices } from "../delivery/destinations.ts";
@@ -425,8 +425,11 @@ export class TopicDO extends DurableObject<Env> {
       const mbDays = (input.attachmentBytes / 1_048_576) * ((storeUntil - nowSec) / 86400);
       publishPrice += actionPriceMicros(PRICES, "attachment_upload", this.tier()) + Math.ceil(rentNanos(PRICES, "attachment_mb_day", mbDays, this.tier()) / 1000);
     }
-    const liveCost = plan.deliveries.filter((d) => d.after_s === 0 && d.transport === "ws").reduce((n, d) => n + d.cost_micros, 0);
-    const queued = plan.deliveries.filter((d) => !(d.after_s === 0 && d.transport === "ws"));
+    const liveAll = new Set(live.map((l) => l.id));
+    const livePlanned = plan.deliveries.filter((d) => liveAll.has(d.subscriber));
+    const liveAllowedIds = new Set(livePlanned.map((d) => d.subscriber));
+    const liveCost = livePlanned.reduce((n, d) => n + d.cost_micros, 0);
+    const queued = plan.deliveries.filter((d) => !liveAll.has(d.subscriber));
     const retentionNanos = rentNanos(PRICES, "retention_message_day", (storeUntil - nowSec) / 86400, this.tier());
 
     if (input.dryRun) {
@@ -500,7 +503,7 @@ export class TopicDO extends DurableObject<Env> {
       if (signed) this.sql.exec("INSERT OR IGNORE INTO seen (id, until) VALUES (?, ?)", env.id!.toUpperCase(), time + MAX_MESSAGE_AGE_S + MAX_CLOCK_SKEW_S);
       if (input.idempotencyKey) this.sql.exec("INSERT OR REPLACE INTO idem (key, body_hash, message_id, created) VALUES (?, ?, ?, ?)", input.idempotencyKey, input.bodyHash, env.id!, nowMs);
     });
-    this.broadcast(env);
+    this.broadcast(env, liveAllowedIds);
 
     // Queued (paid) transports: reserve per job; the delivery consumer settles.
     const jobs: { body: DeliveryJob; delaySeconds?: number }[] = [];
@@ -518,7 +521,7 @@ export class TopicDO extends DurableObject<Env> {
         continue;
       }
       const deadline_ms = input.route.deadlineS ? nowMs + input.route.deadlineS * 1000 : undefined;
-      jobs.push({ body: { topic: meta.name, owner: meta.owner, message: env, sub, reservation: { ref, micros: d.cost_micros }, attempt: 0, sku: d.sku, ...(deadline_ms ? { deadline_ms } : {}) }, delaySeconds: d.after_s || undefined });
+      jobs.push({ body: { topic: meta.name, owner: meta.owner, message: env, sub: { ...sub, after_s: d.after_s }, reservation: { ref, micros: d.cost_micros }, attempt: 0, sku: d.sku, mode: input.route.mode, ...(deadline_ms ? { deadline_ms } : {}) }, delaySeconds: d.after_s || undefined });
     }
     if (jobs.length && this.env.DELIVERY) await this.env.DELIVERY.sendBatch(jobs);
     } catch (e) {
@@ -529,10 +532,10 @@ export class TopicDO extends DurableObject<Env> {
 
     const callerCost = (anonymous ? 0 : publishPrice) + (caller.accountId === meta.owner ? liveCost + queued.reduce((n, d) => n + d.cost_micros, 0) : 0);
     emitMetric(this.env, {
-      accountId: meta.owner, event: "publish", transport: live.length ? "ws" : "", sku: "publish",
+      accountId: meta.owner, event: "publish", transport: livePlanned.length ? livePlanned[0]!.transport : "", sku: "publish",
       detail: meta.name, revenueMicros: publishPrice + liveCost,
-      providerCostMicros: estimatedCostMicros("publish") + estimatedCostMicros("deliver_live", live.length),
-      units: 1 + live.length,
+      providerCostMicros: estimatedCostMicros("publish") + estimatedCostMicros("deliver_live", livePlanned.length),
+      units: 1 + livePlanned.length,
     });
     this.trace(env.id!, { published: nowMs, plan: plan.deliveries, dropped: plan.dropped, cost_micros: { publish: publishPrice, live: liveCost, queued: queued.reduce((n, d) => n + d.cost_micros, 0), retention_nanos: retentionNanos }, publisher: caller.tokenId ?? caller.deviceId ?? caller.accountId ?? "anonymous" }, storeUntil);
     await this.ensureAlarm();
@@ -615,14 +618,14 @@ export class TopicDO extends DurableObject<Env> {
   }
 
   // ---------- subscribe ----------
-  private liveSubscribers(m: Envelope): string[] {
-    const ids: string[] = [];
-    for (const s of this.streams.values()) if (matchesFilter(m, s.filter)) ids.push(s.id);
+  private liveSubscribers(m: Envelope): { id: string; transport: "ws" | "sse" }[] {
+    const out: { id: string; transport: "ws" | "sse" }[] = [];
+    for (const s of this.streams.values()) if (matchesFilter(m, s.filter)) out.push({ id: s.id, transport: "sse" });
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment() as WsAttachment | null;
-      if (a && matchesFilter(m, a.filter)) ids.push(a.id);
+      if (a && matchesFilter(m, a.filter)) out.push({ id: a.id, transport: "ws" });
     }
-    return ids;
+    return out;
   }
 
   private backlog(since: string | null, filter: SubscriptionFilter): Envelope[] {
@@ -646,10 +649,17 @@ export class TopicDO extends DurableObject<Env> {
     return rows.map((r) => JSON.parse(r.json) as Envelope).filter((m) => matchesFilter(m, filter));
   }
 
-  private checkRead(caller: Caller) {
+  private checkRead(caller: Caller, transport?: "ws" | "sse" | "poll") {
     if (!this.meta) throw rpcError("not_found", "no such topic");
     if (this.meta.policy.paused) throw rpcError("topic_paused");
     if (!this.canRead(caller)) throw rpcError("forbidden", "not allowed to read this topic");
+    if (transport && !transportAllowed(
+      transport,
+      [caller.transports, this.accountTransports.allow, this.meta.policy.allow_transports],
+      [caller.denyTransports, this.accountTransports.deny, this.meta.policy.deny_transports],
+    )) {
+      throw rpcError("forbidden", `transport ${transport} denied by policy`);
+    }
   }
 
   /** Poll: cached messages since `since`. Charged to the topic owner (D2). */
@@ -658,7 +668,7 @@ export class TopicDO extends DurableObject<Env> {
   }
 
   private async pollInner(params: SubscribeParams): Promise<Envelope[]> {
-    this.checkRead(params.caller);
+    this.checkRead(params.caller, "poll");
     const msgs = this.backlog(params.since ?? "all", params.filter);
     const cost = actionPriceMicros(PRICES, "api_request", this.tier()) + msgs.length * actionPriceMicros(PRICES, "deliver_live", this.tier());
     await this.capTokenRead(params.caller, cost);
@@ -673,7 +683,7 @@ export class TopicDO extends DurableObject<Env> {
     const params = JSON.parse(req.headers.get("x-subetha-subscribe") ?? "null") as SubscribeParams | null;
     if (!params) return new Response("bad internal request", { status: 400 });
     try {
-      this.checkRead(params.caller);
+      this.checkRead(params.caller, params.format === "ws" ? "ws" : "sse");
     } catch (e) {
       return new Response((e as Error).message, { status: 403 });
     }
@@ -726,15 +736,15 @@ export class TopicDO extends DurableObject<Env> {
     return enc.encode(JSON.stringify(m) + "\n");
   }
 
-  private broadcast(m: Envelope) {
+  private broadcast(m: Envelope, allowedIds: Set<string>) {
     for (const s of this.streams.values()) {
-      if (!matchesFilter(m, s.filter)) continue;
+      if (!allowedIds.has(s.id) || !matchesFilter(m, s.filter)) continue;
       s.send(this.frame(s.format, m));
     }
     const data = JSON.stringify(m);
     for (const ws of this.ctx.getWebSockets()) {
       const a = ws.deserializeAttachment() as WsAttachment | null;
-      if (a && matchesFilter(m, a.filter)) {
+      if (a && allowedIds.has(a.id) && matchesFilter(m, a.filter)) {
         try { ws.send(data); } catch { /* closed */ }
       }
     }

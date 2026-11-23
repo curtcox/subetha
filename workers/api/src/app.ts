@@ -435,16 +435,17 @@ app.post("/v1/hooks/clerk", async (c) => {
 // ---------------- tokens ----------------
 app.get("/v1/tokens", async (c) => {
   const id = requireAdmin(await principal(c));
-  const { results } = await c.env.DB.prepare("SELECT id, name, scopes, transports, daily_cap_micros, total_cap_micros, origins, ips, expires_at, created_at, revoked_at FROM tokens WHERE account_id = ? ORDER BY created_at DESC").bind(id).all();
-  return c.json({ tokens: results.map((r) => ({ ...r, scopes: JSON.parse(r.scopes as string), transports: r.transports ? JSON.parse(r.transports as string) : null, origins: r.origins ? JSON.parse(r.origins as string) : null, ips: r.ips ? JSON.parse(r.ips as string) : null })) });
+  const { results } = await c.env.DB.prepare("SELECT id, name, scopes, transports, deny_transports, daily_cap_micros, total_cap_micros, origins, ips, expires_at, created_at, revoked_at FROM tokens WHERE account_id = ? ORDER BY created_at DESC").bind(id).all();
+  return c.json({ tokens: results.map((r) => ({ ...r, scopes: JSON.parse(r.scopes as string), transports: r.transports ? JSON.parse(r.transports as string) : null, deny_transports: r.deny_transports ? JSON.parse(r.deny_transports as string) : null, origins: r.origins ? JSON.parse(r.origins as string) : null, ips: r.ips ? JSON.parse(r.ips as string) : null })) });
 });
 
 app.post("/v1/tokens", async (c) => {
   const p = await principal(c);
   const id = requireAdmin(p);
-  const body = (await c.req.json()) as { name?: string; scopes?: unknown; transports?: unknown; daily_cap_usd?: number; total_cap_usd?: number; origins?: string[]; ips?: string[]; expires_in_s?: number };
+  const body = (await c.req.json()) as { name?: string; scopes?: unknown; transports?: unknown; deny_transports?: unknown; daily_cap_usd?: number; total_cap_usd?: number; origins?: string[]; ips?: string[]; expires_in_s?: number };
   const scopes = validateScopes(body.scopes);
   const transports = validateTransports(body.transports);
+  const denyTransports = validateTransports(body.deny_transports);
   if (body.origins && (!Array.isArray(body.origins) || !body.origins.every((o) => /^https?:\/\/[^/]+$/.test(o)))) throw new ApiError("bad_request", "origins must be like https://example.com");
   if (body.origins?.length && (scopes.length !== 1 || !/^(publish|subscribe):(@[a-z0-9-]+\/[A-Za-z0-9_-]+|t_[a-z2-7]{26})$/.test(scopes[0]!))) throw new ApiError("bad_request", "publishable (origin-bound) tokens must have exactly one non-wildcard topic scope");
   if (body.ips !== undefined && (!Array.isArray(body.ips) || body.ips.length > 32 || !body.ips.every((e) => typeof e === "string" && parseCidr(e)))) {
@@ -455,8 +456,8 @@ app.post("/v1/tokens", async (c) => {
   if (p.kind === "token" && !scopeAllows(p.scopes, "admin")) throw new ApiError("forbidden");
   const t = await newTokenSecret();
   const cap = (usd?: number) => (usd === undefined ? null : Math.round(usd * 1e6));
-  await c.env.DB.prepare("INSERT INTO tokens (id, account_id, secret_hash, name, scopes, transports, daily_cap_micros, total_cap_micros, origins, ips, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(t.id, id, t.hash, body.name ?? "", JSON.stringify(scopes), transports ? JSON.stringify(transports) : null, cap(body.daily_cap_usd), cap(body.total_cap_usd), body.origins?.length ? JSON.stringify(body.origins) : null, body.ips?.length ? JSON.stringify(body.ips.map((e) => e.trim())) : null, body.expires_in_s ? Date.now() + body.expires_in_s * 1000 : null, Date.now()).run();
+  await c.env.DB.prepare("INSERT INTO tokens (id, account_id, secret_hash, name, scopes, transports, deny_transports, daily_cap_micros, total_cap_micros, origins, ips, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(t.id, id, t.hash, body.name ?? "", JSON.stringify(scopes), transports ? JSON.stringify(transports) : null, denyTransports ? JSON.stringify(denyTransports) : null, cap(body.daily_cap_usd), cap(body.total_cap_usd), body.origins?.length ? JSON.stringify(body.origins) : null, body.ips?.length ? JSON.stringify(body.ips.map((e) => e.trim())) : null, body.expires_in_s ? Date.now() + body.expires_in_s * 1000 : null, Date.now()).run();
   await audit(c.env, id, actorOf(p), "token.create", { id: t.id, scopes });
   return c.json({ id: t.id, token: t.token, scopes, note: "The token is shown once. Store it securely." }, 201);
 });

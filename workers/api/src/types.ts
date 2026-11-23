@@ -81,7 +81,7 @@ export interface TopicMeta {
 
 export type Principal =
   | { kind: "anonymous" }
-  | { kind: "token"; accountId: string; tokenId: string; scopes: string[]; caps: { daily: number | null; total: number | null }; transports: Transport[] | null }
+  | { kind: "token"; accountId: string; tokenId: string; scopes: string[]; caps: { daily: number | null; total: number | null }; transports: Transport[] | null; denyTransports?: Transport[] | null }
   | { kind: "user"; accountId: string | null; clerkId: string; orgId?: string; orgRole?: string }
   | { kind: "device"; accountId: string; deviceId: string; transports: Transport[] | null; denyTransports: Transport[] | null };
 
@@ -132,4 +132,6 @@ export interface DeliveryJob {
   sku?: string | null;
   /** Epoch ms after which the job should be skipped rather than delivered (`route.deadline_s`). */
   deadline_ms?: number;
+  /** Route mode that produced this job (`all` delivers even if already acked on another transport). */
+  mode?: RouteMode;
 }

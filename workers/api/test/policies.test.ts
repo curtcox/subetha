@@ -246,4 +246,45 @@ describe("account and topic policies", () => {
     const subsAfter = (await (await SELF.fetch(`${BASE}/v1/subscriptions`, { headers: auth(a.token) })).json()) as { subscriptions: unknown[] };
     expect(subsAfter.subscriptions).toHaveLength(0);
   });
+
+  it("enforces token deny_transports, live/poll transport policies, and strict topic policy validation", async () => {
+    const a = await bootstrap("tokdeny", 5);
+    await publish("@tokdeny/alerts", "init", auth(a.token));
+    const hook = (await (await SELF.fetch(`${BASE}/v1/endpoints`, {
+      method: "POST", headers: auth(a.token),
+      body: JSON.stringify({ kind: "webhook", address: "https://hooks.example.com/tokdeny" }),
+    })).json()) as { id: string };
+    await SELF.fetch(`${BASE}/v1/subscriptions`, {
+      method: "POST", headers: auth(a.token),
+      body: JSON.stringify({ topic: "@tokdeny/alerts", endpoint_id: hook.id }),
+    });
+
+    // Token denying webhook and poll.
+    const tokRes = await SELF.fetch(`${BASE}/v1/tokens`, {
+      method: "POST", headers: auth(a.token),
+      body: JSON.stringify({ name: "no-hook", scopes: ["publish:@tokdeny/*", "subscribe:@tokdeny/*"], deny_transports: ["webhook", "poll"] }),
+    });
+    expect(tokRes.status).toBe(201);
+    const tok = (await tokRes.json()) as { id: string; token: string };
+    const list = (await (await SELF.fetch(`${BASE}/v1/tokens`, { headers: auth(a.token) })).json()) as { tokens: { id: string; deny_transports: string[] | null }[] };
+    expect(list.tokens.find((t) => t.id === tok.id)?.deny_transports).toEqual(["webhook", "poll"]);
+
+    // Dry-run with the token excludes webhook; poll with the token is forbidden.
+    const dry = (await (await publish("@tokdeny/alerts", "hi", auth(tok.token, { "X-Dry-Run": "1" }))).json()) as { plan: unknown[] };
+    expect(dry.plan).toEqual([]);
+    const polled = await SELF.fetch(`${BASE}/@tokdeny/alerts/json?poll=1`, { headers: { authorization: `Bearer ${tok.token}` } });
+    expect(polled.status).toBe(403);
+
+    // Invalid topic policy fields (unknown transport, out-of-range min_priority) are rejected.
+    const badTransport = await SELF.fetch(`${BASE}/v1/topics/@tokdeny/alerts`, {
+      method: "PUT", headers: auth(a.token),
+      body: JSON.stringify({ policy: { deny_transports: ["carrier_pigeon"] } }),
+    });
+    expect(badTransport.status).toBe(400);
+    const badMinPrio = await SELF.fetch(`${BASE}/v1/topics/@tokdeny/alerts`, {
+      method: "PUT", headers: auth(a.token),
+      body: JSON.stringify({ policy: { min_priority: { sms: 9 } } }),
+    });
+    expect(badMinPrio.status).toBe(400);
+  });
 });

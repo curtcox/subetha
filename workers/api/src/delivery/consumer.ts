@@ -13,7 +13,7 @@ export async function processJob(job: DeliveryJob, env: Env): Promise<"delivered
   const started = Date.now();
   const topic = topicStub(env, job.topic);
   const account = accountStub(env, job.owner);
-  if (job.sub.after_s && (await topic.isAcked(job.message.id!))) {
+  if (job.mode !== "all" && job.sub.after_s && (await topic.isAcked(job.message.id!))) {
     await account.release(job.reservation.ref);
     await topic.recordDelivery(job.message.id!, { sub: job.sub.id, transport: job.sub.transport, result: "skipped: acked" });
     emitMetric(env, { accountId: job.owner, event: "delivery", transport: job.sub.transport, sku: job.sku, outcome: "skipped_acked", latencyMs: Date.now() - started });

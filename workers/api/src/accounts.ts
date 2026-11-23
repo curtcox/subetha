@@ -1,5 +1,5 @@
 // Account directory (D1) helpers.
-import { HANDLE_RE, ulid, type Transport } from "@subetha/sdk/protocol";
+import { HANDLE_RE, TRANSPORTS, ulid, type Transport } from "@subetha/sdk/protocol";
 import { tierFor, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { topicStub } from "./durable/topic.ts";
@@ -120,12 +120,22 @@ export async function audit(env: Env, accountId: string, actor: string, action: 
     .bind(accountId, actor, action, detail === undefined ? null : JSON.stringify(detail), Date.now()).run();
 }
 
-const TRANSPORT_LIST = (v: unknown) => v === undefined || (Array.isArray(v) && v.every((x) => typeof x === "string"));
+const STRS = (v: unknown) => v === undefined || (Array.isArray(v) && v.every((x) => typeof x === "string"));
+const TRANSPORT_LIST = (v: unknown) => v === undefined || (Array.isArray(v) && v.every((x) => typeof x === "string" && (TRANSPORTS as readonly string[]).includes(x)));
 const NUM = (v: unknown) => v === undefined || (typeof v === "number" && Number.isSafeInteger(v) && v >= 0);
 const POS = (v: unknown) => v === undefined || (typeof v === "number" && Number.isSafeInteger(v) && v >= 1);
 const BOOL = (v: unknown) => v === undefined || typeof v === "boolean";
-const STRS = TRANSPORT_LIST;
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function validMinPriority(v: unknown): boolean {
+  if (v === undefined) return true;
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    if (!(TRANSPORTS as readonly string[]).includes(k)) return false;
+    if (typeof val !== "number" || !Number.isSafeInteger(val) || val < 1 || val > 5) return false;
+  }
+  return true;
+}
 
 function validQuietHours(v: unknown): boolean {
   if (v === undefined) return true;
@@ -147,7 +157,7 @@ export function validatePolicy(p: unknown): TopicPolicy {
     ["anon_rate_per_min", NUM], ["anon_daily_cap_micros", NUM], ["rate_per_min", POS], ["burst", POS],
     ["max_cost_per_message_micros", NUM], ["daily_cap_micros", NUM], ["monthly_cap_micros", NUM], ["retention_s", NUM],
     ["allowed_publishers", STRS], ["email_senders", STRS], ["allowed_readers", STRS], ["allow_transports", TRANSPORT_LIST], ["deny_transports", TRANSPORT_LIST],
-    ["min_priority", (v) => v === undefined || (typeof v === "object" && v !== null)],
+    ["min_priority", validMinPriority],
     ["quiet_hours", validQuietHours],
   ];
   for (const [k, ok] of checks) if (!ok(x[k])) throw new ApiError("bad_request", `invalid policy field: ${k}`);

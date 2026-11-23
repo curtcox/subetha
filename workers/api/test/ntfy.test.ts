@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseActions, parseJsonPublish, parseTopicPath } from "../src/ntfy.ts";
+import { parseActions, parseHeaderPublish, parseJsonPublish, parseTopicPath } from "../src/ntfy.ts";
 import { planDeliveries, inQuietHours } from "../src/routing.ts";
 import prices from "@subetha/pricing/prices.json";
 import type { PriceTable } from "@subetha/pricing";
@@ -54,6 +54,39 @@ describe("parseJsonPublish", () => {
     });
     await expect(parseJsonPublish(req)).rejects.toThrow(/max_cost_usd/);
   });
+
+  it("supports X-Dry-Run: yes and ?dry-run=1 consistently", async () => {
+    const req = new Request("https://subetha.test/?dry-run=yes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ topic: "@alice/doorbell", message: "x" }),
+    });
+    const parsed = await parseJsonPublish(req);
+    expect(parsed.dryRun).toBe(true);
+  });
+});
+
+describe("parseHeaderPublish", () => {
+  it("parses X-Content-Type, Content-Type, and X-Hops", async () => {
+    const req = new Request("https://subetha.test/@alice/door", {
+      method: "POST",
+      headers: { "x-content-type": "application/json", "x-hops": "3" },
+      body: '{"ok":true}',
+    });
+    const parsed = await parseHeaderPublish(req, "@alice/door");
+    expect(parsed.envelope.content_type).toBe("application/json");
+    expect(parsed.envelope.hops).toBe(3);
+
+    const inferred = await parseHeaderPublish(
+      new Request("https://subetha.test/@alice/door", { method: "POST", headers: { "content-type": "application/octet-stream" }, body: "AQID" }),
+      "@alice/door",
+    );
+    expect(inferred.envelope.content_type).toBe("application/octet-stream");
+
+    await expect(
+      parseHeaderPublish(new Request("https://subetha.test/@alice/door", { method: "POST", headers: { "x-hops": "99" }, body: "hi" }), "@alice/door"),
+    ).rejects.toThrow(/X-Hops/);
+  });
 });
 
 describe("planDeliveries", () => {
@@ -92,5 +125,27 @@ describe("planDeliveries", () => {
     const tight = planDeliveries({ ...base, queued, priority: 5, deadlineS: 60 });
     expect(tight.deliveries.map((d) => d.subscriber)).toEqual(["c1", "push"]);
     expect(tight.dropped.map((d) => [d.subscriber, d.reason])).toEqual([["sms", "past deadline"], ["voice", "past deadline"]]);
+  });
+  it("enforces transport policies and min_priority on live subscribers and prevents subscriptions from weakening topic min_priority", () => {
+    const live = [{ id: "w1", transport: "ws" as const }, { id: "s1", transport: "sse" as const }];
+    const denied = planDeliveries({ ...base, liveSubscribers: live, queued: [], denyLists: [["ws"]] });
+    expect(denied.deliveries.map((d) => [d.subscriber, d.transport])).toEqual([["s1", "sse"]]);
+    expect(denied.dropped).toEqual([{ subscriber: "w1", transport: "ws", reason: "transport denied by policy" }]);
+
+    const subWeak = [{ id: "sms", transport: "sms" as const, endpoint: "e2", min_priority: 1 }];
+    const strictTopic = planDeliveries({ ...base, liveSubscribers: [], queued: subWeak, priority: 3, policy: { min_priority: { sms: 4 } } });
+    expect(strictTopic.deliveries).toEqual([]);
+    expect(strictTopic.dropped).toEqual([{ subscriber: "sms", transport: "sms", reason: "below minimum priority" }]);
+  });
+  it("sorts any mode cheapest-first and fast mode fastest-first", () => {
+    const mix = [
+      { id: "email", transport: "email" as const, endpoint: "e1" },
+      { id: "sms", transport: "sms" as const, endpoint: "e2" },
+      { id: "hook", transport: "webhook" as const, endpoint: "e3" },
+    ];
+    const anyPlan = planDeliveries({ ...base, liveSubscribers: [], queued: mix, mode: "any" });
+    expect(anyPlan.deliveries.map((d) => d.transport)).toEqual(["webhook", "email", "sms"]);
+    const fastPlan = planDeliveries({ ...base, liveSubscribers: [], queued: mix, mode: "fast" });
+    expect(fastPlan.deliveries.map((d) => d.transport)).toEqual(["webhook", "sms", "email"]);
   });
 });
