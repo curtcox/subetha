@@ -396,6 +396,16 @@ export class SubEtha {
     return { stored };
   }
 
+  /**
+   * Uses `key` (32 bytes, id `kid`) for a topic's E2EE from now on: publishes are encrypted with it
+   * and received messages under it are decrypted. `null` forgets the topic's key.
+   */
+  setTopicKey(topic: string, key: { kid: string; key: Uint8Array } | null): void {
+    if (!key) { delete this.topicKeys[topic]; return; }
+    if (key.key.length !== 32) throw new Error("topic key must be 32 bytes");
+    this.topicKeys[topic] = { kid: key.kid, key: key.key };
+  }
+
   /** Wrapped keys: as a device, the ones addressed to it; as an admin, all of your topics' (GET /v1/keys). */
   listWrappedKeys(topic?: string) {
     return this.request<{ keys: (WrappedKey & { created_at: number })[] }>("GET", `/v1/keys${topic ? `?topic=${encodeURIComponent(topic)}` : ""}`);

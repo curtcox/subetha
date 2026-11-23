@@ -29,6 +29,8 @@ What's covered:
 - dry runs, which cost one API call and deliver nothing;
 - HTTP 402 with the shortfall, from curl and from the console;
 - a scoped token made in the console, which can publish only where its scope allows;
+- E2EE: a topic key made in the console is wrapped to an enrolled device; the console encrypts
+  what it sends and decrypts its inbox, the relay stores ciphertext, and the device opens the key;
 - device enrollment: the device-code link opens the Devices tab with the code filled in, the
   approved device publishes with signed requests, and revoking it in the console locks it out;
 - escalation through the real delivery queue: an urgent message nobody acks goes to SMS after

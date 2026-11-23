@@ -90,3 +90,7 @@ details table { margin-bottom: 10px; }
 .status-banner.bad { border-color: var(--bad); }
 .state { white-space: nowrap; }
 .state-ok { color: var(--ok); } .state-bad { color: var(--bad); } .state-off { color: var(--muted); }
+fieldset { border: 1px solid var(--line); border-radius: 6px; margin: 8px 0; padding: 6px 10px; }
+fieldset legend { font-size: 13px; color: var(--muted); padding: 0 4px; }
+label.check { display: inline-flex; align-items: center; gap: 6px; margin: 4px 14px 4px 0; color: var(--fg); }
+label.check input { width: auto; }

@@ -20,9 +20,17 @@ async function getToken() {
   return load("subetha.token");
 }
 
+// E2EE topic keys this console uses: topic → { kid, key (base64url) }. Kept in memory, and in
+// local storage only when "Remember keys in this browser" is ticked.
+const KEYRING = "subetha.topicKeys";
+let keyring = (() => { try { return JSON.parse(load(KEYRING) || "{}"); } catch { return {}; } })();
+const rememberKeys = () => load(KEYRING) !== null;
+function saveKeyring(remember = rememberKeys()) { store(KEYRING, remember ? JSON.stringify(keyring) : null); }
+const topicKeysFor = () => Object.fromEntries(Object.entries(keyring).map(([t, k]) => [t, { kid: k.kid, key: SubEtha.protocol.base64urlDecode(k.key) }]));
+
 async function makeClient() {
   const token = await getToken();
-  return token ? new SubEtha({ baseUrl: location.origin, token }) : null;
+  return token ? new SubEtha({ baseUrl: location.origin, token, topicKeys: topicKeysFor() }) : null;
 }
 
 async function init() {
@@ -159,7 +167,8 @@ function subscribe() {
   const topics = $("subTopic").value.split(",").map((s) => s.trim()).filter(Boolean);
   sub = client.subscribe(topics, (m) => {
     const li = document.createElement("li");
-    li.innerHTML = `<span class="muted">${new Date(m.time * 1000).toLocaleTimeString()} ${esc(m.topic)} p${m.priority ?? 3}</span><br>${m.title ? `<b>${esc(m.title)}</b> ` : ""}${esc(m.message)}`;
+    const body = m.enc ? `<span class="muted">🔒 Encrypted with key <code>${esc(m.enc.kid)}</code>, which isn't in this browser (Topics → End-to-end encryption keys).</span>` : `${m.title ? `<b>${esc(m.title)}</b> ` : ""}${esc(m.message)}`;
+    li.innerHTML = `<span class="muted">${new Date(m.time * 1000).toLocaleTimeString()} ${esc(m.topic)} p${m.priority ?? 3}</span><br>${body}`;
     $("inbox").prepend(li);
   }, { since: "1h", onError: (e) => console.warn(e) });
 }
@@ -184,12 +193,83 @@ $("pushBtn").onclick = async () => {
 
 async function loadTopics() {
   const { topics } = await client.topics();
+  loadKeys(topics).catch((e) => { $("keyMsg").textContent = `${e.code ?? "error"}: ${e.message}`; });
   $("topicRows").innerHTML = topics.map((t) => `<tr><td><code>${esc(t.name)}</code></td><td><code>${esc(JSON.stringify(t.policy))}</code></td><td><button class="secondary" data-edit="${esc(t.name)}">Edit</button></td></tr>`).join("") || `<tr><td colspan=3 class="muted">No topics yet. Publishing to @${esc(me.handle)}/anything creates one.</td></tr>`;
   document.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => {
     const t = topics.find((x) => x.name === b.dataset.edit);
     $("topicName").value = t.name; $("topicPolicy").value = JSON.stringify(t.policy, null, 2);
   });
 }
+// ---------- E2EE topic keys (spec §5.1) ----------
+const newKid = () => `k${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${SubEtha.protocol.base64urlEncode(crypto.getRandomValues(new Uint8Array(3)))}`;
+let keyDevices = [];
+async function loadKeys(topics) {
+  const sel = $("keyTopic");
+  const current = sel.value;
+  sel.innerHTML = topics.map((t) => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join("") || `<option value="">No topics yet</option>`;
+  if (topics.some((t) => t.name === current)) sel.value = current;
+  const { devices } = await client.request("GET", "/v1/devices");
+  keyDevices = devices.filter((d) => !d.revoked_at);
+  $("keyDevices").innerHTML = `<legend>Wrap new keys for these devices</legend>` + (keyDevices.map((d) => `<label class="check"><input type="checkbox" data-keydev="${esc(d.id)}" checked> ${esc(d.name || d.id.slice(0, 14) + "…")}</label>`).join("") || `<span class="muted">No enrolled devices: the key can only be shared by hand.</span>`);
+  await loadKeyRows();
+  renderLocalKeys();
+}
+async function loadKeyRows() {
+  const topic = $("keyTopic").value;
+  if (!topic) { $("keyRows").innerHTML = ""; return; }
+  const { keys } = await client.listWrappedKeys(topic);
+  const name = (id) => keyDevices.find((d) => d.id === id)?.name || `${id.slice(0, 14)}…`;
+  $("keyRows").innerHTML = keys.map((k) => `<tr><td><code>${esc(k.kid)}</code></td><td>${esc(name(k.to))}</td><td>${esc(when(k.created_at))}</td><td><button class="secondary" data-keydel="${esc(k.kid)}" data-keydevice="${esc(k.to)}">Remove</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">No wrapped keys for this topic.</td></tr>`;
+  document.querySelectorAll("[data-keydel]").forEach((b) => b.onclick = async () => {
+    if (!confirm("Remove this wrapped key? That device won't be able to fetch it again (it keeps any copy it already has).")) return;
+    await client.deleteWrappedKeys(topic, { kid: b.dataset.keydel, device: b.dataset.keydevice }).catch((e) => alert(e.message));
+    loadKeyRows();
+  });
+}
+function renderLocalKeys() {
+  $("keyRemember").checked = rememberKeys();
+  $("localKeyRows").innerHTML = Object.entries(keyring).map(([t, k]) => `<tr><td><code>${esc(t)}</code></td><td><code>${esc(k.kid)}</code></td><td><button class="secondary" data-keyforget="${esc(t)}">Forget</button></td></tr>`).join("") || `<tr><td class="muted">No keys in this browser.</td></tr>`;
+  document.querySelectorAll("[data-keyforget]").forEach((b) => b.onclick = () => useKey(b.dataset.keyforget, null));
+}
+/** Adds (or with null, forgets) a topic key for this console, then re-subscribes so the inbox decrypts. */
+function useKey(topic, k) {
+  if (k) keyring[topic] = k; else delete keyring[topic];
+  saveKeyring();
+  client.setTopicKey(topic, k ? { kid: k.kid, key: SubEtha.protocol.base64urlDecode(k.key) } : null);
+  renderLocalKeys();
+  if (sub) subscribe();
+}
+$("keyTopic").onchange = () => loadKeyRows().catch((e) => { $("keyMsg").textContent = e.message; });
+$("keyRemember").onchange = () => saveKeyring($("keyRemember").checked);
+$("keyNew").onclick = async () => {
+  const topic = $("keyTopic").value;
+  const say = (t) => { $("keyMsg").textContent = t; };
+  if (!topic) return say("Pick a topic first.");
+  const devices = [...document.querySelectorAll("[data-keydev]:checked")].map((i) => i.dataset.keydev);
+  const key = crypto.getRandomValues(new Uint8Array(32));
+  const kid = newKid();
+  try {
+    if (devices.length) await client.shareTopicKey(topic, kid, key, devices);
+    const k = { kid, key: SubEtha.protocol.base64urlEncode(key) };
+    useKey(topic, k);
+    $("keyOut").hidden = false;
+    $("keyOut").textContent = `Topic: ${topic}\nKey id: ${kid}\nKey: ${k.key}\n\nThis browser now encrypts to ${topic} with it. To share it by hand, copy it now: SubEtha can't show it again.`;
+    say(devices.length ? `Wrapped for ${devices.length} device${devices.length > 1 ? "s" : ""}.` : "Not wrapped for any device.");
+    loadKeyRows();
+  } catch (e) { say(`${e.code ?? "error"}: ${e.message}`); }
+};
+$("keyAdd").onclick = () => {
+  const topic = $("keyAddTopic").value.trim(), kid = $("keyAddKid").value.trim(), key = $("keyAddKey").value.trim();
+  try {
+    if (!SubEtha.protocol.isTopic(topic)) throw new Error("not a topic name");
+    if (!/^[A-Za-z0-9_.-]{1,64}$/.test(kid)) throw new Error("key ids are 1–64 characters of A–Z a–z 0–9 _ . -");
+    if (SubEtha.protocol.base64urlDecode(key).length !== 32) throw new Error("a key is 32 bytes (43 base64url characters)");
+    useKey(topic, { kid, key });
+    $("keyAddKey").value = "";
+    $("keyMsg").textContent = `Added a key for ${topic}.`;
+  } catch (e) { $("keyMsg").textContent = e.message; }
+};
+
 $("genSecret").onclick = () => { $("topicName").value = SubEtha.protocol.secretTopic(); };
 $("topicSave").onclick = async () => {
   try {
@@ -405,8 +485,11 @@ $("devApprove").onclick = async () => {
 };
 $("devEnroll").onclick = async () => {
   try {
-    await client.request("POST", "/v1/devices", { device_id: $("devId").value.trim(), name: $("devName").value.trim() || undefined });
-    $("devEnrollMsg").textContent = "Enrolled."; loadDevices();
+    let proof;
+    try { proof = JSON.parse($("devId").value); } catch { throw { code: "bad_request", message: "paste the JSON from enrollmentProof(key): device_id, time, and proof" }; }
+    const { device_id, time, proof: sig } = proof ?? {};
+    await client.request("POST", "/v1/devices", { device_id, time, proof: sig, name: $("devName").value.trim() || undefined });
+    $("devEnrollMsg").textContent = "Enrolled."; $("devId").value = ""; loadDevices();
   } catch (e) { $("devEnrollMsg").textContent = `${e.code}: ${e.message}`; }
 };
 

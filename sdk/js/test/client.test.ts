@@ -41,6 +41,24 @@ describe("SubEtha client", () => {
     expect(got).toMatchObject({ message: "secret", title: "shh" });
   });
 
+  it("setTopicKey adds and forgets a topic's E2EE key on a live client", async () => {
+    const key = crypto.getRandomValues(new Uint8Array(32));
+    let stored = "";
+    const { f } = mockFetch((u, init) => {
+      if (u.endsWith("/")) { stored = init.body as string; return new Response(stored); }
+      return new Response(stored + "\n");
+    });
+    const c = new SubEtha({ baseUrl: "https://x.test", fetch: f, token: "se_t" });
+    expect(() => c.setTopicKey("@a/b", { kid: "k1", key: new Uint8Array(16) })).toThrow(/32 bytes/);
+    c.setTopicKey("@a/b", { kid: "k1", key });
+    const sent = await c.publish("@a/b", "secret");
+    expect(sent.enc).toMatchObject({ kid: "k1" });
+    expect((await c.poll("@a/b"))[0]).toMatchObject({ message: "secret" });
+    c.setTopicKey("@a/b", null);
+    expect((await c.poll("@a/b"))[0]!.message).not.toBe("secret");
+    await expect(c.publish("@a/b", "x", { encrypt: true })).rejects.toThrow(/no E2EE key/);
+  });
+
   it("signs envelopes and requests through a custom DeviceSigner, and verifies with verifyEnvelope", async () => {
     const deviceKey = await deviceKeyFromSeed(hexDecode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"));
     const inner = webCryptoSigner(deviceKey);

@@ -46,7 +46,7 @@ curl -H "Authorization: Bearer $SUBETHA_TOKEN" https://subetha.us/@me/backups/js
   sample, the Expo sample's web build, and Android APKs) and deploy workflows, infrastructure notes
   (`infra/`), legal drafts (`docs/legal/`).
 - **Web console and tools** (`apps/site`): the console (send/receive, topics, endpoints and
-  escalation subscriptions, an endpoint inspector (test deliveries showing the signed webhook request and response, plus an in-browser signature checker), Slack, devices, tokens, billing, usage chart and limits, traces, audit log, and an
+  escalation subscriptions, an endpoint inspector (test deliveries showing the signed webhook request and response, plus an in-browser signature checker), Slack, devices, E2EE topic keys (make, wrap to devices, use in the browser), tokens, billing, usage chart and limits, traces, audit log, and an
   OpenAPI-driven API explorer; "copy as" curl/JS/Python/Swift/Kotlin/Dart), plus a pricing
   calculator and an offline route simulator at `/tools/` that bundle the relay's own price table
   and planner, and the Edge lab (sound, animated QR, and Bluetooth between nearby browsers).

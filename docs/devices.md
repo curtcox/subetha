@@ -35,6 +35,8 @@ The owner's side, and direct enrollment when the device can hand you its id and 
 
 <!-- include: samples/curl/device-flow.sh -->
 
+In the console, paste that JSON into **Devices → Enroll with a proof** within 5 minutes of making it.
+
 ## Signed requests
 
 Every request from an enrolled device carries:

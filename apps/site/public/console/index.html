@@ -75,6 +75,20 @@
         <label>Policy (JSON)</label><textarea id="topicPolicy" rows="6">{ "public_publish": false, "retention_s": 43200 }</textarea>
         <p><button id="topicSave">Save</button> <span id="topicMsg" class="muted"></span></p>
       </div>
+      <div class="card" id="keysCard">
+        <h3>End-to-end encryption keys</h3>
+        <p class="muted">A topic key encrypts titles, messages, and attachments so the relay only routes ciphertext. The relay keeps a key only wrapped to each device you pick, which can open it; nobody else can, including SubEtha.</p>
+        <label for="keyTopic">Topic</label><select id="keyTopic"></select>
+        <fieldset id="keyDevices"><legend>Wrap new keys for these devices</legend></fieldset>
+        <p><button id="keyNew">New key</button> <span id="keyMsg" class="muted"></span></p>
+        <pre id="keyOut" hidden></pre>
+        <div class="scroll"><table><thead><tr><th>Key id</th><th>Device</th><th>Created</th><th></th></tr></thead><tbody id="keyRows"></tbody></table></div>
+        <h4>Keys in this browser</h4>
+        <p class="muted">These decrypt the inbox and encrypt what this console sends to the topic. Paste a key shared with you out of band to add it.</p>
+        <div class="row"><input id="keyAddTopic" placeholder="@you/topic" aria-label="Topic"><input id="keyAddKid" placeholder="key id" aria-label="Key id"><input id="keyAddKey" placeholder="key (base64url, 43 characters)" aria-label="Key" autocomplete="off"><button id="keyAdd" class="secondary">Add</button></div>
+        <p><label class="check"><input type="checkbox" id="keyRemember"> Remember keys in this browser (stored unencrypted in its local storage)</label></p>
+        <table><tbody id="localKeyRows"></tbody></table>
+      </div>
     </section>
 
     <section data-panel="endpoints" hidden>
@@ -150,9 +164,9 @@
           <p id="devMsg" class="muted"></p>
         </div>
         <div class="card">
-          <h3>Enroll by device id</h3>
-          <p class="muted">For devices you provision yourself. The id is the device's public key (<code>dev_…</code>).</p>
-          <label for="devId">Device id</label><input id="devId" placeholder="dev_…" autocomplete="off">
+          <h3>Enroll with a proof</h3>
+          <p class="muted">For devices you provision yourself: paste the JSON the device makes with <code>enrollmentProof(key)</code> in any SDK. It proves the device holds its key and is valid for 5 minutes.</p>
+          <label for="devId">Enrollment proof</label><textarea id="devId" rows="3" placeholder='{"device_id":"dev_…","time":1763750000,"proof":"…"}' autocomplete="off" spellcheck="false"></textarea>
           <label for="devName">Name</label><input id="devName">
           <p><button id="devEnroll" class="secondary">Enroll</button> <span id="devEnrollMsg" class="muted"></span></p>
         </div>

@@ -50,3 +50,18 @@ test("a device enrolled from the console publishes with signed requests until it
   const err = await device.publish(topic, "still there?").then(() => null, (e: { code?: string }) => e);
   expect(err?.code).toBe("unauthorized");
 });
+
+test("a device provisioned by hand is enrolled by pasting its enrollment proof", async ({ page, request }) => {
+  const acct = await bootstrap(request, 1);
+  const key = await generateDeviceKey();
+  await signIn(page, acct.token);
+  await page.locator('#tabs button[data-tab="devices"]').click();
+  await page.locator("#devId").fill("dev_not-json");
+  await page.locator("#devEnroll").click();
+  await expect(page.locator("#devEnrollMsg")).toContainText("paste the JSON");
+  await page.locator("#devId").fill(JSON.stringify(await enrollmentProof(key)));
+  await page.locator("#devName").fill("shed-sensor");
+  await page.locator("#devEnroll").click();
+  await expect(page.locator("#devEnrollMsg")).toHaveText("Enrolled.");
+  await expect(page.locator("#devRows tr", { hasText: "shed-sensor" })).toContainText("active");
+});

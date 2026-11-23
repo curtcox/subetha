@@ -130,6 +130,12 @@ have kept the old key).
 
 <!-- include: samples/ts/key-sharing.ts#snippet -->
 
+In the console, **Topics → End-to-end encryption keys** does the same without code: **New key**
+makes a key, wraps it for the enrolled devices you tick, and shows it once so you can share it by
+hand. The console then encrypts what it sends to the topic and decrypts its inbox. Keys pasted
+under **Keys in this browser** work the same way; they're kept in memory unless you choose to
+remember them in the browser's local storage.
+
 | Endpoint | Who | Does |
 |---|---|---|
 | `PUT /v1/keys` | admin | Stores up to 100 wrapped keys (`{"keys": [...]}`) for topics you own; same topic + kid + device replaces. |
@@ -138,7 +144,7 @@ have kept the old key).
 | `DELETE /v1/keys?topic=[&kid=][&device=]` | admin | Deletes matching wrapped keys. |
 
 Each call is metered as one API request. In the TS SDK: `shareTopicKey`, `loadTopicKeys`,
-`listWrappedKeys`, `deleteWrappedKeys`; in the Rust core, `keywrap::wrap_topic_key` and
+`listWrappedKeys`, `deleteWrappedKeys`, and `setTopicKey` (use a key you already hold); in the Rust core, `keywrap::wrap_topic_key` and
 `unwrap_topic_key`.
 
 ## Responses and errors
