@@ -38,6 +38,7 @@ const CALC_FIELDS: [key: string, label: string, hint: string][] = [
   ["api", "Other API requests per month", "polls, dry runs, downloads"],
   ["inmail", "Inbound emails per month", ""],
   ["insms", "Inbound SMS segments per month", ""],
+  ["inwa", "Inbound WhatsApp messages per month", ""],
   ["topups", "Top-ups in the last 12 months (USD)", "sets your price tier"],
 ];
 
@@ -90,6 +91,7 @@ export function mountPricing(root: HTMLElement) {
       apiRequestsPerMonth: num(byKey("api")),
       inboundEmailsPerMonth: num(byKey("inmail")),
       inboundSmsSegmentsPerMonth: num(byKey("insms")),
+      inboundWhatsappPerMonth: num(byKey("inwa")),
     };
     const r = calculate(input);
     const p = new URLSearchParams();
@@ -142,7 +144,8 @@ export function mountSimulator(root: HTMLElement, opts: { consoleUrl?: string } 
       <div class="row">
         <div><label for="s_allow">X-Allow</label><input id="s_allow" placeholder="all"></div>
         <div><label for="s_deny">X-Deny</label><input id="s_deny" placeholder="none"></div>
-        <div><label for="s_tok">Token transports</label><input id="s_tok" placeholder="all"></div>
+        <div><label for="s_tok">Token allow</label><input id="s_tok" placeholder="all"></div>
+        <div><label for="s_tok_deny">Token deny</label><input id="s_tok_deny" placeholder="none"></div>
       </div>
       <div class="row">
         <div><label for="s_tier">Price tier</label><select id="s_tier">${PRICES.tiers.map((t) => `<option>${t.id}</option>`).join("")}</select></div>
@@ -195,6 +198,7 @@ export function mountSimulator(root: HTMLElement, opts: { consoleUrl?: string } 
       allow: list($<HTMLInputElement>("s_allow").value) as Transport[],
       deny: list($<HTMLInputElement>("s_deny").value) as Transport[],
       tokenTransports: list($<HTMLInputElement>("s_tok").value) as Transport[],
+      tokenDenyTransports: list($<HTMLInputElement>("s_tok_deny").value) as Transport[],
       maxCostUsd: maxRaw === "" ? undefined : Number(maxRaw),
       deadlineS: deadlineRaw === "" ? undefined : Number(deadlineRaw),
       nowMs: now.getTime(),

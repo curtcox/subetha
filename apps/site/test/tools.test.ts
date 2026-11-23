@@ -21,6 +21,17 @@ describe("pricing calculator", () => {
     const std = calculate({ topupsUsd: 0, messagesPerMonth: 100, deliveries: { sms: 1 } });
     const vol = calculate({ topupsUsd: 5000, messagesPerMonth: 100, deliveries: { sms: 1 } });
     expect(vol.totalMicros).toBeLessThan(std.totalMicros);
+    // Device & endpoint rent uses the account's current volume tier (matching cron.ts).
+    const stdRent = calculate({ topupsUsd: 0, messagesPerMonth: 0, deliveries: {}, devices: 50, endpoints: 50 });
+    const volRent = calculate({ topupsUsd: 5000, messagesPerMonth: 0, deliveries: {}, devices: 50, endpoints: 50 });
+    expect(volRent.totalMicros).toBeLessThan(stdRent.totalMicros);
+  });
+
+  it("bills inbound WhatsApp messages when present", () => {
+    const r = calculate({ topupsUsd: 0, messagesPerMonth: 0, deliveries: {}, inboundWhatsappPerMonth: 10 });
+    const wa = r.lines.find((l) => l.sku === "inbound_whatsapp")!;
+    expect(wa.quantity).toBe(10);
+    expect(wa.micros).toBe(10 * actionPriceMicros(PRICES, "inbound_whatsapp"));
   });
 
   it("bills SMS per segment of the typical message", () => {
@@ -81,6 +92,7 @@ describe("route simulator", () => {
     expect(simulate({ ...base, mode: "cheap", subscriptions: subs }).steps.map((s) => s.transport)).toEqual(["ws"]);
     expect(simulate({ ...base, priority: 5, deny: ["sms"], subscriptions: subs }).plan.dropped[0]!.reason).toBe("transport denied by policy");
     expect(simulate({ ...base, priority: 5, tokenTransports: ["ws", "webpush"], subscriptions: subs }).plan.dropped[0]!.reason).toBe("transport denied by policy");
+    expect(simulate({ ...base, priority: 5, tokenDenyTransports: ["sms"], subscriptions: subs }).plan.dropped[0]!.reason).toBe("transport denied by policy");
     const quiet = simulate({ ...base, policy: { quiet_hours: { start: "11:00", end: "13:00" } }, subscriptions: subs });
     expect(quiet.plan.dropped.every((d) => d.reason === "quiet hours")).toBe(true);
     // 12:00 UTC on Jan 1 is 06:00 in America/Chicago (CST, UTC-6): inside 22:00–07:00 local, outside 08:00–10:00 local.

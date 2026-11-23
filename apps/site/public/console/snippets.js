@@ -109,6 +109,7 @@ c.publish(${a.join(", ")})`;
       if (p.priority) o.push(`priority: ${p.priority}`);
       if (p.tags.length) o.push(`tags: ${JSON.stringify(p.tags)}`);
       if (p.click) o.push(`click: ${dq(p.click)}`);
+      if (p.icon) o.push(`icon: ${dq(p.icon)}`);
       if (p.markdown) o.push(`contentType: "text/markdown"`);
       if (p.idempotencyKey) o.push(`idempotencyKey: ${dq(p.idempotencyKey)}`);
       if (hasRoute) {
@@ -131,6 +132,7 @@ try await client.publish(${dq(p.topic)}, ${dq(p.message)}${o.length ? `, Publish
       if (p.priority) o.push(`priority = ${p.priority}`);
       if (p.tags.length) o.push(`tags = listOf(${p.tags.map(kt).join(", ")})`);
       if (p.click) o.push(`click = ${kt(p.click)}`);
+      if (p.icon) o.push(`icon = ${kt(p.icon)}`);
       if (p.markdown) o.push(`contentType = "text/markdown"`);
       if (p.idempotencyKey) o.push(`idempotencyKey = ${kt(p.idempotencyKey)}`);
       if (hasRoute) {
@@ -153,6 +155,7 @@ client.publish(${kt(p.topic)}, ${kt(p.message)}${o.length ? `, PublishOptions(${
       if (p.priority) o.push(`priority: ${p.priority}`);
       if (p.tags.length) o.push(`tags: [${p.tags.map(dartStr).join(", ")}]`);
       if (p.click) o.push(`click: ${dartStr(p.click)}`);
+      if (p.icon) o.push(`icon: ${dartStr(p.icon)}`);
       if (p.markdown) o.push(`contentType: 'text/markdown'`);
       if (p.idempotencyKey) o.push(`idempotencyKey: ${dartStr(p.idempotencyKey)}`);
       if (hasRoute) {

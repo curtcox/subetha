@@ -51,6 +51,7 @@ export interface CalcInput {
   apiRequestsPerMonth?: number;
   inboundEmailsPerMonth?: number;
   inboundSmsSegmentsPerMonth?: number;
+  inboundWhatsappPerMonth?: number;
 }
 
 export interface CalcResult {
@@ -102,12 +103,12 @@ export function calculate(input: CalcInput, prices: PriceTable = PRICES): CalcRe
   }
   const hours = Math.max(0, input.connections ?? 0) * DAYS_PER_MONTH * 24;
   add("Live connections", "connection_hour", hours, Math.ceil(rentNanos(prices, "connection_hour", hours, tier) / 1000));
-  // Device and endpoint rent is metered daily by the cron at the standard tier.
+  // Device and endpoint rent is metered daily by the cron at the account's current tier.
   const devices = Math.max(0, input.devices ?? 0), endpoints = Math.max(0, input.endpoints ?? 0);
   if (devices || endpoints) {
-    const daily = Math.ceil((rentNanos(prices, "device_day", devices) + rentNanos(prices, "endpoint_day", endpoints)) / 1000);
-    const dShare = devices ? rentNanos(prices, "device_day", devices) : 0;
-    const eShare = endpoints ? rentNanos(prices, "endpoint_day", endpoints) : 0;
+    const dShare = devices ? rentNanos(prices, "device_day", devices, tier) : 0;
+    const eShare = endpoints ? rentNanos(prices, "endpoint_day", endpoints, tier) : 0;
+    const daily = Math.ceil((dShare + eShare) / 1000);
     const month = daily * DAYS_PER_MONTH;
     const dMicros = Math.round((month * dShare) / (dShare + eShare));
     add("Enrolled devices", "device_day", devices * DAYS_PER_MONTH, dMicros);
@@ -119,6 +120,8 @@ export function calculate(input: CalcInput, prices: PriceTable = PRICES): CalcRe
   add("Inbound email", "inbound_email", inMail, inMail * actionPriceMicros(prices, "inbound_email", tier));
   const inSms = Math.max(0, input.inboundSmsSegmentsPerMonth ?? 0);
   add("Inbound SMS", "inbound_sms_us", inSms, inSms * actionPriceMicros(prices, "inbound_sms_us", tier));
+  const inWa = Math.max(0, input.inboundWhatsappPerMonth ?? 0);
+  if (prices.skus.inbound_whatsapp) add("Inbound WhatsApp", "inbound_whatsapp", inWa, inWa * actionPriceMicros(prices, "inbound_whatsapp", tier));
 
   const totalMicros = lines.reduce((s, l) => s + l.micros, 0);
   const topup = topupFor(totalMicros, prices);
@@ -161,10 +164,11 @@ export interface SimInput {
   live: number;
   subscriptions: SimSubscription[];
   policy?: TopicPolicy;
-  /** X-Allow / X-Deny on the message, and the publishing token's transport allow-list. */
+  /** X-Allow / X-Deny on the message, and the publishing token's transport allow/deny lists. */
   allow?: Transport[];
   deny?: Transport[];
   tokenTransports?: Transport[];
+  tokenDenyTransports?: Transport[];
   maxCostUsd?: number;
   deadlineS?: number;
   nowMs?: number;
@@ -210,7 +214,7 @@ export function simulate(input: SimInput, prices: PriceTable = PRICES): SimResul
     mode: input.mode,
     priority: input.priority,
     allowLists: [input.allow?.length ? input.allow : null, input.tokenTransports?.length ? input.tokenTransports : null],
-    denyLists: [input.deny?.length ? input.deny : null],
+    denyLists: [input.deny?.length ? input.deny : null, input.tokenDenyTransports?.length ? input.tokenDenyTransports : null],
     policy,
     maxCostMicros: input.maxCostUsd !== undefined && input.maxCostUsd !== null && !Number.isNaN(input.maxCostUsd) ? Math.round(input.maxCostUsd * 1e6) : null,
     deadlineS: input.deadlineS !== undefined && input.deadlineS !== null && !Number.isNaN(input.deadlineS) && input.deadlineS >= 1 ? Math.floor(input.deadlineS) : null,

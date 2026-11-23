@@ -34,8 +34,14 @@ describe("copy as …", () => {
     expect(snippet("python", tricky)).toContain(`"deadline_s": 60`);
     expect(snippet("python", tricky)).toContain(`click="https://example.com/cam"`);
     expect(snippet("swift", tricky)).toContain("Route(mode: .all, maxCostUSD: 0.05, deadlineSeconds: 60");
+    expect(snippet("swift", tricky)).toContain(`icon: "https://example.com/bell.png"`);
+    expect(snippet("swift", tricky)).toContain(`contentType: "text/markdown"`);
     expect(snippet("kotlin", tricky)).toContain("deadlineS = 60");
+    expect(snippet("kotlin", tricky)).toContain(`icon = "https://example.com/bell.png"`);
+    expect(snippet("kotlin", tricky)).toContain(`contentType = "text/markdown"`);
     expect(snippet("dart", tricky)).toContain("deadlineS: 60");
+    expect(snippet("dart", tricky)).toContain(`icon: 'https://example.com/bell.png'`);
+    expect(snippet("dart", tricky)).toContain(`contentType: 'text/markdown'`);
     expect(snippet("js", tricky)).toContain("deadlineS: 60");
     expect(snippet("kotlin", tricky)).toContain("RouteMode.ALL");
     expect(snippet("kotlin", tricky)).toContain(`"Front's \\$door"`);
