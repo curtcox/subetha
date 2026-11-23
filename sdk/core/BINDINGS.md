@@ -124,10 +124,7 @@ Only the native libraries come from cargo or CI. Regenerate whenever `ffi.rs` ch
    and verifies with it on Hermes (`createClient({ core, deviceSeed })`), and CI builds it into
    an x86_64 Android development build of the Expo sample. Still to do: an iOS build of that
    sample in CI (`ubrn build ios` + `expo prebuild` + `xcodebuild`), and publishing the package.
-4. **Flutter.** Use `subetha_core` in `samples/flutter`: an Edge screen with platform plugins
-   for audio, camera, and BLE.
-5. **Platform shims.** Done for the Android and iOS samples (BLE peripheral + central, sound,
-   camera QR; see `docs/edge.md`). LAN (Network.framework / `MulticastSocket`) on phones is
-   still to do.
+4. **Flutter.** Done: `samples/flutter` includes the Edge tab on `subetha_core` (sound, animated QR, BLE central, relay bridge). LAN gossip and wrapped-key FFI can be added on the next `flutter_rust_bridge_codegen` regeneration.
+5. **Platform shims.** Done for Android and iOS samples (BLE peripheral + central, sound, camera QR, and LAN gossip via `LanNode` / `LanGossip`; see `docs/edge.md`). Apple's multicast entitlement is still needed for LAN on physical iPhones.
 6. **Conformance.** The Kotlin and Swift core tests load every applicable vector file:
    `canonical.json`, `topics.json`, `signatures.json`, `e2ee.json`, and `edge.json`.

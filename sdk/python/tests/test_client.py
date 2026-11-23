@@ -234,3 +234,53 @@ def test_share_and_load_topic_keys():
     assert c.load_topic_keys() == {"@a/vault": ("k2", bytes([2]) * 32)}
     other = device_key_from_seed(bytes([8]) * 32)
     assert c.load_topic_keys(device_key=other) == {}
+
+
+def test_auto_e2ee_ack_file_and_control_plane():
+    stored: list[dict] = []
+    acks: list[dict] = []
+    files: list[tuple[bytes, dict]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST" and req.url.path == "/":
+            env = json.loads(req.content)
+            stored.append(env)
+            return httpx.Response(200, json=env)
+        if req.method == "GET" and req.url.path == "/@alice/doorbell/json":
+            return httpx.Response(200, content=ndjson(*stored))
+        if req.method == "POST" and req.url.path == "/v1/ack":
+            acks.append(json.loads(req.content))
+            return httpx.Response(200, json={"acked": True})
+        if req.method == "PUT" and req.url.path == "/@alice/doorbell":
+            files.append((req.content, dict(req.headers)))
+            return httpx.Response(200, json={"id": "01JD5A2Z3K8Q9V6X7W4T1R0S2F", "topic": TOPIC, "message": "snap"})
+        if req.method == "GET" and req.url.path == "/v1/balance":
+            return httpx.Response(200, json={"available_usd_micros": 5_000_000, "reserved_usd_micros": 0})
+        if req.method == "DELETE" and req.url.path == "/v1/keys":
+            return httpx.Response(200, json={"deleted": 1})
+        return httpx.Response(404, json={"error": "not_found"})
+
+    key = bytes([42]) * 32
+    dev = device_key_from_seed(SEED)
+    c = Client("https://relay.test", token="tk", topic_keys={TOPIC: ("k42", key)}, transport=httpx.MockTransport(handler))
+    enc = c.publish(TOPIC, "secret code 4721", title="Vault", sign_with=dev)
+    assert enc["enc"]["kid"] == "k42"
+    assert enc["message"] != "secret code 4721"
+
+    # poll auto-decrypts and verifies signature
+    msgs = c.poll(TOPIC, verify=True, require_signature=True, priority=[3], tags=["a"])
+    assert len(msgs) == 1
+    assert msgs[0]["message"] == "secret code 4721"
+    assert msgs[0]["title"] == "Vault"
+
+    # subscribe auto_ack sends POST /v1/ack
+    sub_msgs = list(c.subscribe(TOPIC, reconnect=False, auto_ack=True, verify=True))
+    assert len(sub_msgs) == 1 and sub_msgs[0]["message"] == "secret code 4721"
+    assert acks == [{"topic": TOPIC, "id": enc["id"], "via": "stream"}]
+
+    # publish_file + control plane
+    c.publish_file(TOPIC, "snap.jpg", b"\xff\xd8\xff", content_type="image/jpeg", message="front door")
+    assert files[0][0] == b"\xff\xd8\xff"
+    assert files[0][1]["x-filename"] == "snap.jpg"
+    assert c.balance()["available_usd_micros"] == 5_000_000
+    assert c.delete_wrapped_keys(TOPIC, kid="k42") == 1

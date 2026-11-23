@@ -17,6 +17,8 @@ from .protocol import (
     TRANSPORTS,
     Deduper,
     DeviceKey,
+    decrypt_envelope,
+    encrypt_envelope,
     is_topic,
     parse_priority,
     sign_envelope,
@@ -24,6 +26,7 @@ from .protocol import (
     ulid,
     unwrap_topic_key,
     validate_envelope,
+    verify_envelope,
     wrap_topic_key,
 )
 
@@ -124,6 +127,7 @@ class Client:
         user_agent: str | None = None,
         device_key: DeviceKey | None = None,
         sign_requests: bool = False,
+        topic_keys: Mapping[str, tuple[str, bytes]] | None = None,
     ) -> None:
         """``sign_requests=True`` authenticates every request with ``device_key`` (an enrolled
         device, spec §8.1) instead of ``token``."""
@@ -132,6 +136,10 @@ class Client:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.device_key = device_key
+        self.topic_keys: dict[str, tuple[str, bytes]] = {}
+        if topic_keys:
+            for t, kv in topic_keys.items():
+                self.set_topic_key(t, kv)
         headers = {"User-Agent": user_agent or f"subetha-python/{__version__}"}
         if token and not sign_requests:
             headers["Authorization"] = f"Bearer {token}"
@@ -176,13 +184,19 @@ class Client:
         *,
         id: str | None = None,
         click: str | None = None,
+        icon: str | None = None,
+        actions: Sequence[Mapping[str, Any]] | None = None,
+        content_type: str | None = None,
+        expires: int | None = None,
+        hops: int | None = None,
+        encrypt: bool | None = None,
         extra: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Publishes a message and returns the relay's JSON response (the stored envelope).
 
-        Simple messages use ntfy headers (``POST /<topic>``). Signed messages, messages with
-        extension fields (``extra``), and titles/tags that can't travel in an HTTP header use the
-        JSON form (``POST /``). ``route`` is a mode string or a dict with ``mode``,
+        Simple messages use ntfy headers (``POST /<topic>``). Signed/encrypted messages, messages
+        with extension fields (``extra``), and titles/tags that can't travel in an HTTP header use
+        the JSON form (``POST /``). ``route`` is a mode string or a dict with ``mode``,
         ``max_cost_usd_micros``, ``deny``, ``allow``, ``deadline_s``.
         """
         if not is_topic(topic):
@@ -192,6 +206,10 @@ class Client:
         prio = parse_priority(priority)
         tag_list = [str(t) for t in tags] if tags else None
         r = _normalize_route(route)
+        tk = self.topic_keys.get(topic)
+        do_encrypt = (tk is not None) if encrypt is None else bool(encrypt)
+        if do_encrypt and tk is None:
+            raise ValueError(f"no E2EE topic key set for {topic}")
 
         headers: dict[str, str] = {}
         if dry_run:
@@ -202,8 +220,10 @@ class Client:
         header_ok = (title is None or _header_safe(title)) and all(_header_safe(t) and "," not in t for t in tag_list or [])
         if click is not None and not _header_safe(click):
             header_ok = False
+        if icon is not None and not _header_safe(icon):
+            header_ok = False
 
-        if sign_with is None and not extra and header_ok:
+        if sign_with is None and not do_encrypt and not extra and not actions and header_ok:
             if title is not None:
                 headers["X-Title"] = title
             if prio is not None:
@@ -212,6 +232,14 @@ class Client:
                 headers["X-Tags"] = ",".join(tag_list)
             if click is not None:
                 headers["X-Click"] = click
+            if icon is not None:
+                headers["X-Icon"] = icon
+            if content_type is not None:
+                headers["X-Content-Type"] = content_type
+            if expires is not None:
+                headers["X-Expires"] = str(int(expires))
+            if hops is not None:
+                headers["X-Hops"] = str(int(hops))
             if id is not None:
                 headers["X-Message-Id"] = id
             if r:
@@ -233,13 +261,27 @@ class Client:
             env["tags"] = tag_list
         if click is not None:
             env["click"] = click
+        if icon is not None:
+            env["icon"] = icon
+        if actions is not None:
+            env["actions"] = [dict(a) for a in actions]
+        if content_type is not None:
+            env["content_type"] = content_type
+        if expires is not None:
+            env["expires"] = int(expires)
+        if hops is not None:
+            env["hops"] = int(hops)
         if r:
             env["route"] = r
         if id is not None:
             env["id"] = id
-        if sign_with is not None:
+        if do_encrypt or sign_with is not None:
             env.setdefault("id", ulid())
             env.setdefault("time", int(time.time()))
+        if do_encrypt and tk is not None:
+            kid, key = tk
+            env = encrypt_envelope(env, key, kid)
+        if sign_with is not None:
             env = sign_envelope(env, sign_with)
         problems = validate_envelope(env)
         if problems:
@@ -249,13 +291,97 @@ class Client:
         resp = self._http.post("/", content=body, headers=headers)
         return self._json(resp)
 
+    def publish_envelope(self, env: Mapping[str, Any], *, idempotency_key: str | None = None) -> dict[str, Any]:
+        """Publishes a pre-built envelope (e.g. forwarded from an edge link) without rewriting it."""
+        payload = {k: v for k, v in env.items() if k != "event"}
+        headers = {"Content-Type": "application/json"}
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        return self._json(self._http.post("/", content=body, headers=headers))
+
+    def publish_file(
+        self,
+        topic: str,
+        filename: str,
+        data: bytes,
+        *,
+        content_type: str = "application/octet-stream",
+        message: str | None = None,
+        title: str | None = None,
+        priority: int | str | None = None,
+        tags: Sequence[str] | None = None,
+        click: str | None = None,
+        route: str | Mapping[str, Any] | None = None,
+        idempotency_key: str | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Uploads a file attachment to R2 and publishes a message referencing it (``PUT /<topic>``)."""
+        if not is_topic(topic):
+            raise ValueError(f"invalid topic: {topic!r}")
+        headers: dict[str, str] = {"Content-Type": content_type, "X-Filename": filename}
+        if message is not None:
+            headers["X-Message"] = message
+        if title is not None:
+            headers["X-Title"] = title
+        prio = parse_priority(priority)
+        if prio is not None and prio != 3:
+            headers["X-Priority"] = str(prio)
+        if tags:
+            headers["X-Tags"] = ",".join(str(t) for t in tags)
+        if click is not None:
+            headers["X-Click"] = click
+        r = _normalize_route(route)
+        if r:
+            headers.update(_route_headers(r))
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
+        if dry_run:
+            headers["X-Dry-Run"] = "1"
+        return self._json(self._http.put(f"/{topic}", content=data, headers=headers))
+
+    def estimate_file(self, topic: str, filename: str, data: bytes, **kwargs: Any) -> dict[str, Any]:
+        """Dry-run cost estimate for ``publish_file``."""
+        return self.publish_file(topic, filename, data, dry_run=True, **kwargs)
+
+    def ack(self, topic: str, message_id: str, via: str = "python") -> dict[str, Any]:
+        """Acknowledges a received message so escalation stops (``POST /v1/ack``)."""
+        return self._json(self._http.post("/v1/ack", json={"topic": topic, "id": message_id, "via": via}))
+
     # -- poll / subscribe --
 
-    def poll(self, topic: str | Sequence[str], since: str | int | None = None) -> list[dict[str, Any]]:
+    def _process_incoming(self, msg: dict[str, Any], *, verify: bool, require_signature: bool, raw: bool) -> dict[str, Any] | None:
+        if require_signature and not msg.get("sig"):
+            return None
+        if (verify or require_signature) and msg.get("sig") and not verify_envelope(msg):
+            return None
+        if not raw and msg.get("enc") and isinstance(msg.get("topic"), str):
+            tk = self.topic_keys.get(msg["topic"])
+            if tk is not None:
+                opened = decrypt_envelope(msg, tk[1])
+                if opened is not None:
+                    return opened
+        return msg
+
+    def poll(
+        self,
+        topic: str | Sequence[str],
+        since: str | int | None = None,
+        *,
+        priority: Sequence[int] | None = None,
+        tags: Sequence[str] | None = None,
+        verify: bool = False,
+        require_signature: bool = False,
+        raw: bool = False,
+    ) -> list[dict[str, Any]]:
         """Returns cached messages (``GET /<topic>/json?poll=1``)."""
         params: dict[str, str] = {"poll": "1"}
         if since is not None:
             params["since"] = str(since)
+        if priority:
+            params["priority"] = ",".join(str(p) for p in priority)
+        if tags:
+            params["tags"] = ",".join(str(t) for t in tags)
         resp = self._http.get(f"/{_topic_path(topic)}/json", params=params)
         if resp.status_code >= 400:
             raise SubEthaError.from_response(resp)
@@ -263,7 +389,9 @@ class Client:
         for line in resp.text.splitlines():
             msg = _parse_line(line)
             if msg is not None and msg.get("event", "message") == "message":
-                out.append(msg)
+                processed = self._process_incoming(msg, verify=verify, require_signature=require_signature, raw=raw)
+                if processed is not None:
+                    out.append(processed)
         return out
 
     def subscribe(
@@ -271,11 +399,17 @@ class Client:
         topic: str | Sequence[str],
         since: str | int | None = None,
         *,
+        priority: Sequence[int] | None = None,
+        tags: Sequence[str] | None = None,
         dedupe: bool | Deduper = True,
         reconnect: bool = True,
         max_reconnects: int | None = None,
         retry_delay: float = 1.0,
         max_retry_delay: float = 30.0,
+        auto_ack: bool = False,
+        verify: bool = False,
+        require_signature: bool = False,
+        raw: bool = False,
         stop: threading.Event | None = None,
     ) -> Iterator[dict[str, Any]]:
         """Yields messages from the NDJSON stream (``GET /<topic>/json``).
@@ -294,7 +428,13 @@ class Client:
         while True:
             if stop is not None and stop.is_set():
                 return
-            params = {"since": str(last)} if last is not None else {}
+            params: dict[str, str] = {}
+            if last is not None:
+                params["since"] = str(last)
+            if priority:
+                params["priority"] = ",".join(str(p) for p in priority)
+            if tags:
+                params["tags"] = ",".join(str(t) for t in tags)
             error: Exception | None = None
             delay_hint: float | None = None
             try:
@@ -319,7 +459,15 @@ class Client:
                                 continue
                             if msg.get("id"):
                                 last = msg["id"]  # only advance on new messages
-                            yield msg
+                            processed = self._process_incoming(msg, verify=verify, require_signature=require_signature, raw=raw)
+                            if processed is None:
+                                continue
+                            if auto_ack and processed.get("id") and processed.get("topic"):
+                                try:
+                                    self.ack(str(processed["topic"]), str(processed["id"]), "stream")
+                                except Exception:
+                                    pass
+                            yield processed
             except httpx.TransportError as e:
                 error = e
             if not reconnect:
@@ -341,6 +489,16 @@ class Client:
 
     # -- wrapped topic keys (spec §5.1) --
 
+    def set_topic_key(self, topic: str, key_pair: tuple[str, bytes] | None) -> None:
+        """Sets or clears the E2EE ``(kid, 32-byte key)`` used automatically for ``topic``."""
+        if key_pair is None:
+            self.topic_keys.pop(topic, None)
+            return
+        kid, key = key_pair
+        if len(key) != 32:
+            raise ValueError("topic key must be 32 bytes")
+        self.topic_keys[topic] = (kid, key)
+
     def share_topic_key(self, topic: str, kid: str, key: bytes, device_ids: Sequence[str]) -> int:
         """Wraps ``key`` for each device and uploads the wrapped keys (``PUT /v1/keys``). Needs an
         admin token for a topic you own. Returns how many were stored."""
@@ -354,9 +512,18 @@ class Client:
         """As a device, the wrapped keys addressed to it; as an admin, all of your topics'."""
         return list(self._json(self._http.get("/v1/keys", params={"topic": topic} if topic else None)).get("keys", []))
 
+    def delete_wrapped_keys(self, topic: str, *, kid: str | None = None, device: str | None = None) -> int:
+        """Deletes wrapped keys for a topic, optionally narrowed by ``kid`` and/or ``device``."""
+        params: dict[str, str] = {"topic": topic}
+        if kid is not None:
+            params["kid"] = kid
+        if device is not None:
+            params["device"] = device
+        return int(self._json(self._http.delete("/v1/keys", params=params)).get("deleted", 0))
+
     def load_topic_keys(self, topic: str | None = None, device_key: DeviceKey | None = None) -> dict[str, tuple[str, bytes]]:
-        """Fetches and opens the wrapped keys addressed to this device. Returns ``{topic: (kid,
-        key)}`` with the newest key per topic, ready for ``decrypt_envelope``/``encrypt_envelope``."""
+        """Fetches and opens the wrapped keys addressed to this device, storing them in
+        ``self.topic_keys`` for automatic E2EE on subsequent publish/poll/subscribe calls."""
         dk = device_key or self.device_key
         if dk is None:
             raise ValueError("load_topic_keys needs a device_key")
@@ -368,7 +535,47 @@ class Client:
             key = unwrap_topic_key(w, dk)
             if key is not None and (w["topic"] not in best or at >= best[w["topic"]][0]):
                 best[w["topic"]] = (at, w["kid"], key)
-        return {t: (kid, key) for t, (_, kid, key) in best.items()}
+        loaded = {t: (kid, key) for t, (_, kid, key) in best.items()}
+        self.topic_keys.update(loaded)
+        return loaded
+
+    # -- control plane --
+
+    def account(self) -> dict[str, Any]:
+        return self._json(self._http.get("/v1/account"))
+
+    def balance(self) -> dict[str, Any]:
+        return self._json(self._http.get("/v1/balance"))
+
+    def prices(self) -> dict[str, Any]:
+        return self._json(self._http.get("/v1/prices"))
+
+    def trace(self, topic: str, message_id: str) -> dict[str, Any]:
+        return self._json(self._http.get(f"/v1/traces/{message_id}", params={"topic": topic}))
+
+    def topics(self) -> list[dict[str, Any]]:
+        return list(self._json(self._http.get("/v1/topics")).get("topics", []))
+
+    def configure_topic(self, topic: str, policy: Mapping[str, Any]) -> dict[str, Any]:
+        return self._json(self._http.put(f"/v1/topics/{topic}", json={"policy": dict(policy)}))
+
+    def delete_topic(self, topic: str) -> dict[str, Any]:
+        return self._json(self._http.delete(f"/v1/topics/{topic}"))
+
+    def list_tokens(self) -> list[dict[str, Any]]:
+        return list(self._json(self._http.get("/v1/tokens")).get("tokens", []))
+
+    def create_token(self, **body: Any) -> dict[str, Any]:
+        return self._json(self._http.post("/v1/tokens", json=body))
+
+    def revoke_token(self, token_id: str) -> dict[str, Any]:
+        return self._json(self._http.delete(f"/v1/tokens/{token_id}"))
+
+    def list_devices(self) -> list[dict[str, Any]]:
+        return list(self._json(self._http.get("/v1/devices")).get("devices", []))
+
+    def revoke_device(self, device_id: str) -> dict[str, Any]:
+        return self._json(self._http.delete(f"/v1/devices/{device_id}"))
 
     # -- helpers --
 
