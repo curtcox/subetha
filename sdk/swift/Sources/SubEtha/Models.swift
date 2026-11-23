@@ -15,6 +15,11 @@ public struct Message: Equatable, Sendable, CustomStringConvertible {
     public var priority: Int { json["priority"]?.intValue.map(Int.init) ?? 3 }
     public var tags: [String] { json["tags"]?.arrayValue?.compactMap(\.stringValue) ?? [] }
     public var click: String? { json["click"]?.stringValue }
+    public var icon: String? { json["icon"]?.stringValue }
+    public var contentType: String? { json["content_type"]?.stringValue }
+    public var hops: Int? { json["hops"]?.intValue.map(Int.init) }
+    public var attachment: [String: JSONValue]? { json["attachment"]?.objectValue }
+    public var actions: [[String: JSONValue]] { json["actions"]?.arrayValue?.compactMap(\.objectValue) ?? [] }
     public var expires: Int64? { json["expires"]?.intValue }
     /// `message` for messages; `open` / `keepalive` for stream control events.
     public var event: String? { json["event"]?.stringValue }
@@ -57,6 +62,8 @@ public struct PublishOptions: Sendable {
     public var tags: [String]
     public var click: String?
     public var icon: String?
+    public var contentType: String?
+    public var actions: [[String: JSONValue]]
     /// Unix seconds.
     public var expires: Int64?
     public var hops: Int?
@@ -70,6 +77,7 @@ public struct PublishOptions: Sendable {
     public var extra: [String: JSONValue]
 
     public init(title: String? = nil, priority: Int? = nil, tags: [String] = [], click: String? = nil, icon: String? = nil,
+                contentType: String? = nil, actions: [[String: JSONValue]] = [],
                 expires: Int64? = nil, hops: Int? = nil, route: Route? = nil, idempotencyKey: String? = nil,
                 sign: Bool? = nil, encrypt: Bool? = nil, extra: [String: JSONValue] = [:]) {
         self.title = title
@@ -77,6 +85,8 @@ public struct PublishOptions: Sendable {
         self.tags = tags
         self.click = click
         self.icon = icon
+        self.contentType = contentType
+        self.actions = actions
         self.expires = expires
         self.hops = hops
         self.route = route
@@ -123,6 +133,7 @@ public struct SubscribeOptions: Sendable {
 
     public init(since: String? = nil, priority: [Int] = [], tags: [String] = [], transport: SubscribeTransport = .stream,
                 pollInterval: TimeInterval = 5, autoAck: Bool = true, verify: Bool = false, requireSignature: Bool = false,
+                raw: Bool = false,
                 initialBackoff: TimeInterval = 0.5, maxBackoff: TimeInterval = 30,
                 onOpen: (@Sendable () -> Void)? = nil, onError: (@Sendable (Error) -> Void)? = nil) {
         self.since = since
@@ -133,6 +144,7 @@ public struct SubscribeOptions: Sendable {
         self.autoAck = autoAck
         self.verify = verify
         self.requireSignature = requireSignature
+        self.raw = raw
         self.initialBackoff = initialBackoff
         self.maxBackoff = maxBackoff
         self.onOpen = onOpen

@@ -107,6 +107,8 @@ class SubEtha {
       if (o.tags.isNotEmpty) 'tags': o.tags,
       if (o.click != null) 'click': o.click,
       if (o.icon != null) 'icon': o.icon,
+      if (o.contentType != null) 'content_type': o.contentType,
+      if (o.actions.isNotEmpty) 'actions': o.actions,
       if (o.expires != null) 'expires': o.expires,
       if (o.hops != null) 'hops': o.hops,
       if (o.route != null) 'route': o.route!.toJson(),
@@ -150,6 +152,81 @@ class SubEtha {
   Future<Estimate> estimate(String topic, String message, [PublishOptions options = const PublishOptions()]) async {
     final env = await buildEnvelope(topic, message, options);
     return Estimate(await _requestObject('POST', '/', body: env, headers: {'X-Dry-Run': '1'}));
+  }
+
+  Map<String, String> _fileHeaders(
+    String filename,
+    String contentType,
+    String? message,
+    PublishOptions o, [
+    Map<String, String> extra = const {},
+  ]) {
+    final h = <String, String>{'Content-Type': contentType, 'X-Filename': filename};
+    if (message != null) h['X-Message'] = message;
+    if (o.title != null) h['X-Title'] = o.title!;
+    if (o.priority != null && o.priority != 3) h['X-Priority'] = '${o.priority}';
+    if (o.tags.isNotEmpty) h['X-Tags'] = o.tags.join(',');
+    if (o.click != null) h['X-Click'] = o.click!;
+    if (o.icon != null) h['X-Icon'] = o.icon!;
+    if (o.actions.isNotEmpty) h['X-Actions'] = jsonEncode(o.actions);
+    if (o.contentType == 'text/markdown') {
+      h['X-Markdown'] = '1';
+    } else if (o.contentType != null) {
+      h['X-Content-Type'] = o.contentType!;
+    }
+    if (o.expires != null) h['X-Expires'] = '${o.expires}';
+    if (o.hops != null) h['X-Hops'] = '${o.hops}';
+    final r = o.route;
+    if (r != null) {
+      if (r.mode != null) h['X-Route-Mode'] = r.mode!.name;
+      if (r.maxCostUsd != null) h['X-Max-Cost'] = '${r.maxCostUsd}';
+      if (r.deny.isNotEmpty) h['X-Deny'] = r.deny.join(',');
+      if (r.allow.isNotEmpty) h['X-Allow'] = r.allow.join(',');
+      if (r.deadlineS != null) h['X-Deadline'] = '${r.deadlineS}';
+    }
+    if (o.idempotencyKey != null) h['Idempotency-Key'] = o.idempotencyKey!;
+    h.addAll(extra);
+    return h;
+  }
+
+  /// Publishes a file attachment uploaded to R2 (`PUT /<topic>` with `X-Filename`).
+  Future<Message> publishFile(
+    String topic,
+    String filename,
+    List<int> bytes, {
+    String contentType = 'application/octet-stream',
+    String? message,
+    PublishOptions options = const PublishOptions(),
+  }) async {
+    final text = await _send(
+      'PUT',
+      Uri.parse('$baseUrl/${topicPath([topic])}'),
+      body: bytes,
+      headers: _fileHeaders(filename, contentType, message, options),
+    );
+    final decoded = jsonDecode(text);
+    if (decoded is! Map<String, dynamic>) throw const FormatException('expected a JSON object');
+    return Message(decoded);
+  }
+
+  /// Dry run for a file-attachment publish.
+  Future<Estimate> estimateFile(
+    String topic,
+    String filename,
+    List<int> bytes, {
+    String contentType = 'application/octet-stream',
+    String? message,
+    PublishOptions options = const PublishOptions(),
+  }) async {
+    final text = await _send(
+      'PUT',
+      Uri.parse('$baseUrl/${topicPath([topic])}'),
+      body: bytes,
+      headers: _fileHeaders(filename, contentType, message, options, const {'X-Dry-Run': '1'}),
+    );
+    final decoded = jsonDecode(text);
+    if (decoded is! Map<String, dynamic>) throw const FormatException('expected a JSON object');
+    return Estimate(decoded);
   }
 
   // ---------------------------------------------------------------- receive
@@ -369,8 +446,39 @@ class SubEtha {
   // ---------------------------------------------------------------- control plane
 
   Future<Map<String, dynamic>> account() => _requestObject('GET', '/v1/account');
+  Future<Map<String, dynamic>> updateAccount(Map<String, dynamic> patch) => _requestObject('PATCH', '/v1/account', body: patch);
   Future<Map<String, dynamic>> balance() => _requestObject('GET', '/v1/balance');
   Future<Map<String, dynamic>> prices() => _requestObject('GET', '/v1/prices');
+  Future<Map<String, dynamic>> trace(String topic, String id) =>
+      _requestObject('GET', '/v1/traces/${Uri.encodeComponent(id)}?topic=${Uri.encodeQueryComponent(topic)}');
+  Future<Map<String, dynamic>> ledger({int after = 0, int limit = 100}) => _requestObject('GET', '/v1/ledger?after=$after&limit=$limit');
+  Future<Map<String, dynamic>> usage({int days = 30}) => _requestObject('GET', '/v1/usage?days=$days');
+  Future<Map<String, dynamic>> audit({int limit = 50}) => _requestObject('GET', '/v1/audit?limit=$limit');
+  Future<Map<String, dynamic>> topics() => _requestObject('GET', '/v1/topics');
+  Future<Map<String, dynamic>> topic(String name) => _requestObject('GET', '/v1/topics/${topicPath([name])}');
+  Future<Map<String, dynamic>> createTopic(String name, {Map<String, dynamic> policy = const {}}) =>
+      _requestObject('PUT', '/v1/topics/${topicPath([name])}', body: {'policy': policy});
+  Future<Map<String, dynamic>> deleteTopic(String name) => _requestObject('DELETE', '/v1/topics/${topicPath([name])}');
+  Future<Map<String, dynamic>> devices() => _requestObject('GET', '/v1/devices');
+  Future<Map<String, dynamic>> updateDevice(String id, Map<String, dynamic> patch) =>
+      _requestObject('PATCH', '/v1/devices/${Uri.encodeComponent(id)}', body: patch);
+  Future<Map<String, dynamic>> revokeDevice(String id) => _requestObject('DELETE', '/v1/devices/${Uri.encodeComponent(id)}');
+  Future<Map<String, dynamic>> endpoints() => _requestObject('GET', '/v1/endpoints');
+  Future<Map<String, dynamic>> deleteEndpoint(String id) => _requestObject('DELETE', '/v1/endpoints/${Uri.encodeComponent(id)}');
+  Future<Map<String, dynamic>> subscriptions() => _requestObject('GET', '/v1/subscriptions');
+  Future<Map<String, dynamic>> deleteSubscription(String id) => _requestObject('DELETE', '/v1/subscriptions/${Uri.encodeComponent(id)}');
+  Future<Map<String, dynamic>> tokens() => _requestObject('GET', '/v1/tokens');
+  Future<Map<String, dynamic>> revokeToken(String id) => _requestObject('DELETE', '/v1/tokens/${Uri.encodeComponent(id)}');
+  Future<Map<String, dynamic>> listWrappedKeys({String? topic}) =>
+      _requestObject('GET', topic != null ? '/v1/keys?topic=${Uri.encodeQueryComponent(topic)}' : '/v1/keys');
+  Future<Map<String, dynamic>> deleteWrappedKeys(String topic, {String? kid, String? device}) {
+    final q = <String>[
+      'topic=${Uri.encodeQueryComponent(topic)}',
+      if (kid != null) 'kid=${Uri.encodeQueryComponent(kid)}',
+      if (device != null) 'device=${Uri.encodeQueryComponent(device)}',
+    ];
+    return _requestObject('DELETE', '/v1/keys?${q.join('&')}');
+  }
 }
 
 class _StreamEnded implements Exception {

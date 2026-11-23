@@ -114,6 +114,8 @@ public final class SubEtha: @unchecked Sendable {
         if !o.tags.isEmpty { env["tags"] = .array(o.tags.map(JSONValue.string)) }
         if let v = o.click { env["click"] = .string(v) }
         if let v = o.icon { env["icon"] = .string(v) }
+        if let v = o.contentType { env["content_type"] = .string(v) }
+        if !o.actions.isEmpty { env["actions"] = .array(o.actions.map(JSONValue.object)) }
         if let v = o.expires { env["expires"] = .int(v) }
         if let v = o.hops { env["hops"] = .int(Int64(v)) }
         if let r = o.route {
@@ -166,6 +168,50 @@ public final class SubEtha: @unchecked Sendable {
     public func estimate(_ topic: String, _ message: String, _ options: PublishOptions = PublishOptions()) async throws -> Estimate {
         let env = try buildEnvelope(topic, message, options)
         return Estimate(json: try await requestObject("POST", "/", body: .object(env), headers: ["X-Dry-Run": "1"]))
+    }
+
+    private func fileHeaders(filename: String, contentType: String, message: String?, options: PublishOptions, extra: [String: String] = [:]) -> [String: String] {
+        var h: [String: String] = ["Content-Type": contentType, "X-Filename": filename]
+        if let m = message { h["X-Message"] = m }
+        if let v = options.title { h["X-Title"] = v }
+        if let v = options.priority, v != 3 { h["X-Priority"] = String(v) }
+        if !options.tags.isEmpty { h["X-Tags"] = options.tags.joined(separator: ",") }
+        if let v = options.click { h["X-Click"] = v }
+        if let v = options.icon { h["X-Icon"] = v }
+        if !options.actions.isEmpty { h["X-Actions"] = JSONValue.array(options.actions.map(JSONValue.object)).jsonString() }
+        if options.contentType == "text/markdown" { h["X-Markdown"] = "1" }
+        else if let ct = options.contentType { h["X-Content-Type"] = ct }
+        if let v = options.expires { h["X-Expires"] = String(v) }
+        if let v = options.hops { h["X-Hops"] = String(v) }
+        if let r = options.route {
+            if let m = r.mode { h["X-Route-Mode"] = m.rawValue }
+            if let c = r.maxCostUSD { h["X-Max-Cost"] = String(c) }
+            if !r.deny.isEmpty { h["X-Deny"] = r.deny.joined(separator: ",") }
+            if !r.allow.isEmpty { h["X-Allow"] = r.allow.joined(separator: ",") }
+            if let d = r.deadlineSeconds { h["X-Deadline"] = String(d) }
+        }
+        if let k = options.idempotencyKey { h["Idempotency-Key"] = k }
+        for (k, v) in extra { h[k] = v }
+        return h
+    }
+
+    /// Publishes a file attachment uploaded to R2 (`PUT /<topic>` with `X-Filename`).
+    @discardableResult
+    public func publishFile(_ topic: String, filename: String, data: Data, contentType: String = "application/octet-stream", message: String? = nil, options: PublishOptions = PublishOptions()) async throws -> Message {
+        let url = URL(string: baseURL.absoluteString + "/" + Self.topicPath([topic]))!
+        let h = fileHeaders(filename: filename, contentType: contentType, message: message, options: options)
+        let out = try await send(try makeRequest("PUT", url, body: data, headers: h))
+        guard let obj = try JSONValue.parse(out).objectValue else { throw SubEthaClientError.invalidResponse("expected a JSON object") }
+        return Message(json: obj)
+    }
+
+    /// Dry run for a file-attachment publish.
+    public func estimateFile(_ topic: String, filename: String, data: Data, contentType: String = "application/octet-stream", message: String? = nil, options: PublishOptions = PublishOptions()) async throws -> Estimate {
+        let url = URL(string: baseURL.absoluteString + "/" + Self.topicPath([topic]))!
+        let h = fileHeaders(filename: filename, contentType: contentType, message: message, options: options, extra: ["X-Dry-Run": "1"])
+        let out = try await send(try makeRequest("PUT", url, body: data, headers: h))
+        guard let obj = try JSONValue.parse(out).objectValue else { throw SubEthaClientError.invalidResponse("expected a JSON object") }
+        return Estimate(json: obj)
     }
 
     // MARK: - Receive
@@ -344,9 +390,42 @@ public final class SubEtha: @unchecked Sendable {
 
     // MARK: - Control plane
 
+    private static func q(_ s: String) -> String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&=+#")
+        return s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s
+    }
+
     public func account() async throws -> [String: JSONValue] { try await requestObject("GET", "/v1/account") }
+    public func updateAccount(_ patch: [String: JSONValue]) async throws -> [String: JSONValue] { try await requestObject("PATCH", "/v1/account", body: .object(patch)) }
     public func balance() async throws -> [String: JSONValue] { try await requestObject("GET", "/v1/balance") }
     public func prices() async throws -> [String: JSONValue] { try await requestObject("GET", "/v1/prices") }
+    public func trace(topic: String, id: String) async throws -> [String: JSONValue] { try await requestObject("GET", "/v1/traces/\(Self.q(id))?topic=\(Self.q(topic))") }
+    public func ledger(after: Int64 = 0, limit: Int = 100) async throws -> [String: JSONValue] { try await requestObject("GET", "/v1/ledger?after=\(after)&limit=\(limit)") }
+    public func usage(days: Int = 30) async throws -> [String: JSONValue] { try await requestObject("GET", "/v1/usage?days=\(days)") }
+    public func audit(limit: Int = 50) async throws -> [String: JSONValue] { try await requestObject("GET", "/v1/audit?limit=\(limit)") }
+    public func topics() async throws -> [String: JSONValue] { try await requestObject("GET", "/v1/topics") }
+    public func topic(_ name: String) async throws -> [String: JSONValue] { try await requestObject("GET", "/v1/topics/\(Self.topicPath([name]))") }
+    public func createTopic(_ name: String, policy: [String: JSONValue] = [:]) async throws -> [String: JSONValue] { try await requestObject("PUT", "/v1/topics/\(Self.topicPath([name]))", body: ["policy": .object(policy)]) }
+    public func deleteTopic(_ name: String) async throws -> [String: JSONValue] { try await requestObject("DELETE", "/v1/topics/\(Self.topicPath([name]))") }
+    public func devices() async throws -> [String: JSONValue] { try await requestObject("GET", "/v1/devices") }
+    public func updateDevice(_ id: String, _ patch: [String: JSONValue]) async throws -> [String: JSONValue] { try await requestObject("PATCH", "/v1/devices/\(Self.q(id))", body: .object(patch)) }
+    public func revokeDevice(_ id: String) async throws -> [String: JSONValue] { try await requestObject("DELETE", "/v1/devices/\(Self.q(id))") }
+    public func endpoints() async throws -> [String: JSONValue] { try await requestObject("GET", "/v1/endpoints") }
+    public func deleteEndpoint(_ id: String) async throws -> [String: JSONValue] { try await requestObject("DELETE", "/v1/endpoints/\(Self.q(id))") }
+    public func subscriptions() async throws -> [String: JSONValue] { try await requestObject("GET", "/v1/subscriptions") }
+    public func deleteSubscription(_ id: String) async throws -> [String: JSONValue] { try await requestObject("DELETE", "/v1/subscriptions/\(Self.q(id))") }
+    public func tokens() async throws -> [String: JSONValue] { try await requestObject("GET", "/v1/tokens") }
+    public func revokeToken(_ id: String) async throws -> [String: JSONValue] { try await requestObject("DELETE", "/v1/tokens/\(Self.q(id))") }
+    public func listWrappedKeys(topic: String? = nil) async throws -> [String: JSONValue] {
+        try await requestObject("GET", topic.map { "/v1/keys?topic=\(Self.q($0))" } ?? "/v1/keys")
+    }
+    public func deleteWrappedKeys(topic: String, kid: String? = nil, device: String? = nil) async throws -> [String: JSONValue] {
+        var qs = ["topic=\(Self.q(topic))"]
+        if let kid { qs.append("kid=\(Self.q(kid))") }
+        if let device { qs.append("device=\(Self.q(device))") }
+        return try await requestObject("DELETE", "/v1/keys?\(qs.joined(separator: "&"))")
+    }
 
     // MARK: - Helpers
 

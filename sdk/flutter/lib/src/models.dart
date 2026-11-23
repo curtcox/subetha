@@ -15,6 +15,11 @@ class Message {
   int get priority => _int('priority') ?? 3;
   List<String> get tags => (json['tags'] as List?)?.whereType<String>().toList() ?? const [];
   String? get click => _str('click');
+  String? get icon => _str('icon');
+  String? get contentType => _str('content_type');
+  int? get hops => _int('hops');
+  Map<String, dynamic>? get attachment => json['attachment'] is Map<String, dynamic> ? json['attachment'] as Map<String, dynamic> : null;
+  List<Map<String, dynamic>> get actions => (json['actions'] as List?)?.whereType<Map<String, dynamic>>().toList() ?? const [];
   int? get expires => _int('expires');
 
   /// `message` for messages; `open` / `keepalive` for stream control events.
@@ -67,6 +72,8 @@ class PublishOptions {
   final List<String> tags;
   final String? click;
   final String? icon;
+  final String? contentType;
+  final List<Map<String, dynamic>> actions;
 
   /// Unix seconds.
   final int? expires;
@@ -89,6 +96,8 @@ class PublishOptions {
     this.tags = const [],
     this.click,
     this.icon,
+    this.contentType,
+    this.actions = const [],
     this.expires,
     this.hops,
     this.route,

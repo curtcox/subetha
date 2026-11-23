@@ -278,4 +278,54 @@ final class SubEthaTests: XCTestCase {
         XCTAssertEqual(account, "acct_1")
     }
     #endif
+
+    func testContentTypeActionsFileUploadAndControlPlane() async throws {
+        let t = MockTransport { r, _ in
+            if r.httpMethod == "PUT", r.value(forHTTPHeaderField: "X-Dry-Run") == "1" {
+                return .init(body: #"{"dry_run":true,"estimate_usd_micros":25,"plan":[]}"#)
+            }
+            if r.httpMethod == "PUT" {
+                return .init(body: #"{"id":"01F","topic":"@a/b","message":"snap","attachment":{"name":"snap.jpg","url":"https://x.test/file/1/snap.jpg","size":3}}"#)
+            }
+            return .init(body: r.httpBody.flatMap { $0.isEmpty ? nil : String(decoding: $0, as: UTF8.self) } ?? "{}")
+        }
+        let c = SubEtha(baseURL: base, token: "se_t", transport: t)
+        let m = try await c.publish("@a/b", "**hi**", PublishOptions(
+            icon: "https://x.test/i.png",
+            contentType: "text/markdown",
+            actions: [["action": "view", "label": "Open", "url": "https://x.test"]],
+            hops: 2
+        ))
+        XCTAssertEqual(m.contentType, "text/markdown")
+        XCTAssertEqual(m.icon, "https://x.test/i.png")
+        XCTAssertEqual(m.hops, 2)
+        XCTAssertEqual(m.actions.first?["label"], "Open")
+        XCTAssertTrue(SubscribeOptions(raw: true).raw)
+
+        let uploaded = try await c.publishFile("@a/b", filename: "snap.jpg", data: Data([1, 2, 3]), contentType: "image/jpeg", message: "snap",
+                                               options: PublishOptions(title: "Door", route: Route(allow: ["ws", "sms"], deadlineSeconds: 30)))
+        XCTAssertEqual(uploaded.attachment?["name"], "snap.jpg")
+        let putReq = t.requests[1]
+        XCTAssertEqual(putReq.httpMethod, "PUT")
+        XCTAssertEqual(pathAndQuery(putReq), "/@a/b")
+        XCTAssertEqual(putReq.value(forHTTPHeaderField: "X-Filename"), "snap.jpg")
+        XCTAssertEqual(putReq.value(forHTTPHeaderField: "Content-Type"), "image/jpeg")
+        XCTAssertEqual(putReq.value(forHTTPHeaderField: "X-Allow"), "ws,sms")
+        XCTAssertEqual(putReq.value(forHTTPHeaderField: "X-Deadline"), "30")
+
+        let est = try await c.estimateFile("@a/b", filename: "snap.jpg", data: Data([1, 2, 3]), contentType: "image/jpeg")
+        XCTAssertEqual(est.estimateUSDMicros, 25)
+
+        _ = try await c.trace(topic: "@a/b", id: "01F")
+        XCTAssertEqual(pathAndQuery(t.requests[3]), "/v1/traces/01F?topic=@a/b")
+        _ = try await c.topics()
+        _ = try await c.createTopic("@a/b", policy: ["paused": false])
+        _ = try await c.deleteTopic("@a/b")
+        _ = try await c.devices()
+        _ = try await c.usage(days: 7)
+        _ = try await c.listWrappedKeys(topic: "@a/b")
+        _ = try await c.deleteWrappedKeys(topic: "@a/b", kid: "k1")
+        XCTAssertEqual(t.requests.last?.httpMethod, "DELETE")
+        XCTAssertEqual(pathAndQuery(t.requests.last!), "/v1/keys?topic=@a/b&kid=k1")
+    }
 }

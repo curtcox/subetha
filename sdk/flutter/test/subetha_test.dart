@@ -282,4 +282,63 @@ void main() {
     expect(SubEtha.topicPath(['@a/b', '@a/c']), '@a/b,@a/c');
     expect(() => SubEtha(signRequests: true), throwsArgumentError);
   });
+
+  test('contentType, actions, file uploads, and control plane helpers', () async {
+    final relay = Relay((r, _) {
+      if (r.request.method == 'PUT' && r.request.headers['X-Dry-Run'] == '1') {
+        return Relay.json('{"dry_run":true,"estimate_usd_micros":25,"plan":[]}');
+      }
+      if (r.request.method == 'PUT' && r.request.url.path == '/@a/b') {
+        return Relay.json('{"id":"01F","topic":"@a/b","message":"snap","attachment":{"name":"snap.jpg","url":"https://x.test/file/1/snap.jpg","size":3}}');
+      }
+      return Relay.json(r.body.isEmpty ? '{}' : r.body);
+    });
+    final c = SubEtha(baseUrl: 'https://x.test', token: 'se_t', httpClient: relay.client);
+    final m = await c.publish(
+      '@a/b',
+      '**hi**',
+      const PublishOptions(
+        icon: 'https://x.test/i.png',
+        contentType: 'text/markdown',
+        actions: [{'action': 'view', 'label': 'Open', 'url': 'https://x.test'}],
+        hops: 2,
+      ),
+    );
+    expect(m.contentType, 'text/markdown');
+    expect(m.icon, 'https://x.test/i.png');
+    expect(m.hops, 2);
+    expect(m.actions.first['label'], 'Open');
+
+    final uploaded = await c.publishFile(
+      '@a/b',
+      'snap.jpg',
+      const [1, 2, 3],
+      contentType: 'image/jpeg',
+      message: 'snap',
+      options: const PublishOptions(title: 'Door', route: Route(allow: ['ws', 'sms'], deadlineS: 30)),
+    );
+    expect(uploaded.attachment?['name'], 'snap.jpg');
+    final putReq = relay.requests[1].request;
+    expect(putReq.method, 'PUT');
+    expect(putReq.url.path, '/@a/b');
+    expect(putReq.headers['X-Filename'], 'snap.jpg');
+    expect(putReq.headers['Content-Type'], 'image/jpeg');
+    expect(putReq.headers['X-Allow'], 'ws,sms');
+    expect(putReq.headers['X-Deadline'], '30');
+
+    final est = await c.estimateFile('@a/b', 'snap.jpg', const [1, 2, 3], contentType: 'image/jpeg');
+    expect(est.estimateUsdMicros, 25);
+
+    await c.trace('@a/b', '01F');
+    expect(relay.requests[3].pathAndQuery, '/v1/traces/01F?topic=%40a%2Fb');
+    await c.topics();
+    await c.createTopic('@a/b');
+    await c.deleteTopic('@a/b');
+    await c.devices();
+    await c.usage(days: 7);
+    await c.listWrappedKeys(topic: '@a/b');
+    await c.deleteWrappedKeys('@a/b', kid: 'k1');
+    expect(relay.requests.last.request.method, 'DELETE');
+    expect(relay.requests.last.pathAndQuery, '/v1/keys?topic=%40a%2Fb&kid=k1');
+  });
 }

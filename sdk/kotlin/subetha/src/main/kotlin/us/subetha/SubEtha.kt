@@ -105,6 +105,8 @@ public class SubEtha @JvmOverloads constructor(
             if (options.tags.isNotEmpty()) put("tags", JsonArray(options.tags.map(::JsonPrimitive)))
             options.click?.let { put("click", it) }
             options.icon?.let { put("icon", it) }
+            options.contentType?.let { put("content_type", it) }
+            if (options.actions.isNotEmpty()) put("actions", JsonArray(options.actions))
             options.expires?.let { put("expires", it) }
             options.hops?.let { put("hops", it) }
             options.route?.let { r ->
@@ -154,6 +156,63 @@ public class SubEtha @JvmOverloads constructor(
     public suspend fun estimate(topic: String, message: String, options: PublishOptions = PublishOptions()): Estimate {
         val env = buildEnvelope(topic, message, options)
         return Estimate(requestObject("POST", "/", env, mapOf("X-Dry-Run" to "1")))
+    }
+
+    private fun fileHeaders(filename: String, contentType: String, message: String?, options: PublishOptions, extra: Map<String, String> = emptyMap()): Map<String, String> {
+        val h = LinkedHashMap<String, String>()
+        h["Content-Type"] = contentType
+        h["X-Filename"] = filename
+        message?.let { h["X-Message"] = it }
+        options.title?.let { h["X-Title"] = it }
+        options.priority?.takeIf { it != 3 }?.let { h["X-Priority"] = it.toString() }
+        if (options.tags.isNotEmpty()) h["X-Tags"] = options.tags.joinToString(",")
+        options.click?.let { h["X-Click"] = it }
+        options.icon?.let { h["X-Icon"] = it }
+        if (options.actions.isNotEmpty()) h["X-Actions"] = JsonArray(options.actions).toString()
+        if (options.contentType == "text/markdown") h["X-Markdown"] = "1"
+        else options.contentType?.let { h["X-Content-Type"] = it }
+        options.expires?.let { h["X-Expires"] = it.toString() }
+        options.hops?.let { h["X-Hops"] = it.toString() }
+        options.route?.let { r ->
+            r.mode?.let { h["X-Route-Mode"] = it.wire }
+            r.maxCostUsd?.let { h["X-Max-Cost"] = it.toString() }
+            if (r.deny.isNotEmpty()) h["X-Deny"] = r.deny.joinToString(",")
+            if (r.allow.isNotEmpty()) h["X-Allow"] = r.allow.joinToString(",")
+            r.deadlineS?.let { h["X-Deadline"] = it.toString() }
+        }
+        options.idempotencyKey?.let { h["Idempotency-Key"] = it }
+        h.putAll(extra)
+        return h
+    }
+
+    /** Publishes a file attachment uploaded to R2 (`PUT /<topic>` with `X-Filename`). */
+    public suspend fun publishFile(
+        topic: String,
+        filename: String,
+        bytes: ByteArray,
+        contentType: String = "application/octet-stream",
+        message: String? = null,
+        options: PublishOptions = PublishOptions(),
+    ): Message {
+        val url = "$baseUrl/${topicPath(listOf(topic))}"
+        val resp = send("PUT", url, bytes, fileHeaders(filename, contentType, message, options))
+        val text = withContext(Dispatchers.IO) { resp.use { it.readText() } }
+        return Message(json.parseToJsonElement(text) as? JsonObject ?: throw IOException("expected a JSON object"))
+    }
+
+    /** Dry run for a file-attachment publish. */
+    public suspend fun estimateFile(
+        topic: String,
+        filename: String,
+        bytes: ByteArray,
+        contentType: String = "application/octet-stream",
+        message: String? = null,
+        options: PublishOptions = PublishOptions(),
+    ): Estimate {
+        val url = "$baseUrl/${topicPath(listOf(topic))}"
+        val resp = send("PUT", url, bytes, fileHeaders(filename, contentType, message, options, mapOf("X-Dry-Run" to "1")))
+        val text = withContext(Dispatchers.IO) { resp.use { it.readText() } }
+        return Estimate(json.parseToJsonElement(text) as? JsonObject ?: throw IOException("expected a JSON object"))
     }
 
     // ---------------------------------------------------------------- receive
@@ -357,9 +416,37 @@ public class SubEtha @JvmOverloads constructor(
     // ---------------------------------------------------------------- control plane
 
     public suspend fun account(): JsonObject = requestObject("GET", "/v1/account")
+    public suspend fun updateAccount(patch: JsonObject): JsonObject = requestObject("PATCH", "/v1/account", patch)
     public suspend fun balance(): JsonObject = requestObject("GET", "/v1/balance")
     public suspend fun prices(): JsonObject = requestObject("GET", "/v1/prices")
     public suspend fun trace(topic: String, id: String): JsonObject = requestObject("GET", "/v1/traces/${enc(id)}?topic=${enc(topic)}")
+    public suspend fun ledger(after: Long = 0, limit: Int = 100): JsonObject = requestObject("GET", "/v1/ledger?after=$after&limit=$limit")
+    public suspend fun usage(days: Int = 30): JsonObject = requestObject("GET", "/v1/usage?days=$days")
+    public suspend fun audit(limit: Int = 50): JsonObject = requestObject("GET", "/v1/audit?limit=$limit")
+    public suspend fun topics(): JsonObject = requestObject("GET", "/v1/topics")
+    public suspend fun topic(name: String): JsonObject = requestObject("GET", "/v1/topics/${topicPath(listOf(name))}")
+    public suspend fun createTopic(name: String, policy: JsonObject = JsonObject(emptyMap())): JsonObject =
+        requestObject("PUT", "/v1/topics/${topicPath(listOf(name))}", buildJsonObject { put("policy", policy) })
+    public suspend fun deleteTopic(name: String): JsonObject = requestObject("DELETE", "/v1/topics/${topicPath(listOf(name))}")
+    public suspend fun devices(): JsonObject = requestObject("GET", "/v1/devices")
+    public suspend fun updateDevice(id: String, patch: JsonObject): JsonObject = requestObject("PATCH", "/v1/devices/${enc(id)}", patch)
+    public suspend fun revokeDevice(id: String): JsonObject = requestObject("DELETE", "/v1/devices/${enc(id)}")
+    public suspend fun endpoints(): JsonObject = requestObject("GET", "/v1/endpoints")
+    public suspend fun deleteEndpoint(id: String): JsonObject = requestObject("DELETE", "/v1/endpoints/${enc(id)}")
+    public suspend fun subscriptions(): JsonObject = requestObject("GET", "/v1/subscriptions")
+    public suspend fun deleteSubscription(id: String): JsonObject = requestObject("DELETE", "/v1/subscriptions/${enc(id)}")
+    public suspend fun tokens(): JsonObject = requestObject("GET", "/v1/tokens")
+    public suspend fun revokeToken(id: String): JsonObject = requestObject("DELETE", "/v1/tokens/${enc(id)}")
+    public suspend fun listWrappedKeys(topic: String? = null): JsonObject =
+        requestObject("GET", if (topic != null) "/v1/keys?topic=${enc(topic)}" else "/v1/keys")
+    public suspend fun deleteWrappedKeys(topic: String, kid: String? = null, device: String? = null): JsonObject {
+        val qs = buildList {
+            add("topic=${enc(topic)}")
+            kid?.let { add("kid=${enc(it)}") }
+            device?.let { add("device=${enc(it)}") }
+        }
+        return requestObject("DELETE", "/v1/keys?${qs.joinToString("&")}")
+    }
 
     public companion object {
         public const val DEFAULT_BASE_URL: String = "https://subetha.us"

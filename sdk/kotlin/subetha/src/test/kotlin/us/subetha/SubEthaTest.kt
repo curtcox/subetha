@@ -306,4 +306,54 @@ class SubEthaTest {
         assertFailsWith<IllegalArgumentException> { SubEtha(signRequests = true) }
         assertEquals(JsonPrimitive("x"), Message.parse("""{"topic":"t","a":"x"}""")["a"])
     }
+
+    @Test
+    fun contentTypeActionsFileUploadAndControlPlane() = runBlocking {
+        MockServer { r, ex ->
+            when {
+                r.method == "PUT" && r.headers["x-dry-run"] == "1" ->
+                    MockServer.respond(ex, 200, """{"dry_run":true,"estimate_usd_micros":25,"plan":[]}""")
+                r.method == "PUT" && r.pathAndQuery == "/@a/b" ->
+                    MockServer.respond(ex, 200, """{"id":"01F","topic":"@a/b","message":"snap","attachment":{"name":"snap.jpg","url":"https://x.test/file/1/snap.jpg","size":3}}""")
+                else -> MockServer.respond(ex, 200, r.body.ifBlank { "{}" })
+            }
+        }.use { s ->
+            val c = SubEtha(baseUrl = s.url, token = "se_t")
+            val action = obj("""{"action":"view","label":"Open","url":"https://x.test"}""")
+            val m = c.publish(
+                "@a/b", "**hi**",
+                PublishOptions(icon = "https://x.test/i.png", contentType = "text/markdown", actions = listOf(action), hops = 2),
+            )
+            assertEquals("text/markdown", m.contentType)
+            assertEquals("https://x.test/i.png", m.icon)
+            assertEquals(2, m.hops)
+            assertEquals("Open", m.actions.first()["label"]!!.jsonPrimitive.content)
+
+            val uploaded = c.publishFile(
+                "@a/b", "snap.jpg", byteArrayOf(1, 2, 3), "image/jpeg", message = "snap",
+                options = PublishOptions(title = "Door", route = Route(allow = listOf("ws", "sms"), deadlineS = 30)),
+            )
+            assertEquals("snap.jpg", uploaded.attachment?.get("name")?.jsonPrimitive?.content)
+            val putReq = s.requests[1]
+            assertEquals("PUT", putReq.method)
+            assertEquals("/@a/b", putReq.pathAndQuery)
+            assertEquals("snap.jpg", putReq.headers["x-filename"])
+            assertEquals("image/jpeg", putReq.headers["content-type"])
+            assertEquals("ws,sms", putReq.headers["x-allow"])
+            assertEquals("30", putReq.headers["x-deadline"])
+
+            val est = c.estimateFile("@a/b", "snap.jpg", byteArrayOf(1, 2, 3), "image/jpeg")
+            assertEquals(25, est.estimateUsdMicros)
+
+            c.topics()
+            c.createTopic("@a/b")
+            c.deleteTopic("@a/b")
+            c.devices()
+            c.usage(days = 7)
+            c.listWrappedKeys("@a/b")
+            c.deleteWrappedKeys("@a/b", kid = "k1")
+            assertEquals("DELETE", s.requests.last().method)
+            assertEquals("/v1/keys?topic=%40a%2Fb&kid=k1", s.requests.last().pathAndQuery)
+        }
+    }
 }

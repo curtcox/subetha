@@ -21,6 +21,11 @@ public class Message(public val json: JsonObject) {
     public val priority: Int get() = (json["priority"] as? JsonPrimitive)?.intOrNull ?: 3
     public val tags: List<String> get() = (json["tags"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
     public val click: String? get() = str("click")
+    public val icon: String? get() = str("icon")
+    public val contentType: String? get() = str("content_type")
+    public val hops: Int? get() = (json["hops"] as? JsonPrimitive)?.intOrNull
+    public val attachment: JsonObject? get() = json["attachment"] as? JsonObject
+    public val actions: List<JsonObject> get() = (json["actions"] as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()
     public val expires: Long? get() = (json["expires"] as? JsonPrimitive)?.longOrNull
     /** `message` for messages; `open` / `keepalive` for stream control events. */
     public val event: String? get() = str("event")
@@ -66,6 +71,8 @@ public data class PublishOptions(
     val tags: List<String> = emptyList(),
     val click: String? = null,
     val icon: String? = null,
+    val contentType: String? = null,
+    val actions: List<JsonObject> = emptyList(),
     /** Unix seconds. */
     val expires: Long? = null,
     val hops: Int? = null,
