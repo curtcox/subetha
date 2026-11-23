@@ -158,49 +158,137 @@ document.querySelectorAll("#tabs button").forEach((b) => b.onclick = () => {
   history.replaceState(null, "", `#${hash}`);
 });
 
+const safeHref = (u) => {
+  if (typeof u !== "string") return null;
+  if (u.startsWith("/file/")) return u;
+  try {
+    const p = new URL(u);
+    return p.protocol === "https:" || p.protocol === "http:" ? p.toString() : null;
+  } catch { return null; }
+};
+function parseActionsInput(raw) {
+  const t = raw.trim();
+  if (!t) return undefined;
+  if (t.startsWith("[")) return JSON.parse(t);
+  return t.split(";").map((part) => {
+    const [action, label, url, ...rest] = part.split(",").map((f) => f.trim());
+    if (!action || !label) throw { code: "bad_request", message: "actions look like: view, Open, https://example.com" };
+    const a = { action, label };
+    if (url) a.url = url;
+    for (const kv of rest) {
+      const [k, v] = kv.split("=", 2);
+      if (k && v !== undefined) a[k] = v === "true" ? true : v === "false" ? false : v;
+    }
+    return a;
+  });
+}
 function pubOpts() {
   const tags = $("pubTags").value.split(",").map((s) => s.trim()).filter(Boolean);
-  return { title: $("pubTitle").value || undefined, priority: Number($("pubPrio").value), tags, route: { mode: $("pubMode").value }, sign: !!(browserDeviceKey && $("pubSign").checked) };
+  const deny = $("pubDeny").value.split(",").map((s) => s.trim()).filter(Boolean);
+  const maxRaw = $("pubMaxCost").value.trim();
+  const route = { mode: $("pubMode").value };
+  if (maxRaw !== "") route.maxCostUsd = Number(maxRaw);
+  if (deny.length) route.deny = deny;
+  const o = {
+    title: $("pubTitle").value || undefined,
+    priority: Number($("pubPrio").value),
+    tags,
+    click: $("pubClick").value.trim() || undefined,
+    icon: $("pubIcon").value.trim() || undefined,
+    actions: parseActionsInput($("pubActions").value),
+    contentType: $("pubMarkdown").checked ? "text/markdown" : undefined,
+    idempotencyKey: $("pubIdem").value.trim() || undefined,
+    route,
+    sign: !!(browserDeviceKey && $("pubSign").checked),
+  };
+  return o;
 }
+$("pubFile").onchange = () => { $("pubFileClear").hidden = !$("pubFile").files?.length; };
+$("pubFileClear").onclick = () => { $("pubFile").value = ""; $("pubFileClear").hidden = true; };
 
 $("pubBtn").onclick = async () => {
   const out = $("pubOut"); out.hidden = false;
   try {
-    const m = await client.publish($("pubTopic").value.trim(), $("pubMsg").value || "triggered", pubOpts());
+    const topic = $("pubTopic").value.trim();
+    const o = pubOpts();
+    const file = $("pubFile").files?.[0];
+    const m = file
+      ? await client.publishFile(topic, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()), type: file.type || "application/octet-stream" }, { ...o, message: $("pubMsg").value || undefined })
+      : await client.publish(topic, $("pubMsg").value || "triggered", o);
+    if (file) { $("pubFile").value = ""; $("pubFileClear").hidden = true; }
     out.textContent = JSON.stringify(m, null, 2);
     $("traceTopic").value = m.topic; $("traceId").value = m.id;
     me = await client.account(); showBalance(me);
-  } catch (e) { out.textContent = `${e.code}: ${e.message}`; }
+  } catch (e) { out.textContent = `${e.code ?? "error"}: ${e.message}`; }
 };
 
 $("dryBtn").onclick = async () => {
   const out = $("pubOut"); out.hidden = false;
   try {
-    const e = await client.estimate($("pubTopic").value.trim(), $("pubMsg").value || "test", pubOpts());
+    const topic = $("pubTopic").value.trim();
+    const o = pubOpts();
+    const file = $("pubFile").files?.[0];
+    const e = file
+      ? await client.estimateFile(topic, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()), type: file.type || "application/octet-stream" }, { ...o, message: $("pubMsg").value || undefined })
+      : await client.estimate(topic, $("pubMsg").value || "test", o);
     out.textContent = `Estimated cost: ${usd(e.estimate_usd_micros)}\n\n` + (e.plan.length ? e.plan.map((d) => `${d.transport.padEnd(8)} ${usd(d.cost_micros)}${d.after_s ? `  (after ${d.after_s}s if unacked)` : ""}`).join("\n") : "No subscribers right now: the message would be stored for later.");
-  } catch (e) { out.textContent = `${e.code}: ${e.message}`; }
+  } catch (e) { out.textContent = `${e.code ?? "error"}: ${e.message}`; }
 };
 
 $("copyLang").innerHTML = LANGUAGES.map((l) => `<option value="${l}">${LANGUAGE_NAMES[l]}</option>`).join("");
 $("copyLang").value = load("subetha.copyLang") || "curl";
 $("copyLang").onchange = () => store("subetha.copyLang", $("copyLang").value);
 $("curlBtn").onclick = async () => {
-  const o = pubOpts();
-  const text = snippet($("copyLang").value, { baseUrl: location.origin, topic: $("pubTopic").value.trim(), message: $("pubMsg").value || "triggered", title: o.title, priority: o.priority, tags: o.tags, mode: o.route.mode });
-  $("pubOut").hidden = false; $("pubOut").textContent = text;
-  await navigator.clipboard?.writeText(text).catch(() => {});
+  try {
+    const o = pubOpts();
+    const text = snippet($("copyLang").value, { baseUrl: location.origin, topic: $("pubTopic").value.trim(), message: $("pubMsg").value || "triggered", title: o.title, priority: o.priority, tags: o.tags, click: o.click, mode: o.route.mode, maxCostUsd: o.route.maxCostUsd, deny: o.route.deny });
+    $("pubOut").hidden = false; $("pubOut").textContent = text;
+    await navigator.clipboard?.writeText(text).catch(() => {});
+  } catch (e) { $("pubOut").hidden = false; $("pubOut").textContent = `${e.code ?? "error"}: ${e.message}`; }
 };
+
+function renderInboxItem(m) {
+  const li = document.createElement("li");
+  const tags = m.tags?.length ? ` · ${m.tags.map((t) => `<code>${esc(t)}</code>`).join(" ")}` : "";
+  const sender = m.sender ? ` · <code title="${esc(m.sender)}">${esc(m.sender.slice(0, 12))}…</code>` : "";
+  const traceBtn = m.id ? ` <button type="button" class="secondary" style="padding:1px 6px;font-size:12px" data-trace-topic="${esc(m.topic)}" data-trace-id="${esc(m.id)}">Trace</button>` : "";
+  const body = m.enc ? `<span class="muted">🔒 Encrypted with key <code>${esc(m.enc.kid)}</code>, which isn't in this browser (Topics → End-to-end encryption keys).</span>` : `${m.title ? `<b>${esc(m.title)}</b> ` : ""}${esc(m.message)}`;
+  const extras = [];
+  const clickUrl = !m.enc && safeHref(m.click);
+  if (clickUrl) extras.push(`<a href="${esc(clickUrl)}" target="_blank" rel="noopener noreferrer">${esc(clickUrl)}</a>`);
+  const attUrl = !m.enc && m.attachment && safeHref(m.attachment.url);
+  if (attUrl) {
+    const size = typeof m.attachment.size === "number" ? ` (${m.attachment.size.toLocaleString()} B)` : "";
+    const img = /^image\//.test(m.attachment.type ?? "") ? `<br><img src="${esc(attUrl)}" alt="${esc(m.attachment.name)}" style="max-width:220px;max-height:140px;border-radius:4px;margin-top:4px">` : "";
+    extras.push(`📎 <a href="${esc(attUrl)}" target="_blank" rel="noopener noreferrer">${esc(m.attachment.name || "attachment")}</a>${esc(size)}${img}`);
+  }
+  if (!m.enc && Array.isArray(m.actions) && m.actions.length) {
+    const links = m.actions.map((a) => {
+      const u = a.action === "view" ? safeHref(a.url) : null;
+      return u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">[${esc(a.label)}]</a>` : `<span class="muted">[${esc(a.label)}]</span>`;
+    });
+    extras.push(links.join(" "));
+  }
+  li.innerHTML = `<span class="muted">${new Date(m.time * 1000).toLocaleTimeString()} ${esc(m.topic)} p${m.priority ?? 3}${tags}${sender}</span>${traceBtn}<br>${body}${extras.length ? `<br><small>${extras.join(" · ")}</small>` : ""}`;
+  li.querySelector("[data-trace-id]")?.addEventListener("click", (ev) => {
+    const btn = ev.currentTarget;
+    $("traceTopic").value = btn.dataset.traceTopic;
+    $("traceId").value = btn.dataset.traceId;
+    showTab("traces");
+    $("traceBtn").click();
+  });
+  return li;
+}
 
 function subscribe() {
   sub?.close();
   $("inbox").replaceChildren();
   const topics = $("subTopic").value.split(",").map((s) => s.trim()).filter(Boolean);
+  const priority = $("inboxPrio").value.split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n >= 1 && n <= 5);
+  const tags = $("inboxTags").value.split(",").map((s) => s.trim()).filter(Boolean);
   sub = client.subscribe(topics, (m) => {
-    const li = document.createElement("li");
-    const body = m.enc ? `<span class="muted">🔒 Encrypted with key <code>${esc(m.enc.kid)}</code>, which isn't in this browser (Topics → End-to-end encryption keys).</span>` : `${m.title ? `<b>${esc(m.title)}</b> ` : ""}${esc(m.message)}`;
-    li.innerHTML = `<span class="muted">${new Date(m.time * 1000).toLocaleTimeString()} ${esc(m.topic)} p${m.priority ?? 3}</span><br>${body}`;
-    $("inbox").prepend(li);
-  }, { since: "1h", onError: (e) => console.warn(e) });
+    $("inbox").prepend(renderInboxItem(m));
+  }, { since: "1h", ...(priority.length ? { priority } : {}), ...(tags.length ? { tags } : {}), onError: (e) => console.warn(e) });
 }
 $("subBtn").onclick = subscribe;
 

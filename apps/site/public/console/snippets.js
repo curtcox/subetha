@@ -1,7 +1,7 @@
 // "Copy as …" for the message composer (PLAN §10): the same publish in curl and every SDK.
 // Pure: takes the composer's fields, returns source text. Tested in apps/site/test/snippets.test.ts.
 
-/** @typedef {{ baseUrl: string, topic: string, message: string, title?: string, priority?: number, tags?: string[], mode?: string, maxCostUsd?: number, deny?: string[] }} Pub */
+/** @typedef {{ baseUrl: string, topic: string, message: string, title?: string, priority?: number, tags?: string[], click?: string, mode?: string, maxCostUsd?: number, deny?: string[] }} Pub */
 
 export const LANGUAGES = ["curl", "js", "python", "swift", "kotlin", "dart"];
 export const LANGUAGE_NAMES = { curl: "curl", js: "JavaScript", python: "Python", swift: "Swift", kotlin: "Kotlin", dart: "Dart" };
@@ -21,6 +21,7 @@ function norm(p) {
     title: p.title || undefined,
     priority: p.priority && p.priority !== 3 ? p.priority : undefined,
     tags: (p.tags ?? []).filter(Boolean),
+    click: p.click || undefined,
     mode: p.mode && p.mode !== "any" ? p.mode : undefined,
     maxCostUsd: typeof p.maxCostUsd === "number" && !Number.isNaN(p.maxCostUsd) ? p.maxCostUsd : undefined,
     deny: (p.deny ?? []).filter(Boolean),
@@ -38,6 +39,7 @@ export function snippet(lang, pub) {
       if (p.title) parts.push(`-H ${sq(`X-Title: ${p.title}`)}`);
       if (p.priority) parts.push(`-H "X-Priority: ${p.priority}"`);
       if (p.tags.length) parts.push(`-H ${sq(`X-Tags: ${p.tags.join(",")}`)}`);
+      if (p.click) parts.push(`-H ${sq(`X-Click: ${p.click}`)}`);
       if (p.mode) parts.push(`-H "X-Route-Mode: ${p.mode}"`);
       if (p.maxCostUsd !== undefined) parts.push(`-H "X-Max-Cost: ${p.maxCostUsd}"`);
       if (p.deny.length) parts.push(`-H "X-Deny: ${p.deny.join(",")}"`);
@@ -49,6 +51,7 @@ export function snippet(lang, pub) {
       if (p.title) o.push(`title: ${dq(p.title)}`);
       if (p.priority) o.push(`priority: ${p.priority}`);
       if (p.tags.length) o.push(`tags: ${JSON.stringify(p.tags)}`);
+      if (p.click) o.push(`click: ${dq(p.click)}`);
       if (hasRoute) {
         const r = [];
         if (p.mode) r.push(`mode: ${dq(p.mode)}`);
@@ -66,6 +69,7 @@ await se.publish(${dq(p.topic)}, ${dq(p.message)}${o.length ? `, { ${o.join(", "
       if (p.title) a.push(`title=${py(p.title)}`);
       if (p.priority) a.push(`priority=${p.priority}`);
       if (p.tags.length) a.push(`tags=${JSON.stringify(p.tags)}`);
+      if (p.click) a.push(`click=${py(p.click)}`);
       if (hasRoute) {
         const r = [];
         if (p.mode) r.push(`"mode": ${py(p.mode)}`);
@@ -84,6 +88,7 @@ c.publish(${a.join(", ")})`;
       if (p.title) o.push(`title: ${dq(p.title)}`);
       if (p.priority) o.push(`priority: ${p.priority}`);
       if (p.tags.length) o.push(`tags: ${JSON.stringify(p.tags)}`);
+      if (p.click) o.push(`click: ${dq(p.click)}`);
       if (hasRoute) {
         const r = [];
         if (p.mode) r.push(`mode: .${p.mode}`);
@@ -101,6 +106,7 @@ try await client.publish(${dq(p.topic)}, ${dq(p.message)}${o.length ? `, Publish
       if (p.title) o.push(`title = ${kt(p.title)}`);
       if (p.priority) o.push(`priority = ${p.priority}`);
       if (p.tags.length) o.push(`tags = listOf(${p.tags.map(kt).join(", ")})`);
+      if (p.click) o.push(`click = ${kt(p.click)}`);
       if (hasRoute) {
         const r = [];
         if (p.mode) r.push(`mode = RouteMode.${p.mode.toUpperCase()}`);
@@ -118,6 +124,7 @@ client.publish(${kt(p.topic)}, ${kt(p.message)}${o.length ? `, PublishOptions(${
       if (p.title) o.push(`title: ${dartStr(p.title)}`);
       if (p.priority) o.push(`priority: ${p.priority}`);
       if (p.tags.length) o.push(`tags: [${p.tags.map(dartStr).join(", ")}]`);
+      if (p.click) o.push(`click: ${dartStr(p.click)}`);
       if (hasRoute) {
         const r = [];
         if (p.mode) r.push(`mode: RouteMode.${p.mode}`);

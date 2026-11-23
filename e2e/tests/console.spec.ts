@@ -118,3 +118,57 @@ test("a token made in the console is limited to its scopes", async ({ page, requ
   expect((await request.post(`/@${acct.handle}/doorbell`, { headers: auth(token), data: "ding" })).status()).toBe(200);
   expect((await request.post(`/@${acct.handle}/garage`, { headers: auth(token), data: "ding" })).status()).toBe(403);
 });
+
+test("attachments can be uploaded from Compose and downloaded from the inbox", async ({ page, request }) => {
+  const acct = await bootstrap(request, 1);
+  const topic = `@${acct.handle}/files`;
+  await signIn(page, acct.token);
+  await page.locator("#subTopic").fill(topic);
+  await page.locator("#subBtn").click();
+
+  await page.locator("#pubTopic").fill(topic);
+  await page.locator("#pubMsg").fill("Sensor log");
+  await page.locator("#pubMore summary").click();
+  await page.locator("#pubClick").fill("https://example.com/logs");
+  await page.locator("#pubFile").setInputFiles({ name: "log.txt", mimeType: "text/plain", buffer: Buffer.from("temp=21.5C\n") });
+  await page.locator("#pubBtn").click();
+
+  await expect(page.locator("#pubOut")).toContainText('"name": "log.txt"');
+  const item = page.locator("#inbox li").first();
+  await expect(item).toContainText("Sensor log");
+  await expect(item).toContainText("log.txt");
+  await expect(item).toContainText("https://example.com/logs");
+  const href = await item.locator('a', { hasText: "log.txt" }).getAttribute("href");
+  expect(href).toContain("/file/");
+  const dl = await request.get(href!);
+  expect(dl.status()).toBe(200);
+  expect(await dl.text()).toBe("temp=21.5C\n");
+});
+
+test("the live inbox filters by priority and tags and jumps to a message trace", async ({ page, request }) => {
+  const acct = await bootstrap(request, 1);
+  const topic = `@${acct.handle}/filtered`;
+  expect((await request.post(`/${topic}`, { headers: auth(acct.token), data: "init" })).ok()).toBe(true);
+
+  await signIn(page, acct.token);
+  await page.locator("#subTopic").fill(topic);
+  await page.locator("#inboxPrio").fill("4,5");
+  await page.locator("#inboxTags").fill("alarm");
+  await page.locator("#subBtn").click();
+
+  // Low priority and wrong-tag messages should not appear; matching message should.
+  await request.post(`/${topic}`, { headers: { ...auth(acct.token), "X-Priority": "2", "X-Tags": "alarm" }, data: "too quiet" });
+  await request.post(`/${topic}`, { headers: { ...auth(acct.token), "X-Priority": "5", "X-Tags": "info" }, data: "wrong tag" });
+  const match = await request.post(`/${topic}`, { headers: { ...auth(acct.token), "X-Priority": "5", "X-Tags": "alarm,door" }, data: "intruder alert" });
+  const { id } = (await match.json()) as { id: string };
+
+  const item = page.locator("#inbox li").first();
+  await expect(item).toContainText("intruder alert");
+  await expect(page.locator("#inbox")).not.toContainText("too quiet");
+  await expect(page.locator("#inbox")).not.toContainText("wrong tag");
+
+  // Jump straight to the trace from the inbox item.
+  await item.getByRole("button", { name: "Trace" }).click();
+  await expect(page.locator('[data-panel="traces"]')).toBeVisible();
+  await expect(page.locator("#traceOut")).toContainText(id);
+});

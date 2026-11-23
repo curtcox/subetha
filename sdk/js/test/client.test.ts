@@ -23,6 +23,27 @@ describe("SubEtha client", () => {
     expect(m).toEqual({ topic: "@a/b", message: "hi", title: "T", tags: ["x"], route: { mode: "fast", max_cost_usd_micros: 20000, deny: ["sms"] } });
   });
 
+  it("uploads and dry-runs attachments with publishFile and estimateFile", async () => {
+    const { f, calls } = mockFetch(() => new Response(JSON.stringify({ id: "01A", topic: "@a/b", message: "snap", attachment: { name: "snap.jpg", url: "https://x.test/file/1/snap.jpg", size: 3, type: "image/jpeg" } })));
+    const c = new SubEtha({ baseUrl: "https://x.test", token: "se_t", fetch: f });
+    const bytes = new Uint8Array([1, 2, 3]);
+    const m = await c.publishFile("@a/b", { name: "snap.jpg", bytes, type: "image/jpeg" }, { title: "Door", message: "snap", priority: 4, click: "https://example.com", route: { deny: ["voice"] } });
+    expect(calls[0]!.url).toBe("https://x.test/%40a/b");
+    expect(calls[0]!.init.method).toBe("PUT");
+    const h = calls[0]!.init.headers as Record<string, string>;
+    expect(h["x-filename"]).toBe("snap.jpg");
+    expect(h["content-type"]).toBe("image/jpeg");
+    expect(h["x-title"]).toBe("Door");
+    expect(h["x-message"]).toBe("snap");
+    expect(h["x-priority"]).toBe("4");
+    expect(h["x-click"]).toBe("https://example.com");
+    expect(h["x-deny"]).toBe("voice");
+    expect(m.attachment?.name).toBe("snap.jpg");
+
+    await c.estimateFile("@a/b", { name: "snap.jpg", bytes, type: "image/jpeg" });
+    expect((calls[1]!.init.headers as Record<string, string>)["x-dry-run"]).toBe("1");
+  });
+
   it("signs and encrypts when configured, and decrypts on poll", async () => {
     const deviceKey = await deviceKeyFromSeed(hexDecode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"));
     const key = crypto.getRandomValues(new Uint8Array(32));

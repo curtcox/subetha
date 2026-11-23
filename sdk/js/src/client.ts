@@ -249,6 +249,51 @@ export class SubEtha {
     return this.request<Estimate>("POST", "/", env, { "x-dry-run": "1" });
   }
 
+  private fileHeaders(file: { name: string; type?: string }, o: PublishOptions & { message?: string } = {}, extra: Record<string, string> = {}): Record<string, string> {
+    const h: Record<string, string> = { "content-type": file.type || "application/octet-stream", "x-filename": file.name, ...extra };
+    if (o.message) h["x-message"] = o.message;
+    if (o.title) h["x-title"] = o.title;
+    if (o.priority !== undefined && o.priority !== 3) h["x-priority"] = String(o.priority);
+    if (o.tags?.length) h["x-tags"] = o.tags.join(",");
+    if (o.click) h["x-click"] = o.click;
+    if (o.icon) h["x-icon"] = o.icon;
+    if (o.actions?.length) h["x-actions"] = JSON.stringify(o.actions);
+    if (o.contentType === "text/markdown") h["x-markdown"] = "1";
+    if (o.expires) h["x-expires"] = String(o.expires);
+    if (o.route?.mode) h["x-route-mode"] = o.route.mode;
+    if (o.route?.maxCostUsd !== undefined) h["x-max-cost"] = String(o.route.maxCostUsd);
+    if (o.route?.deny?.length) h["x-deny"] = o.route.deny.join(",");
+    if (o.route?.allow?.length) h["x-allow"] = o.route.allow.join(",");
+    if (o.idempotencyKey) h["idempotency-key"] = o.idempotencyKey;
+    return this.headers(h);
+  }
+
+  /** Publish a message with a file attachment uploaded to R2 (PUT /<topic> with X-Filename). */
+  async publishFile(topic: string, file: { name: string; bytes: Uint8Array; type?: string }, o: PublishOptions & { message?: string } = {}): Promise<Envelope> {
+    const r = await this.f(`${this.baseUrl}/${topicPath(topic)}`, {
+      method: "PUT",
+      headers: this.fileHeaders(file, o),
+      body: file.bytes as BodyInit,
+    });
+    const text = await r.text();
+    const data = text ? (() => { try { return JSON.parse(text); } catch { return { message: text }; } })() : {};
+    if (!r.ok) throw new SubEthaError(r.status, data);
+    return data as Envelope;
+  }
+
+  /** Dry run for a file-attachment publish (includes upload + storage + MMS pricing if applicable). */
+  async estimateFile(topic: string, file: { name: string; bytes: Uint8Array; type?: string }, o: PublishOptions & { message?: string } = {}): Promise<Estimate> {
+    const r = await this.f(`${this.baseUrl}/${topicPath(topic)}`, {
+      method: "PUT",
+      headers: this.fileHeaders(file, o, { "x-dry-run": "1" }),
+      body: file.bytes as BodyInit,
+    });
+    const text = await r.text();
+    const data = text ? (() => { try { return JSON.parse(text); } catch { return { message: text }; } })() : {};
+    if (!r.ok) throw new SubEthaError(r.status, data);
+    return data as Estimate;
+  }
+
   private query(o: { since?: string; priority?: number[]; tags?: string[]; poll?: boolean }): string {
     const q = new URLSearchParams();
     if (o.poll) q.set("poll", "1");
