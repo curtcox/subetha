@@ -339,15 +339,25 @@ function testCounts() {
 
 function buildInfo() {
   const sha = process.env.GITHUB_SHA ?? git("rev-parse", "HEAD");
+  const version = git("describe", "--tags", "--always") || `0.1.0-dev+${sha.slice(0, 8)}`;
   const date = git("log", "-1", "--format=%cI") || new Date().toISOString();
   const subject = git("log", "-1", "--format=%s");
   const json = (p) => JSON.parse(readFileSync(join(repo, p), "utf8"));
   const tomlVersion = (p) => /^version\s*=\s*"([^"]+)"/m.exec(readFileSync(join(repo, p), "utf8"))?.[1] ?? "?";
+  const yamlVersion = (p) => /^version:\s*([^\s#]+)/m.exec(readFileSync(join(repo, p), "utf8"))?.[1] ?? "?";
+  const gradleVersion = (p) => /^\s*version\s*=\s*"([^"]+)"/m.exec(readFileSync(join(repo, p), "utf8"))?.[1] ?? "?";
   const sdks = [
     ["TypeScript SDK + CLI + web components", "@subetha/sdk", json("sdk/js/package.json").version, "https://www.npmjs.com/package/@subetha/sdk", "sdk/js"],
     ["Rust core", "subetha-core", tomlVersion("sdk/core/Cargo.toml"), "https://crates.io/crates/subetha-core", "sdk/core"],
     ["Python SDK", "subetha", tomlVersion("sdk/python/pyproject.toml"), "https://pypi.org/project/subetha/", "sdk/python"],
+    ["Swift SDK", "SubEtha", version, null, "sdk/swift"],
+    ["Kotlin SDK", "us.subetha:subetha", gradleVersion("sdk/kotlin/build.gradle.kts"), null, "sdk/kotlin"],
+    ["Dart / Flutter SDK", "subetha", yamlVersion("sdk/flutter/pubspec.yaml"), "https://pub.dev/packages/subetha", "sdk/flutter"],
+    ["Flutter native core plugin", "subetha_core", yamlVersion("sdk/flutter_core/pubspec.yaml"), null, "sdk/flutter_core"],
+    ["React Native SDK", "@subetha/react-native", json("sdk/react-native/package.json").version, "https://www.npmjs.com/package/@subetha/react-native", "sdk/react-native"],
+    ["React Native Turbo Module", "@subetha/react-native-core", json("sdk/react-native-core/package.json").version, null, "sdk/react-native-core"],
     ["Reticulum/LXMF gateway", "subetha-reticulum-gateway", tomlVersion("gateways/reticulum/pyproject.toml"), null, "gateways/reticulum"],
+    ["APNs HTTP/2 relay", "@subetha/apns-relay", json("gateways/apns-relay/package.json").version, null, "gateways/apns-relay"],
   ];
   const workflows = readdirSync(join(repo, ".github/workflows")).filter((f) => /\.ya?ml$/.test(f)).sort();
   const badges = workflows.map((w) => `<a href="${REPO_URL}/actions/workflows/${w}"><img alt="${w}" src="${REPO_URL}/actions/workflows/${w}/badge.svg"></a>`).join(" ");
@@ -355,8 +365,13 @@ function buildInfo() {
   const testTable = tests.length
     ? `<table><tr><th>Suite</th><th>Tests</th><th>Passed</th><th>Failed</th></tr>${tests.map((t) => `<tr><td>${escapeHtml(t.name)}</td><td>${t.total}</td><td class="ok">${t.passed}</td><td class="${t.failed ? "bad" : ""}">${t.failed}</td></tr>`).join("")}<tr><th>Total</th><th>${tests.reduce((n, t) => n + t.total, 0)}</th><th>${tests.reduce((n, t) => n + t.passed, 0)}</th><th>${tests.reduce((n, t) => n + t.failed, 0)}</th></tr></table>`
     : `<p class="muted">Test counts weren't collected for this build.</p>`;
+  const changelogPath = join(repo, "CHANGELOG.md");
+  const changelogHtml = existsSync(changelogPath)
+    ? makeMarked().parse(readFileSync(changelogPath, "utf8").replace(/^#\s+Changelog\s*\n+/i, ""))
+    : `<p class="muted">No changelog found.</p>`;
   return `<h1>Build info</h1>
 <table>
+<tr><th>Version</th><td><code>${escapeHtml(version)}</code></td></tr>
 <tr><th>Commit</th><td><a href="${REPO_URL}/commit/${sha}"><code>${sha.slice(0, 12)}</code></a> ${escapeHtml(subject)}</td></tr>
 <tr><th>Committed</th><td>${escapeHtml(date)}</td></tr>
 <tr><th>Built</th><td>${new Date().toISOString()}${process.env.GITHUB_RUN_ID ? ` · <a href="${REPO_URL}/actions/runs/${process.env.GITHUB_RUN_ID}">run ${process.env.GITHUB_RUN_ID}</a>` : ""}</td></tr>
@@ -367,8 +382,10 @@ function buildInfo() {
 ${testTable}
 <h2>SDKs and packages</h2>
 <table><tr><th>Package</th><th>Name</th><th>Version</th><th>Links</th></tr>
-${sdks.map(([what, name, v, registry, dir]) => `<tr><td>${what}</td><td><code>${name}</code></td><td>${v}</td><td><a href="${REPO_URL}/tree/main/${dir}">source</a>${registry ? ` · <a href="${registry}">registry</a> <span class="muted">(publishing pending)</span>` : ""}</td></tr>`).join("\n")}
+${sdks.map(([what, name, v, registry, dir]) => `<tr><td>${what}</td><td><code>${name}</code></td><td>${escapeHtml(v)}</td><td><a href="${REPO_URL}/tree/main/${dir}">source</a>${registry ? ` · <a href="${registry}">registry</a> <span class="muted">(publishing pending)</span>` : ""}</td></tr>`).join("\n")}
 </table>
+<h2>Changelog</h2>
+${changelogHtml}
 <h2>Links</h2>
 <ul>
 <li><a href="docs/">Docs</a> (this build) · <a href="openapi.yaml">openapi.yaml</a> · <a href="llms.txt">llms.txt</a></li>
@@ -376,7 +393,7 @@ ${sdks.map(([what, name, v, registry, dir]) => `<tr><td>${what}</td><td><code>${
 <li><a href="pricing-report.html">Pricing invariant report</a>: every SKU's cost, price, and margin at every tier</li>
 <li><a href="status/">Relay status</a> (polls ${appUrl}/v1/status from this page)</li>
 <li><a href="${appUrl}/console/">Live web console</a> (runs against production) · <a href="${appUrl}/sdk.js">sdk.js</a> drop-in web components</li>
-<li><a href="${REPO_URL}/blob/main/PLAN.md">Project plan</a> · <a href="docs/legal/terms.html">Legal drafts</a></li>
+<li><a href="${REPO_URL}/blob/main/PLAN.md">Project plan</a> · <a href="${REPO_URL}/blob/main/CHANGELOG.md">Changelog</a> · <a href="docs/legal/terms.html">Legal drafts</a></li>
 </ul>`;
 }
 
