@@ -3,7 +3,7 @@ import { base64urlEncode, utf8 } from "@subetha/sdk/protocol";
 import { timingSafeEqual } from "../crypto.ts";
 import type { Env } from "../types.ts";
 import { httpFailure, loadEndpoint, PermanentError, registerSender, renderText } from "./senders.ts";
-import { CALL_TIME_LIMIT_S, MMS_MAX_CHARS, MMS_SKU, mmsMedia, smsBody, smsSegments } from "./units.ts";
+import { CALL_TIME_LIMIT_S, MMS_MAX_BYTES, MMS_MAX_CHARS, MMS_SKU, mmsMedia, smsBody, smsSegments } from "./units.ts";
 import { phoneCountry } from "./destinations.ts";
 
 export { CALL_TIME_LIMIT_S, MMS_SKU, mmsMedia, SMS_MAX_CHARS, smsBody, smsSegments, voiceMinutes } from "./units.ts";
@@ -29,6 +29,25 @@ export async function sendSms(env: Env, to: string, body: string, mediaUrl?: str
   if (!r.ok) throw httpFailure(r.status, text);
   const j = JSON.parse(text) as { sid: string; num_segments?: string };
   return { sid: j.sid, segments: Number(j.num_segments ?? smsSegments(body)) };
+}
+
+/**
+ * Downloads the picture from an inbound MMS (Twilio's MediaUrl0). Only URLs on Twilio's API host
+ * are fetched, since the request carries the account's credentials; only JPEG, PNG and GIF up to
+ * MMS_MAX_BYTES are kept. Returns null for anything else.
+ */
+export async function fetchInboundMedia(env: Env, url: string): Promise<{ bytes: Uint8Array; type: string; name: string } | null> {
+  const t = twilioAuth(env);
+  let u: URL;
+  try { u = new URL(url); } catch { return null; }
+  if (u.origin !== new URL(t.base).origin || !u.pathname.startsWith(`/2010-04-01/Accounts/${t.sid}/Messages/`)) return null;
+  const r = await fetch(u.toString(), { headers: { authorization: t.auth }, redirect: "follow" });
+  if (!r.ok) return null;
+  const type = (r.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+  const ext = ({ "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif" } as Record<string, string>)[type];
+  if (!ext || Number(r.headers.get("content-length") ?? 0) > MMS_MAX_BYTES) { await r.body?.cancel(); return null; }
+  const bytes = new Uint8Array(await r.arrayBuffer());
+  return bytes.length && bytes.length <= MMS_MAX_BYTES ? { bytes, type, name: `mms.${ext}` } : null;
 }
 
 const xml = (s: string) => s.replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" })[c]!);

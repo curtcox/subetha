@@ -176,6 +176,11 @@ for everyone:
   voice pause (`GET /v1/status` shows `telephony_circuit`) until prices are regenerated.
 - SMS bodies are cut to 459 characters (3 segments) and billed per segment; calls are billed per
   started minute. A topic policy can require a minimum priority (`"min_priority": {"sms": 4}`).
+- **Texting in.** `PATCH /v1/endpoints/{id}` with `{"inbound_topic": "@you/texts"}` makes texts
+  from that verified number to the SubEtha number publish to a topic you own (tagged `sms`,
+  charged as `inbound_sms_us`). A text with a JPEG, PNG, or GIF picture is charged as
+  `inbound_mms_us`, and the picture becomes the message's attachment (stored and billed like any
+  other attachment). Replying `ACK <message id>` acknowledges an escalation instead.
 - **Pictures go as MMS.** When a message has a JPEG, PNG, or GIF attachment of up to 5 MB (and
   isn't end-to-end encrypted), US numbers get one MMS with the picture and up to 1,600 characters
   of text, billed as one `deliver_mms_us` message instead of per segment. Numbers outside the US

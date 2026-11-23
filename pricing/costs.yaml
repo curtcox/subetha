@@ -111,6 +111,13 @@ skus:
     markup: 0.4
     components: { twilio: 0.0083, carrier_fee: 0.0025, overhead: 0.0002 }
     floor_usd: 0.0005
+  inbound_mms_us:
+    description: Receive one MMS (text plus a picture) on a SubEtha number; the picture is stored as an attachment
+    unit: message
+    charge: action
+    markup: 0.4
+    components: { twilio: 0.0165, carrier_fee: 0.01, media_fetch: 0.000002, overhead: 0.0003 }
+    floor_usd: 0.001
   deliver_voice_us:
     description: One minute of a text-to-speech call to a verified US number
     unit: minute

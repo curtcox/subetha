@@ -15,6 +15,7 @@ Generated from `pricing/costs.yaml`. Every SKU at every tier must have a margin 
 | `deliver_sms_us` | segment | $0.0115 | $0.0166 | $0.0155 | $0.0143 | 30.7% | 25.6% | 19.6% |
 | `deliver_mms_us` | message | $0.0323 | $0.0462 | $0.0430 | $0.0398 | 30.1% | 24.9% | 18.8% |
 | `inbound_sms_us` | segment | $0.0110 | $0.0159 | $0.0148 | $0.0137 | 30.8% | 25.7% | 19.7% |
+| `inbound_mms_us` | message | $0.0268 | $0.0385 | $0.0358 | $0.0332 | 30.4% | 25.2% | 19.2% |
 | `deliver_voice_us` | minute | $0.0169 | $0.0247 | $0.0230 | $0.0213 | 31.5% | 26.4% | 20.6% |
 | `deliver_sms_intl` | segment | $0.0505 | $0.0717 | $0.0667 | $0.0616 | 29.6% | 24.2% | 18.0% |
 | `deliver_voice_intl` | minute | $0.0534 | $0.0768 | $0.0714 | $0.0661 | 30.4% | 25.2% | 19.2% |

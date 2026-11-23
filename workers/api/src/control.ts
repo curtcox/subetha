@@ -5,6 +5,7 @@ import { isTopic, ulid, type Transport } from "@subetha/sdk/protocol";
 import { actionPriceMicros, skuForTransport, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { audit } from "./accounts.ts";
+import { discardAttachment, recordAttachment, storeAttachment } from "./attachments.ts";
 import { requireAdmin } from "./auth.ts";
 import { randomBase32, randomDigits, sha256Hex, timingSafeEqual } from "./crypto.ts";
 import { accountStub } from "./durable/account.ts";
@@ -12,7 +13,7 @@ import { topicStub } from "./durable/topic.ts";
 import { ApiError, unwrap } from "./errors.ts";
 import { EMAIL_RE, sendEmail } from "./delivery/email.ts";
 import { verifySlackSignature } from "./delivery/slack.ts";
-import { ackToken, makeCall, sendSms, verifyTwilioSignature, voiceMinutes, voiceTwiml } from "./delivery/twilio.ts";
+import { ackToken, fetchInboundMedia, makeCall, sendSms, verifyTwilioSignature, voiceMinutes, voiceTwiml } from "./delivery/twilio.ts";
 import { DEST_PRICES_KEY, destUnitPrice, INTL_COUNTRIES, phoneCountry, type DestinationPrices } from "./delivery/destinations.ts";
 import type { Env, Principal, QueuedSubscription, SubscriptionFilter } from "./types.ts";
 import { registerDeviceRoutes } from "./devices.ts";
@@ -60,7 +61,8 @@ const maskAddress = (kind: string, a: string) =>
   kind === "email" ? a.replace(/^(.).*(@.*)$/, "$1…$2") : kind === "sms" || kind === "voice" ? a.slice(0, 2) + "…" + a.slice(-4) : kind === "webpush" ? "(browser)" : a.length > 40 ? a.slice(0, 37) + "…" : a;
 
 function publicEndpoint(e: EndpointRecord) {
-  return { id: e.id, kind: e.kind, address: maskAddress(e.kind, e.address), verified: !!e.verified_at, created_at: e.created_at };
+  const cfg = JSON.parse(e.config || "{}") as { name?: string; inbound_topic?: string };
+  return { id: e.id, kind: e.kind, address: maskAddress(e.kind, e.address), verified: !!e.verified_at, created_at: e.created_at, ...(cfg.name ? { name: cfg.name } : {}), ...(cfg.inbound_topic ? { inbound_topic: cfg.inbound_topic } : {}) };
 }
 
 export async function loadDestPrices(env: Env): Promise<DestinationPrices | null> {
@@ -228,6 +230,34 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     return c.json({ ...publicEndpoint(e), verified: true });
   });
 
+  // Rename an endpoint, or (SMS) choose the topic that texts from its number publish to.
+  app.patch("/v1/endpoints/:id", async (c) => {
+    const p = await principal(c);
+    const accountId = requireAdmin(p);
+    const e = await c.env.DB.prepare("SELECT * FROM endpoints WHERE id = ? AND account_id = ?").bind(c.req.param("id"), accountId).first<EndpointRecord>();
+    if (!e) throw new ApiError("not_found");
+    const body = (await c.req.json()) as { name?: unknown; inbound_topic?: unknown };
+    const cfg = JSON.parse(e.config || "{}") as Record<string, unknown>;
+    if (body.name !== undefined) {
+      if (typeof body.name !== "string" || body.name.length > 100) throw new ApiError("bad_request", "name must be a string of up to 100 characters");
+      cfg.name = body.name;
+    }
+    if (body.inbound_topic !== undefined) {
+      if (e.kind !== "sms") throw new ApiError("bad_request", "inbound_topic applies to sms endpoints only");
+      if (body.inbound_topic === null) delete cfg.inbound_topic;
+      else {
+        if (typeof body.inbound_topic !== "string" || !isTopic(body.inbound_topic)) throw new ApiError("invalid_topic");
+        const meta = await topicStub(c.env, body.inbound_topic).getMeta();
+        if (!meta || meta.owner !== accountId) throw new ApiError("forbidden", "inbound_topic must be a topic you own");
+        cfg.inbound_topic = body.inbound_topic;
+      }
+    }
+    e.config = JSON.stringify(cfg);
+    await c.env.DB.prepare("UPDATE endpoints SET config = ? WHERE id = ?").bind(e.config, e.id).run();
+    await audit(c.env, accountId, p.kind, "endpoint.update", { id: e.id, ...(body.inbound_topic !== undefined ? { inbound_topic: cfg.inbound_topic ?? null } : {}) });
+    return c.json(publicEndpoint(e));
+  });
+
   app.delete("/v1/endpoints/:id", async (c) => {
     const p = await principal(c);
     const accountId = requireAdmin(p);
@@ -320,7 +350,8 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     if (/^(help|info)$/i.test(body)) {
       return twiml(c, "<Response><Message>SubEtha notifications. Manage at subetha.us/console. Reply STOP to opt out. Msg &amp; data rates may apply.</Message></Response>");
     }
-    const ep = await c.env.DB.prepare("SELECT * FROM endpoints WHERE kind = 'sms' AND address = ? AND verified_at IS NOT NULL ORDER BY created_at LIMIT 1").bind(from).first<EndpointRecord>();
+    // The same number can be verified on several accounts; the oldest one with an inbound topic wins.
+    const ep = await c.env.DB.prepare("SELECT * FROM endpoints WHERE kind = 'sms' AND address = ? AND verified_at IS NOT NULL ORDER BY json_extract(config, '$.inbound_topic') IS NULL, created_at LIMIT 1").bind(from).first<EndpointRecord>();
     if (!ep) return twiml(c);
     if (/^(stop|stopall|unsubscribe|cancel|end|quit)$/i.test(body)) {
       await c.env.DB.prepare("UPDATE endpoints SET verified_at = NULL WHERE kind IN ('sms','voice') AND address = ?").bind(from).run();
@@ -334,15 +365,28 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
       return twiml(c);
     }
     if (!cfg.inbound_topic) return twiml(c);
-    const price = actionPriceMicros(PRICES, "inbound_sms_us");
+    // An MMS's first picture becomes the message's attachment (billed as inbound_mms_us, plus
+    // the attachment's upload and storage like any publish); other media types are dropped.
+    const media = Number(params.NumMedia ?? 0) > 0 && c.env.FILES ? await fetchInboundMedia(c.env, params.MediaUrl0 ?? "").catch(() => null) : null;
+    const price = actionPriceMicros(PRICES, media ? "inbound_mms_us" : "inbound_sms_us");
     const charge = await accountStub(c.env, ep.account_id).charge(price, `insms:${params.MessageSid}`, null, {}, true);
     if (!charge.ok) return twiml(c);
-    unwrap(await topicStub(c.env, cfg.inbound_topic).publish({
-      envelope: { topic: cfg.inbound_topic, message: body.slice(0, 4096), tags: ["sms"], sms_from: maskAddress("sms", from) } as never,
-      caller: { accountId: ep.account_id, tokenId: null, deviceId: null, caps: { daily: null, total: null }, transports: null },
-      autoCreateOwner: null, idempotencyKey: `sms:${params.MessageSid}`, bodyHash: params.MessageSid ?? "", dryRun: false,
-      route: { mode: "any", maxCost: null, deny: ["sms"], allow: null },
-    }));
+    const stored = media ? await storeAttachment(c.env, media) : null;
+    const envelope = { topic: cfg.inbound_topic, message: (body || (media ? `You received a file: ${media.name}` : "")).slice(0, 4096), tags: ["sms"], sms_from: maskAddress("sms", from), ...(stored ? { attachment: stored.attachment } : {}) };
+    let result;
+    try {
+      result = unwrap(await topicStub(c.env, cfg.inbound_topic).publish({
+        envelope: envelope as never,
+        caller: { accountId: ep.account_id, tokenId: null, deviceId: null, caps: { daily: null, total: null }, transports: null },
+        autoCreateOwner: null, idempotencyKey: `sms:${params.MessageSid}`, bodyHash: params.MessageSid ?? "", dryRun: false,
+        attachmentBytes: media?.bytes.length,
+        route: { mode: "any", maxCost: null, deny: ["sms"], allow: null },
+      }));
+    } catch (e) {
+      if (stored) await discardAttachment(c.env, stored.fileId);
+      throw e;
+    }
+    if (stored) await recordAttachment(c.env, stored.fileId, media!, cfg.inbound_topic, result);
     return twiml(c);
   });
 

@@ -972,6 +972,35 @@ paths:
         "402": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
   /v1/endpoints/{id}:
+    patch:
+      tags: [endpoints]
+      operationId: updateEndpoint
+      summary: Rename an endpoint or set an SMS endpoint's inbound topic
+      description: |
+        Texts from a verified SMS endpoint's number to the SubEtha number publish to its
+        `inbound_topic` (which must be a topic you own), charged as `inbound_sms_us`, or
+        `inbound_mms_us` when the text carries a JPEG, PNG, or GIF picture, which becomes the
+        message's attachment. `null` turns inbound texts off.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 100 }
+                inbound_topic: { type: [string, "null"] }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Endpoint" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
     delete:
       tags: [endpoints]
       operationId: deleteEndpoint
@@ -2076,6 +2105,8 @@ components:
         address: { type: string, description: Masked. }
         verified: { type: boolean }
         created_at: { type: integer }
+        name: { type: string }
+        inbound_topic: { type: string, description: "SMS endpoints: the topic that texts from this number publish to." }
 
     SubscriptionFilter:
       type: object

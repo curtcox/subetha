@@ -1,4 +1,5 @@
 // HTTP API: ntfy-compatible publish/subscribe plus the /v1 control plane (spec §8, PLAN §7).
+import { discardAttachment, recordAttachment, storeAttachment } from "./attachments.ts";
 import { Hono, type Context } from "hono";
 import { canonicalize, isTopic, validateEnvelope, ulid, type Envelope, type Json } from "@subetha/sdk/protocol";
 import { actionPriceMicros, topupSplit, tierFor, type PriceTable } from "@subetha/pricing";
@@ -447,10 +448,9 @@ async function doPublish(c: C, parsed: ParsedPublish): Promise<Response> {
   // Attachments go to R2 first; the publish (which charges for them) references the file.
   let fileId: string | null = null;
   if (parsed.file) {
-    if (!c.env.FILES) throw new ApiError("unsupported", "attachments are not enabled");
-    fileId = ulid().toLowerCase();
-    env.attachment = { name: parsed.file.name, url: `${c.env.BASE_URL}/file/${fileId}/${encodeURIComponent(parsed.file.name)}`, size: parsed.file.bytes.length, type: parsed.file.type };
-    if (!parsed.dryRun) await c.env.FILES.put(`att/${fileId}`, parsed.file.bytes, { httpMetadata: { contentType: parsed.file.type } });
+    const stored = await storeAttachment(c.env, parsed.file, parsed.dryRun);
+    fileId = stored.fileId;
+    env.attachment = stored.attachment;
   }
   const bodyHash = await sha256Hex(canonicalize({ ...env, route: parsed.route, file: parsed.file ? await sha256Hex(parsed.file.bytes) : undefined } as unknown as Json));
   let result;
@@ -466,17 +466,10 @@ async function doPublish(c: C, parsed: ParsedPublish): Promise<Response> {
       route: parsed.route,
     }));
   } catch (e) {
-    if (fileId && !parsed.dryRun) await c.env.FILES!.delete(`att/${fileId}`);
+    if (fileId && !parsed.dryRun) await discardAttachment(c.env, fileId);
     throw e;
   }
-  if (fileId && !parsed.dryRun) {
-    if (result.duplicate) await c.env.FILES!.delete(`att/${fileId}`);
-    else {
-      const meta = await topicStub(c.env, env.topic).getMeta();
-      await c.env.DB.prepare("INSERT INTO files (id, topic, owner_account_id, name, type, size, message_id, expires, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind(fileId, env.topic, meta!.owner, parsed.file!.name, parsed.file!.type, parsed.file!.bytes.length, result.message.id, result.message.expires, Date.now()).run();
-    }
-  }
+  if (fileId && !parsed.dryRun) await recordAttachment(c.env, fileId, parsed.file!, env.topic, result);
   if (result.created_topic) c.executionCtx.waitUntil(recordTopic(c.env, { name: env.topic, owner: caller.accountId!, policy: {}, created_at: Date.now() }));
   const headers = { "x-cost-micros": String(result.cost_micros), "x-message-id": result.message.id ?? "" };
   if (result.dry_run) return c.json({ dry_run: true, estimate_usd_micros: result.cost_micros, plan: result.plan, message: result.message }, 200, headers);
