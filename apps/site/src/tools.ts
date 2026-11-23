@@ -155,6 +155,8 @@ export interface SimInput {
   title?: string;
   message: string;
   tags?: string[];
+  /** The message carries a picture (JPEG/PNG/GIF ≤ 5 MB): US SMS subscribers get one MMS. */
+  image?: boolean;
   /** Open WebSocket/SSE connections matching the message. */
   live: number;
   subscriptions: SimSubscription[];
@@ -169,6 +171,7 @@ export interface SimInput {
 
 export interface SimStep {
   transport: Transport;
+  sku: string | null;
   subscriber: string;
   after_s: number;
   cost_micros: number;
@@ -214,11 +217,12 @@ export function simulate(input: SimInput, prices: PriceTable = PRICES): SimResul
     nowMs,
     tags: input.tags ?? [],
     units: { sms: segments, voice: voiceMinutes(renderText(env, 1500)) },
+    mms: !!input.image,
   });
   const publishMicros = actionPriceMicros(prices, "publish", tier);
   const retentionS = Math.min(policy.retention_s ?? DEFAULT_RETENTION_S, MAX_RETENTION_S);
   const retentionMicros = Math.ceil(rentNanos(prices, "retention_message_day", retentionS / 86400, tier) / 1000);
-  const steps = plan.deliveries.map((d) => ({ transport: d.transport, subscriber: d.subscriber, after_s: d.after_s, cost_micros: d.cost_micros })).sort((a, b) => a.after_s - b.after_s);
+  const steps = plan.deliveries.map((d) => ({ transport: d.transport, sku: d.sku, subscriber: d.subscriber, after_s: d.after_s, cost_micros: d.cost_micros })).sort((a, b) => a.after_s - b.after_s);
   const immediate = plan.deliveries.filter((d) => d.after_s === 0).reduce((s, d) => s + d.cost_micros, 0);
   const worstCaseMicros = publishMicros + plan.costMicros + retentionMicros;
   const ackedMicros = input.mode === "all" ? worstCaseMicros : publishMicros + immediate + retentionMicros;

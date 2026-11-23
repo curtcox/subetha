@@ -132,6 +132,7 @@ export function mountSimulator(root: HTMLElement, opts: { consoleUrl?: string } 
       <h3>Message</h3>
       <div class="row"><div><label for="s_title">Title</label><input id="s_title" value="Front door"></div><div><label for="s_tags">Tags</label><input id="s_tags" placeholder="door,warning"></div></div>
       <label for="s_msg">Message</label><input id="s_msg" value="Opened">
+      <label class="check"><input id="s_image" type="checkbox"> With a picture (SMS goes as one MMS to US numbers)</label>
       <div class="row">
         <div><label for="s_prio">Priority</label><select id="s_prio">${[1, 2, 3, 4, 5].map((p) => `<option${p === 5 ? " selected" : ""}>${p}</option>`).join("")}</select></div>
         <div><label for="s_mode">Route mode</label><select id="s_mode">${MODES.map((m) => `<option>${m}</option>`).join("")}</select></div>
@@ -185,6 +186,7 @@ export function mountSimulator(root: HTMLElement, opts: { consoleUrl?: string } 
       title: $<HTMLInputElement>("s_title").value || undefined,
       message: $<HTMLInputElement>("s_msg").value,
       tags: list($<HTMLInputElement>("s_tags").value),
+      image: $<HTMLInputElement>("s_image").checked,
       live: num($<HTMLInputElement>("s_live")),
       subscriptions: subs,
       policy,
@@ -196,7 +198,7 @@ export function mountSimulator(root: HTMLElement, opts: { consoleUrl?: string } 
     };
     const r = simulate(input);
     const steps = r.steps.length
-      ? `<div class="scroll"><table><thead><tr><th>When</th><th>Transport</th><th>Subscriber</th><th class="num">Cost</th></tr></thead><tbody>${r.steps.map((s) => `<tr><td>${s.after_s ? `after ${s.after_s}s if unacked` : "immediately"}</td><td>${esc(s.transport)}</td><td class="muted">${esc(s.subscriber)}</td><td class="num">${usd(s.cost_micros)}</td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="scroll"><table><thead><tr><th>When</th><th>Transport</th><th>Subscriber</th><th class="num">Cost</th></tr></thead><tbody>${r.steps.map((s) => `<tr><td>${s.after_s ? `after ${s.after_s}s if unacked` : "immediately"}</td><td>${esc(s.transport === "sms" && s.sku === "deliver_mms_us" ? "sms (MMS)" : s.transport)}</td><td class="muted">${esc(s.subscriber)}</td><td class="num">${usd(s.cost_micros)}</td></tr>`).join("")}</tbody></table></div>`
       : `<p class="muted">Nothing would be delivered now: the message is stored until it expires, for subscribers who connect or poll later.</p>`;
     const dropped = r.plan.dropped.length
       ? `<h4>Not used</h4><div class="scroll"><table><thead><tr><th>Transport</th><th>Subscriber</th><th>Why</th></tr></thead><tbody>${r.plan.dropped.map((d) => `<tr><td>${esc(d.transport)}</td><td class="muted">${esc(d.subscriber)}</td><td>${esc(d.reason)}</td></tr>`).join("")}</tbody></table></div>`
@@ -209,7 +211,7 @@ export function mountSimulator(root: HTMLElement, opts: { consoleUrl?: string } 
         <tr><th>Reserved (worst case, what a dry run reports)</th><th class="num">${usd(r.worstCaseMicros)}</th></tr>
         ${mode === "all" ? "" : `<tr><td>If acked before the first escalation</td><td class="num">${usd(r.ackedMicros)}</td></tr>`}
       </table>
-      ${r.smsSegments > 1 ? `<p class="muted">This message is ${r.smsSegments} SMS segments.</p>` : ""}
+      ${r.smsSegments > 1 && !input.image ? `<p class="muted">This message is ${r.smsSegments} SMS segments.</p>` : ""}
       <p class="muted">Unused reservations are released when the message is acked. ${opts.consoleUrl ? `To run this against a real topic, use <a href="${esc(opts.consoleUrl)}">Simulate route &amp; cost</a> in the console (a dry run, charged as one API request).` : ""}</p>`;
   };
 

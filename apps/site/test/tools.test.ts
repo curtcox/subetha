@@ -90,6 +90,14 @@ describe("route simulator", () => {
     expect(all.ackedMicros).toBe(all.worstCaseMicros);
   });
 
+  it("bills an SMS subscriber one MMS when the message has a picture", () => {
+    const subs = [{ transport: "sms" as const }];
+    const text = simulate({ ...base, message: "x".repeat(300), subscriptions: subs });
+    const pic = simulate({ ...base, message: "x".repeat(300), subscriptions: subs, image: true });
+    expect(text.steps.find((s) => s.transport === "sms")).toMatchObject({ sku: "deliver_sms_us", cost_micros: actionPriceMicros(PRICES, "deliver_sms_us", "standard", 2) });
+    expect(pic.steps.find((s) => s.transport === "sms")).toMatchObject({ sku: "deliver_mms_us", cost_micros: actionPriceMicros(PRICES, "deliver_mms_us", "standard") });
+  });
+
   it("counts SMS segments of the rendered message", () => {
     const r = simulate({ ...base, priority: 5, title: "T", message: "y".repeat(200), subscriptions: [{ transport: "sms" }] });
     expect(r.smsSegments).toBe(2);
