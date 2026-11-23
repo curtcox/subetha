@@ -572,6 +572,14 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     if (!team) throw new ApiError("not_found", "install the Slack app for this team first");
     const meta = await topicStub(c.env, body.topic).getMeta();
     if (!meta || meta.owner !== accountId) throw new ApiError("forbidden", "you must own the topic");
+    const existing = await c.env.DB.prepare("SELECT account_id, topic, endpoint_id FROM slack_bindings WHERE team_id = ? AND channel = ?")
+      .bind(body.team_id, body.channel).first<{ account_id: string; topic: string; endpoint_id: string | null }>();
+    if (existing && existing.account_id !== accountId) throw new ApiError("conflict", "this channel is bound by another account");
+    if (existing?.endpoint_id) {
+      await c.env.DB.prepare("DELETE FROM subscriptions WHERE endpoint_id = ?").bind(existing.endpoint_id).run();
+      await c.env.DB.prepare("DELETE FROM endpoints WHERE id = ? AND account_id = ?").bind(existing.endpoint_id, accountId).run();
+      await syncTopicSubscriptions(c.env, existing.topic);
+    }
     let endpointId: string | null = null;
     if (body.outbound !== false) {
       endpointId = `ep_${ulid()}`;
@@ -581,9 +589,9 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
       await syncTopicSubscriptions(c.env, body.topic);
     }
     if (body.inbound !== false) {
-      const existing = await c.env.DB.prepare("SELECT account_id FROM slack_bindings WHERE team_id = ? AND channel = ?").bind(body.team_id, body.channel).first<{ account_id: string }>();
-      if (existing && existing.account_id !== accountId) throw new ApiError("conflict", "this channel is bound by another account");
       await c.env.DB.prepare("INSERT OR REPLACE INTO slack_bindings (team_id, channel, topic, account_id, endpoint_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(body.team_id, body.channel, body.topic, accountId, endpointId, Date.now()).run();
+    } else if (existing) {
+      await c.env.DB.prepare("DELETE FROM slack_bindings WHERE team_id = ? AND channel = ? AND account_id = ?").bind(body.team_id, body.channel, accountId).run();
     }
     return c.json({ bound: true, endpoint_id: endpointId }, 201);
   });

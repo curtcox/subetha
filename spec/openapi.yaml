@@ -1679,6 +1679,25 @@ paths:
                   bearer_methods_supported: { type: array, items: { type: string } }
                   resource_documentation: { type: string, format: uri }
 
+  /.well-known/oauth-protected-resource/mcp:
+    get:
+      tags: [mcp]
+      operationId: oauthProtectedResourceMcp
+      summary: Path-scoped OAuth 2.0 protected resource metadata (RFC 9728) for /mcp
+      security: []
+      responses:
+        "200":
+          description: Metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resource: { type: string, format: uri }
+                  authorization_servers: { type: array, items: { type: string, format: uri } }
+                  bearer_methods_supported: { type: array, items: { type: string } }
+                  resource_documentation: { type: string, format: uri }
+
   # ------------------------------------------------------------------ attachments
   /file/{id}/{name}:
     get:

@@ -4,7 +4,7 @@ import type { Context, Hono } from "hono";
 import { actionPriceMicros, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { isTopic, isWrappedKey, ulid, type WrappedKey } from "@subetha/sdk/protocol";
-import { audit } from "./accounts.ts";
+import { accountTier, audit } from "./accounts.ts";
 import { requireAccount, requireAdmin } from "./auth.ts";
 import { accountStub } from "./durable/account.ts";
 import { ApiError } from "./errors.ts";
@@ -21,7 +21,8 @@ export const MAX_KEYS_PER_TOPIC = 1000;
 
 /** Key-store calls are metered like other API requests (PLAN §8 rule 0), paid by the caller's account. */
 async function meter(env: Env, accountId: string, what: string) {
-  const r = await accountStub(env, accountId).charge(actionPriceMicros(PRICES, "api_request"), `keys:${what}:${ulid()}`, null, {});
+  const tier = await accountTier(env, accountId);
+  const r = await accountStub(env, accountId).charge(actionPriceMicros(PRICES, "api_request", tier), `keys:${what}:${ulid()}`, null, {});
   if (!r.ok) throw new ApiError("insufficient_balance", "balance too low for this request");
 }
 

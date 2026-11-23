@@ -10,7 +10,7 @@ import type { Context, Hono } from "hono";
 import { isTopic, ulid, type Envelope } from "@subetha/sdk/protocol";
 import { actionPriceMicros, skuForTransport, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
-import { audit } from "./accounts.ts";
+import { accountTier, audit } from "./accounts.ts";
 import { requireAdmin } from "./auth.ts";
 import { accountStub } from "./durable/account.ts";
 import { ApiError } from "./errors.ts";
@@ -82,20 +82,22 @@ export function registerInspectorRoutes(app: Hono<Vars>, principal: PrincipalFn)
     if (!row.verified_at) throw new ApiError("forbidden", "verify the endpoint before testing it");
     const ep = await loadEndpoint(c.env, row.id);
     const message = testMessage(body);
-    const telephony = ep.kind === "sms" || ep.kind === "voice";
+    const telephony = ep.kind === "sms" || ep.kind === "voice" || ep.kind === "whatsapp";
     if (telephony && (await checkTelephonyCircuit(c.env, accountId))) throw new ApiError("provider_unavailable", "SMS and voice are temporarily paused");
     const send = senders[ep.kind];
     const sku = skuForTransport(PRICES, ep.kind);
     if (!send || !sku) throw new ApiError("bad_request", `${ep.kind} endpoints can't be tested`);
 
     // Numbers outside the US are priced per destination (and must still be enabled for the account).
-    const price = ep.kind === "sms" || ep.kind === "voice"
+    const tier = await accountTier(c.env, accountId);
+    const price = ep.kind === "sms" || ep.kind === "voice" || ep.kind === "whatsapp"
       ? (await telephonyUnitPrice(c.env, accountId, ep.kind, ep.address)) * units(ep.kind, message)
-      : actionPriceMicros(PRICES, sku, "standard", units(ep.kind, message));
+      : actionPriceMicros(PRICES, sku, tier, units(ep.kind, message));
     const ref = `test:${ep.id}:${message.id}`;
     const account = accountStub(c.env, accountId);
     const tokenId = p.kind === "token" ? p.tokenId : null;
-    const r = await account.reserve(price, ref, tokenId, {}, telephony ? "telephony" : null);
+    const caps = p.kind === "token" ? { tokenDaily: p.caps.daily, tokenTotal: p.caps.total } : {};
+    const r = await account.reserve(price, ref, tokenId, caps, telephony ? "telephony" : null, `sku=${sku}`);
     if (!r.ok) {
       throw r.code === "insufficient_balance"
         ? new ApiError("insufficient_balance", "balance can't cover the test delivery", { shortfall_usd_micros: r.shortfall })

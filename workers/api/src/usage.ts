@@ -31,7 +31,26 @@ export function categorize(ref: string): UsageCategory | null {
 /** The topic a live-delivery lease was for (`lease:<topic>:<ulid>`). */
 export const leaseTopic = (ref: string) => (ref.startsWith("lease:") ? ref.slice(6, ref.lastIndexOf(":")) : null);
 
-export type RefRow = { ref: string; start: number; net: number; closed: number };
+export type RefRow = { ref: string; start: number; net: number; closed: number; meta?: string | null };
+
+/** Infers the SKU identifier from a ledger ref + optional `sku=...` metadata tag. */
+export function skuOf(ref: string, meta?: string | null): string {
+  const m = meta ? /(?:^|\s)sku=([a-z0-9_]+)/.exec(meta) : null;
+  if (m) return m[1]!;
+  const p = ref.slice(0, ref.indexOf(":"));
+  switch (p) {
+    case "pub": return "publish";
+    case "lease": return "deliver_live";
+    case "rent": return "device_day";
+    case "inmail": return "inbound_email";
+    case "insms": return "inbound_sms_us";
+    case "dlv": return "deliver_other";
+    case "verify": return "verify_endpoint";
+    case "test": return "test_delivery";
+    case "dry": case "dup": case "idem": case "keys": case "dl": return "api_request";
+    default: return "other";
+  }
+}
 
 export interface Usage {
   since: number;
@@ -40,6 +59,7 @@ export interface Usage {
   total_micros: number;
   pending_micros: number;
   live_by_topic: { topic: string; micros: number }[];
+  by_sku: { sku: string; micros: number }[];
 }
 
 const dayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -53,6 +73,7 @@ export function aggregateUsage(rows: RefRow[], nowMs: number, days: number): Usa
   for (let i = 0; i < days; i++) byDay.set(dayOf(since + i * 86_400_000), zero());
   const totals = zero();
   const topics = new Map<string, number>();
+  const skus = new Map<string, number>();
   let pending = 0;
   for (const r of rows) {
     if (r.start < since) continue;
@@ -63,6 +84,8 @@ export function aggregateUsage(rows: RefRow[], nowMs: number, days: number): Usa
     if (spent <= 0) continue;
     byDay.get(dayOf(r.start))![cat] += spent;
     totals[cat] += spent;
+    const sku = skuOf(r.ref, r.meta);
+    skus.set(sku, (skus.get(sku) ?? 0) + spent);
     const t = leaseTopic(r.ref);
     if (t) topics.set(t, (topics.get(t) ?? 0) + spent);
   }
@@ -73,5 +96,6 @@ export function aggregateUsage(rows: RefRow[], nowMs: number, days: number): Usa
     total_micros: Object.values(totals).reduce((a, b) => a + b, 0),
     pending_micros: pending,
     live_by_topic: [...topics].map(([topic, micros]) => ({ topic, micros })).sort((a, b) => b.micros - a.micros).slice(0, 10),
+    by_sku: [...skus].map(([sku, micros]) => ({ sku, micros })).sort((a, b) => b.micros - a.micros),
   };
 }

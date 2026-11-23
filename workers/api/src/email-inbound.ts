@@ -116,7 +116,7 @@ export async function handleInboundEmail(message: ForwardableEmailMessage, env: 
     envelope: { topic, title: parsed.subject.slice(0, 256) || undefined, message: (parsed.text || "(no text)").slice(0, 4096), tags: ["email"], email_from: from } as never,
     caller: { accountId: meta.owner, tokenId: null, deviceId: null, caps: { daily: null, total: null }, transports: null },
     autoCreateOwner: null, idempotencyKey: `email:${msgId}`, bodyHash: msgId, dryRun: false,
-    route: { mode: "any", maxCost: null, deny: [], allow: null },
+    route: { mode: "any", maxCost: null, deny: ["email"], allow: null },
   });
   if (!r.ok) message.setReject(r.error.message);
 }

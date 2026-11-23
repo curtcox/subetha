@@ -17,7 +17,11 @@ export const TOOLS = [
     inputSchema: { type: "object", required: ["topic", "message"], properties: {
       topic: topicProp, message: { type: "string" }, title: { type: "string" },
       priority: { type: "integer", minimum: 1, maximum: 5 }, tags: { type: "array", items: { type: "string" } },
-      click: { type: "string" }, route_mode: { enum: ["any", "fast", "all", "cheap"] },
+      click: { type: "string" }, icon: { type: "string" },
+      actions: { type: "array", items: { type: "object" } },
+      content_type: { enum: ["text/plain", "text/markdown", "application/json", "application/octet-stream"] },
+      expires: { type: "integer", minimum: 0 }, hops: { type: "integer", minimum: 0, maximum: 16 },
+      route_mode: { enum: ["any", "fast", "all", "cheap"] },
       max_cost_usd: { type: "number" }, deny: { type: "array", items: { type: "string" } },
       allow: { type: "array", items: { type: "string" } }, deadline_s: { type: "integer", minimum: 1 },
       idempotency_key: { type: "string" },
@@ -31,7 +35,7 @@ export const TOOLS = [
   {
     name: "wait_for_message",
     description: "Long-poll: wait up to timeout_s seconds for the next message on a topic (after `since`, default now). Returns the message or {timeout:true}.",
-    inputSchema: { type: "object", required: ["topic"], properties: { topic: topicProp, since: { type: "string" }, timeout_s: { type: "integer", minimum: 1, maximum: 50, default: 25 } } },
+    inputSchema: { type: "object", required: ["topic"], properties: { topic: topicProp, since: { type: "string" }, priority: { type: "string", description: "e.g. 4,5" }, tags: { type: "string" }, timeout_s: { type: "integer", minimum: 1, maximum: 50, default: 25 } } },
   },
   {
     name: "list_topics",
@@ -77,7 +81,7 @@ async function runTool(name: string, a: Args, call: Call): Promise<unknown> {
   switch (name) {
     case "publish": {
       const env: Record<string, unknown> = { topic, message: String(a.message ?? "") };
-      for (const k of ["title", "priority", "tags", "click"]) if (a[k] !== undefined) env[k] = a[k];
+      for (const k of ["title", "priority", "tags", "click", "icon", "actions", "content_type", "expires", "hops"]) if (a[k] !== undefined) env[k] = a[k];
       const route: Record<string, unknown> = {};
       if (a.route_mode) route.mode = a.route_mode;
       if (a.max_cost_usd !== undefined) route.max_cost_usd_micros = Math.floor(Number(a.max_cost_usd) * 1e6);
@@ -112,6 +116,8 @@ async function runTool(name: string, a: Args, call: Call): Promise<unknown> {
       const timeout = Math.min(Math.max(Number(a.timeout_s ?? 25), 1), 50) * 1000;
       const q = new URLSearchParams();
       if (a.since) q.set("since", String(a.since));
+      if (a.priority) q.set("priority", String(a.priority));
+      if (a.tags) q.set("tags", String(a.tags));
       const r = await call(`/${topicPath(topic)}/json${q.size ? `?${q}` : ""}`);
       if (!r.ok) throw Object.assign(new Error(await r.text()), { status: r.status });
       // Read bytes directly: cancelling a pipeThrough(TextDecoderStream) chain leaves a rejected
@@ -164,12 +170,14 @@ export function mcpChallenge(origin: string, error?: string): string {
 export function registerMcp(app: App) {
   // The resource is the URL the client used (subetha.us/mcp or mcp.subetha.us/mcp); access
   // tokens that name an audience must name it (oauth.ts).
-  app.get("/.well-known/oauth-protected-resource", (c) => c.json({
-    resource: `${new URL(c.req.url).origin}/mcp`,
-    authorization_servers: c.env.CLERK_ISSUER ? [c.env.CLERK_ISSUER] : [],
+  const resourceMetadata = (origin: string, env: Env) => ({
+    resource: `${origin}/mcp`,
+    authorization_servers: env.CLERK_ISSUER ? [env.CLERK_ISSUER] : [],
     bearer_methods_supported: ["header"],
-    resource_documentation: `${c.env.BASE_URL}/docs/agents.html`,
-  }));
+    resource_documentation: `${env.BASE_URL}/docs/agents.html`,
+  });
+  app.get("/.well-known/oauth-protected-resource", (c) => c.json(resourceMetadata(new URL(c.req.url).origin, c.env)));
+  app.get("/.well-known/oauth-protected-resource/mcp", (c) => c.json(resourceMetadata(new URL(c.req.url).origin, c.env)));
 
   app.get("/mcp", (c) => c.json({ error: "use POST (Streamable HTTP, JSON responses)" }, 405, { allow: "POST" }));
 

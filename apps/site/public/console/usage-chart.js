@@ -67,6 +67,7 @@ export function renderUsageChart(root, usage) {
 
   const legend = ORDER.map((c, i) => `<span class="key"><i style="background:var(--series-${i + 1})"></i>${esc(labels[c] ?? c)}</span>`).join("");
   const rows = ORDER.map((c, i) => `<tr><td><i class="swatch" style="background:var(--series-${i + 1})"></i>${esc(labels[c] ?? c)}</td><td class="num">${money(usage.totals?.[c] ?? 0)}</td></tr>`).join("");
+  const skus = (usage.by_sku ?? []).map((s) => `<tr><td><code>${esc(s.sku)}</code></td><td class="num">${money(s.micros)}</td></tr>`).join("");
   const topics = (usage.live_by_topic ?? []).map((t) => `<tr><td><code>${esc(t.topic)}</code></td><td class="num">${money(t.micros)}</td></tr>`).join("");
 
   root.innerHTML = `
@@ -78,6 +79,7 @@ export function renderUsageChart(root, usage) {
     </div>
     <details><summary>Table</summary>
       <table><thead><tr><th>Category</th><th class="num">Spend</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><th>Total</th><th class="num">${money(usage.total_micros)}</th></tr></tfoot></table>
+      ${skus ? `<table><thead><tr><th>Spend by SKU</th><th class="num">Spend</th></tr></thead><tbody>${skus}</tbody></table>` : ""}
       ${topics ? `<table><thead><tr><th>Live delivery & storage by topic</th><th class="num">Spend</th></tr></thead><tbody>${topics}</tbody></table>` : ""}
       <table><thead><tr><th>Day</th>${ORDER.map((c) => `<th class="num">${esc(labels[c] ?? c)}</th>`).join("")}<th class="num">Total</th></tr></thead><tbody>${days.filter((d) => d.total).map((d) => `<tr><td>${esc(d.day)}</td>${ORDER.map((c) => `<td class="num">${money(d.micros[c])}</td>`).join("")}<td class="num">${money(d.total)}</td></tr>`).join("") || `<tr><td colspan="${ORDER.length + 2}" class="muted">No spend in this period.</td></tr>`}</tbody></table>
     </details>`;

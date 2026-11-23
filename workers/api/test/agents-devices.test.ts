@@ -48,6 +48,15 @@ describe("MCP server", () => {
     expect(timedOut.structuredContent).toEqual({ timeout: true });
     const bad = await call("publish", { topic: "nope", message: "x" });
     expect(bad.isError).toBe(true);
+
+    // Path-scoped RFC 9728 metadata route and extended MCP publish fields.
+    const meta = await SELF.fetch(`${BASE}/.well-known/oauth-protected-resource/mcp`);
+    expect(meta.status).toBe(200);
+    expect(((await meta.json()) as { resource: string }).resource).toBe(`${BASE}/mcp`);
+
+    const rich = await call("publish", { topic: "@agent/inbox", message: '{"x":1}', content_type: "application/json", hops: 2 });
+    expect(rich.isError).toBe(false);
+    expect(rich.structuredContent).toMatchObject({ content_type: "application/json", hops: 2 });
   });
 });
 

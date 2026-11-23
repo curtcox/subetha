@@ -1,6 +1,6 @@
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { aggregateUsage, categorize, leaseTopic } from "../src/usage.ts";
+import { aggregateUsage, categorize, leaseTopic, skuOf } from "../src/usage.ts";
 import { auth, balance, BASE, bootstrap, publish } from "./helpers.ts";
 
 const NOW = Date.UTC(2026, 10, 21, 15);
@@ -20,8 +20,8 @@ describe("usage aggregation", () => {
   it("counts closed refs on their first day, open ones as pending, and skips earlier refs", () => {
     const u = aggregateUsage([
       { ref: "pub:a", start: NOW - 1000, net: -6, closed: 1 },
-      { ref: "dlv:a:s:1", start: NOW - DAY, net: -16_602, closed: 1 }, // reserved yesterday, settled today: counts yesterday
-      { ref: "dlv:a:s:2", start: NOW, net: -74_000, closed: 0 }, // still in flight
+      { ref: "dlv:a:s:1", start: NOW - DAY, net: -16_602, closed: 1, meta: "sku=deliver_sms_us" }, // reserved yesterday, settled today: counts yesterday
+      { ref: "dlv:a:s:2", start: NOW, net: -74_000, closed: 0, meta: "sku=deliver_voice_us" }, // still in flight
       { ref: "lease:@me/door:1", start: NOW - 2 * DAY, net: -3, closed: 1 },
       { ref: "lease:@me/door:2", start: NOW - 2 * DAY, net: -4, closed: 1 },
       { ref: "lease:@me/bell:1", start: NOW, net: 0, closed: 1 }, // fully returned
@@ -36,6 +36,13 @@ describe("usage aggregation", () => {
     expect(u.total_micros).toBe(16_615);
     expect(u.pending_micros).toBe(74_000);
     expect(u.live_by_topic).toEqual([{ topic: "@me/door", micros: 7 }]);
+    expect(u.by_sku).toEqual([
+      { sku: "deliver_sms_us", micros: 16_602 },
+      { sku: "deliver_live", micros: 7 },
+      { sku: "publish", micros: 6 },
+    ]);
+    expect(skuOf("dlv:a:s:1", "sku=deliver_webhook")).toBe("deliver_webhook");
+    expect(skuOf("inmail:abc")).toBe("inbound_email");
   });
 });
 

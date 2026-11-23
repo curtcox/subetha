@@ -152,17 +152,17 @@ export class AccountDO extends DurableObject<Env> {
   }
   private static PAUSED: ReserveResult = { ok: false, code: "spend_cap_exceeded", cap: "account_paused", remaining: 0 };
 
-  async charge(amount: number, ref: string, tokenId: string | null, caps: Caps, once = false): Promise<ReserveResult> {
+  async charge(amount: number, ref: string, tokenId: string | null, caps: Caps, once = false, meta?: string): Promise<ReserveResult> {
     const c = await this.withControls(caps);
     if (!c) return AccountDO.PAUSED;
-    return this.tx(() => this.ledger.charge(amount, ref, { tokenId, caps: c, once }));
+    return this.tx(() => this.ledger.charge(amount, ref, { tokenId, caps: c, once, meta }));
   }
 
   /**
    * Reserve before acting. Category "telephony" (SMS/voice) is subject to the new-funds hold:
    * until the first top-up is HOLD_DAYS old, total telephony spend is capped (PLAN §8).
    */
-  async reserve(amount: number, ref: string, tokenId: string | null, caps: Caps, category: "telephony" | null = null): Promise<ReserveResult> {
+  async reserve(amount: number, ref: string, tokenId: string | null, caps: Caps, category: "telephony" | null = null, meta?: string): Promise<ReserveResult> {
     const withCtl = await this.withControls(caps);
     if (!withCtl) return AccountDO.PAUSED;
     caps = withCtl;
@@ -175,7 +175,7 @@ export class AccountDO extends DurableObject<Env> {
           return { ok: false, code: "spend_cap_exceeded", cap: "account_daily", remaining: Math.max(0, TELEPHONY_HOLD_CAP_MICROS - spent) } as ReserveResult;
         }
       }
-      const r = this.ledger.reserve(amount, ref, { tokenId, caps });
+      const r = this.ledger.reserve(amount, ref, { tokenId, caps, meta });
       if (r.ok && category === "telephony") {
         this.store.putTelephonyRef(ref, amount);
         this.store.addSpend("telephony", "total", amount);
@@ -255,7 +255,8 @@ export class AccountDO extends DurableObject<Env> {
     const from = nowMs - (days + 7) * 86_400_000;
     const rows = this.ctx.storage.sql.exec<RefRow>(
       `SELECT ref, MIN(time) AS start, SUM(amount) AS net,
-              SUM(CASE WHEN kind IN ('settle', 'lease_return') THEN 1 ELSE 0 END) AS closed
+              SUM(CASE WHEN kind IN ('settle', 'lease_return') THEN 1 ELSE 0 END) AS closed,
+              MAX(CASE WHEN kind = 'reserve' THEN meta END) AS meta
          FROM entries WHERE time >= ? AND kind IN ('reserve', 'settle', 'lease', 'lease_return')
         GROUP BY ref`, from).toArray();
     return aggregateUsage(rows, nowMs, days);

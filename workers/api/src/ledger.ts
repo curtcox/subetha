@@ -85,10 +85,10 @@ export class Ledger {
   }
 
   /** Reserve worst-case cost before acting. */
-  reserve(amount: number, ref: string, opts: { tokenId?: string | null; caps?: Caps } = {}): ReserveResult {
+  reserve(amount: number, ref: string, opts: { tokenId?: string | null; caps?: Caps; meta?: string } = {}): ReserveResult {
     assertAmount(amount);
     if (this.s.getReservation(ref)) throw new Error(`duplicate reservation ref ${ref}`);
-    const { tokenId = null, caps = {} } = opts;
+    const { tokenId = null, caps = {}, meta } = opts;
     const today = day(this.now());
     if (tokenId) {
       if (caps.tokenDaily != null) {
@@ -114,7 +114,7 @@ export class Ledger {
     this.s.setReserved(this.reserved + amount);
     this.s.putReservation({ ref, amount, tokenId, time: this.now() });
     this.addSpend(tokenId, amount);
-    this.entry("reserve", -amount, ref);
+    this.entry("reserve", -amount, ref, meta);
     return { ok: true, available: this.available };
   }
 
@@ -153,7 +153,7 @@ export class Ledger {
    * Reserve and settle in one step (for fixed-price actions). With `once`, a second charge with
    * the same ref is a no-op (used by metering jobs that may re-run).
    */
-  charge(amount: number, ref: string, opts: { tokenId?: string | null; caps?: Caps; once?: boolean } = {}): ReserveResult {
+  charge(amount: number, ref: string, opts: { tokenId?: string | null; caps?: Caps; once?: boolean; meta?: string } = {}): ReserveResult {
     if (opts.once) {
       if (this.s.hasRef(`charge:${ref}`)) return { ok: true, available: this.available };
     }
