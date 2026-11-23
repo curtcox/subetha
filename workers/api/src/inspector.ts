@@ -15,6 +15,7 @@ import { requireAdmin } from "./auth.ts";
 import { accountStub } from "./durable/account.ts";
 import { ApiError } from "./errors.ts";
 import { CIRCUIT_KEY } from "./cron.ts";
+import { telephonyUnitPrice } from "./control.ts";
 import { senders } from "./delivery/index.ts";
 import { loadEndpoint } from "./delivery/senders.ts";
 import { checkWebhookResponse, sendWebhook, webhookRequest } from "./delivery/webhook.ts";
@@ -87,7 +88,10 @@ export function registerInspectorRoutes(app: Hono<Vars>, principal: PrincipalFn)
     const sku = skuForTransport(PRICES, ep.kind);
     if (!send || !sku) throw new ApiError("bad_request", `${ep.kind} endpoints can't be tested`);
 
-    const price = actionPriceMicros(PRICES, sku, "standard", units(ep.kind, message));
+    // Numbers outside the US are priced per destination (and must still be enabled for the account).
+    const price = ep.kind === "sms" || ep.kind === "voice"
+      ? (await telephonyUnitPrice(c.env, accountId, ep.kind, ep.address)) * units(ep.kind, message)
+      : actionPriceMicros(PRICES, sku, "standard", units(ep.kind, message));
     const ref = `test:${ep.id}:${message.id}`;
     const account = accountStub(c.env, accountId);
     const tokenId = p.kind === "token" ? p.tokenId : null;

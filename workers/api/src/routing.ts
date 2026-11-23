@@ -20,6 +20,8 @@ export interface PlanInput {
   tags?: string[];
   /** Billable units per transport (SMS segments, call minutes). Default 1. */
   units?: Partial<Record<Transport, number>>;
+  /** Unit price (µ$) of SMS/voice to a country outside the US at this tier, or null if unpriced. */
+  destPrice?: (transport: Transport, country: string) => number | null;
 }
 
 export interface Plan {
@@ -77,7 +79,16 @@ export function planDeliveries(input: PlanInput): Plan {
       dropped.push({ subscriber: sub.id, transport: t, reason: why });
       continue;
     }
-    const { sku, cost } = price(t);
+    let { sku, cost } = price(t);
+    if (sub.country) {
+      const unit = input.destPrice?.(t, sub.country) ?? null;
+      if (unit === null) {
+        dropped.push({ subscriber: sub.id, transport: t, reason: "destination price unknown" });
+        continue;
+      }
+      sku = `deliver_${t}_intl`;
+      cost = unit * (input.units?.[t] ?? 1);
+    }
     const after = input.mode === "all" ? 0 : input.mode === "fast" ? Math.min(sub.after_s ?? 0, 5) : sub.after_s ?? 0;
     deliveries.push({ subscriber: sub.id, transport: t, sku, cost_micros: cost, after_s: after });
   }

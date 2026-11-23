@@ -12,7 +12,8 @@ import { topicStub } from "./durable/topic.ts";
 import { ApiError, unwrap } from "./errors.ts";
 import { EMAIL_RE, sendEmail } from "./delivery/email.ts";
 import { verifySlackSignature } from "./delivery/slack.ts";
-import { ackToken, makeCall, sendSms, US_E164, verifyTwilioSignature, voiceMinutes, voiceTwiml } from "./delivery/twilio.ts";
+import { ackToken, makeCall, sendSms, verifyTwilioSignature, voiceMinutes, voiceTwiml } from "./delivery/twilio.ts";
+import { DEST_PRICES_KEY, destUnitPrice, INTL_COUNTRIES, phoneCountry, type DestinationPrices } from "./delivery/destinations.ts";
 import type { Env, Principal, QueuedSubscription, SubscriptionFilter } from "./types.ts";
 import { registerDeviceRoutes } from "./devices.ts";
 import { registerInspectorRoutes } from "./inspector.ts";
@@ -44,14 +45,14 @@ export function validateAddress(kind: Transport, address: unknown): string {
   if (typeof address !== "string" || !address) throw new ApiError("bad_request", "address is required");
   const ok =
     kind === "email" ? EMAIL_RE.test(address) :
-    kind === "sms" || kind === "voice" ? US_E164.test(address) :
+    kind === "sms" || kind === "voice" ? phoneCountry(address) !== null :
     kind === "webhook" ? /^https:\/\/[^\s/]+(\/\S*)?$/.test(address) :
     kind === "webpush" ? (() => { try { const s = JSON.parse(address); return /^https:\/\//.test(s.endpoint) && typeof s.keys?.p256dh === "string" && typeof s.keys?.auth === "string"; } catch { return false; } })() :
     kind === "apns" ? /^[0-9a-f]{64,200}$/i.test(address) :
     kind === "fcm" ? /^[\w:.-]{20,4096}$/.test(address) :
     kind === "lxmf" ? /^[0-9a-f]{32}$/i.test(address) :
     false;
-  if (!ok) throw new ApiError("bad_request", kind === "sms" || kind === "voice" ? "only US numbers in E.164 form (+1NXXNXXXXXX) are supported for now" : `invalid ${kind} address`);
+  if (!ok) throw new ApiError("bad_request", kind === "sms" || kind === "voice" ? `unsupported phone number: use E.164 (+…) for the US or one of ${Object.keys(INTL_COUNTRIES).join(", ")}; premium-rate and non-geographic numbers are not served` : `invalid ${kind} address`);
   return address;
 }
 
@@ -60,6 +61,31 @@ const maskAddress = (kind: string, a: string) =>
 
 function publicEndpoint(e: EndpointRecord) {
   return { id: e.id, kind: e.kind, address: maskAddress(e.kind, e.address), verified: !!e.verified_at, created_at: e.created_at };
+}
+
+export async function loadDestPrices(env: Env): Promise<DestinationPrices | null> {
+  return env.CACHE.get<DestinationPrices>(DEST_PRICES_KEY, "json");
+}
+
+/** Accounts' opt-in countries outside the US (PLAN §8). */
+export const optedCountries = (json: string | null | undefined): string[] => (json ? (JSON.parse(json) as string[]) : []);
+
+/**
+ * Price (µ$, standard tier) of one SMS segment or call minute to `address`, after checking that the
+ * destination is served: US numbers use the static SKU; other countries must be opted into by the
+ * account and have a current live price.
+ */
+export async function telephonyUnitPrice(env: Env, accountId: string, kind: "sms" | "voice", address: string): Promise<number> {
+  const country = phoneCountry(address);
+  if (!country) throw new ApiError("bad_request", "unsupported phone number");
+  if (country === "US") return actionPriceMicros(PRICES, skuForTransport(PRICES, kind)!);
+  const row = await env.DB.prepare("SELECT telephony_countries FROM accounts WHERE id = ?").bind(accountId).first<{ telephony_countries: string | null }>();
+  if (!optedCountries(row?.telephony_countries).includes(country)) {
+    throw new ApiError("forbidden", `${INTL_COUNTRIES[country]!.name} (${country}) isn't enabled for this account; add it to telephony_countries with PATCH /v1/account`);
+  }
+  const p = destUnitPrice(await loadDestPrices(env), kind, country, "standard");
+  if (p === null) throw new ApiError("provider_unavailable", `no current ${kind} price for ${country}; try again later`);
+  return p;
 }
 
 const VERIFY_SEND_INTERVAL_MS = 3_600_000;
@@ -93,8 +119,9 @@ async function sendCode(env: Env, e: EndpointRecord, code: string) {
   if (sentAt === null) throw new ApiError("rate_limited", "a code was sent to this destination recently; try again in an hour");
   // The verification message costs the same as a delivery and is paid before it is sent; SMS and
   // calls count toward the new-funds telephony hold.
-  const sku = skuForTransport(PRICES, e.kind)!;
-  const price = actionPriceMicros(PRICES, sku);
+  const price = e.kind === "sms" || e.kind === "voice"
+    ? await telephonyUnitPrice(env, e.account_id, e.kind, e.address)
+    : actionPriceMicros(PRICES, skuForTransport(PRICES, e.kind)!);
   const ref = `verify:${e.id}:${ulid()}`;
   const account = accountStub(env, e.account_id);
   const r = await account.reserve(price, ref, null, {}, telephony ? "telephony" : null);
@@ -114,13 +141,20 @@ async function sendCode(env: Env, e: EndpointRecord, code: string) {
 /** Push the topic's current verified subscriptions into its Durable Object. */
 export async function syncTopicSubscriptions(env: Env, topic: string) {
   const { results } = await env.DB.prepare(
-    `SELECT s.id, s.filter, s.after_s, s.min_priority, e.id AS endpoint_id, e.kind, e.address
+    `SELECT s.id, s.filter, s.after_s, s.min_priority, e.id AS endpoint_id, e.kind, e.address, a.telephony_countries
      FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id JOIN accounts a ON a.id = e.account_id
-     WHERE s.topic = ? AND e.verified_at IS NOT NULL AND a.frozen_since IS NULL`).bind(topic).all<{ id: string; filter: string; after_s: number; min_priority: number | null; endpoint_id: string; kind: Transport; address: string }>();
-  const subs: QueuedSubscription[] = results.map((r) => ({
-    id: r.id, transport: r.kind, endpoint: r.endpoint_id, address: r.kind === "webpush" ? undefined : r.address,
-    filter: JSON.parse(r.filter) as SubscriptionFilter, after_s: r.after_s || undefined, min_priority: r.min_priority ?? undefined,
-  }));
+     WHERE s.topic = ? AND e.verified_at IS NOT NULL AND a.frozen_since IS NULL`).bind(topic).all<{ id: string; filter: string; after_s: number; min_priority: number | null; endpoint_id: string; kind: Transport; address: string; telephony_countries: string | null }>();
+  const subs: QueuedSubscription[] = [];
+  for (const r of results) {
+    // Numbers outside the US deliver only while the owner keeps their country enabled.
+    const country = r.kind === "sms" || r.kind === "voice" ? phoneCountry(r.address) : null;
+    if ((r.kind === "sms" || r.kind === "voice") && (!country || (country !== "US" && !optedCountries(r.telephony_countries).includes(country)))) continue;
+    subs.push({
+      id: r.id, transport: r.kind, endpoint: r.endpoint_id, address: r.kind === "webpush" ? undefined : r.address,
+      filter: JSON.parse(r.filter) as SubscriptionFilter, after_s: r.after_s || undefined, min_priority: r.min_priority ?? undefined,
+      ...(country && country !== "US" ? { country } : {}),
+    });
+  }
   await topicStub(env, topic).setSubscriptions(subs);
 }
 
@@ -152,6 +186,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     const kind = body.kind!;
     if (!CREATABLE.includes(kind)) throw new ApiError("bad_request", kind === "slack" ? "Slack endpoints are created by installing the Slack app (GET /v1/slack/install)" : `kind must be one of ${CREATABLE.join(", ")}`);
     const address = validateAddress(kind, body.address);
+    if (kind === "sms" || kind === "voice") await telephonyUnitPrice(c.env, accountId, kind, address);
     if (kind === "webhook") assertPublicWebhook(address, c.env.BASE_URL);
     // Web Push endpoints are URLs we POST to as well (the browser's push service).
     if (kind === "webpush") assertPublicWebhook(JSON.parse(address).endpoint, c.env.BASE_URL);

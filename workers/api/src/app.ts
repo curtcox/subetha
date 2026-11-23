@@ -12,7 +12,8 @@ import { ApiError, reviveError, unwrap } from "./errors.ts";
 import { parseFilter, parseHeaderPublish, parseJsonPublish, parseTopicPath, type ParsedPublish } from "./ntfy.ts";
 import { createCheckoutSession, verifyStripeSignature } from "./stripe.ts";
 import type { Env, Principal, TopicMeta } from "./types.ts";
-import { registerControlRoutes } from "./control.ts";
+import { registerControlRoutes, syncAccountEndpoints } from "./control.ts";
+import { DEST_PRICES_KEY, INTL_COUNTRIES, parseCountries, type DestinationPrices } from "./delivery/destinations.ts";
 import { mcpChallenge, registerMcp } from "./mcp.ts";
 import { USAGE_LABELS } from "./usage.ts";
 
@@ -107,6 +108,15 @@ const principal = async (c: C) => {
 
 app.get("/v1/health", (c) => c.json({ ok: true, environment: c.env.ENVIRONMENT, time: Math.floor(Date.now() / 1000) }));
 app.get("/v1/prices", (c) => c.json(PRICES));
+// Today's per-country SMS/voice prices outside the US (refreshed daily from Twilio; PLAN §8, rule 5).
+app.get("/v1/prices/destinations", async (c) => {
+  const t = await c.env.CACHE.get<DestinationPrices>(DEST_PRICES_KEY, "json");
+  const countries = Object.fromEntries(Object.entries(INTL_COUNTRIES).map(([iso, info]) => {
+    const p = t?.countries[iso];
+    return [iso, { name: info.name, calling_code: `+${info.code}`, sms_usd_micros: p?.sms ?? null, voice_usd_micros_per_minute: p?.voice ?? null }];
+  }));
+  return c.json({ updated_at: t ? Math.floor(t.updated_at / 1000) : null, countries });
+});
 
 // Status page data (PLAN §14 Phase 3): component health and which transports are configured.
 app.get("/v1/status", async (c) => {
@@ -139,7 +149,7 @@ app.get("/v1/account", async (c) => {
   const acct = await getAccount(c.env, id);
   if (!acct) throw new ApiError("not_found");
   const bal = await accountStub(c.env, id).balance();
-  return c.json({ id: acct.id, handle: acct.handle, email: acct.email, tier: tierFor(PRICES, acct.topups_12mo_micros), balance_usd_micros: bal.available, reserved_usd_micros: bal.reserved, daily_cap_micros: acct.daily_cap_micros, oauth_daily_cap_micros: acct.oauth_daily_cap_micros ?? null, paused: !!acct.paused, created_at: acct.created_at });
+  return c.json({ id: acct.id, handle: acct.handle, email: acct.email, tier: tierFor(PRICES, acct.topups_12mo_micros), balance_usd_micros: bal.available, reserved_usd_micros: bal.reserved, daily_cap_micros: acct.daily_cap_micros, oauth_daily_cap_micros: acct.oauth_daily_cap_micros ?? null, telephony_countries: JSON.parse(acct.telephony_countries ?? "[]") as string[], paused: !!acct.paused, created_at: acct.created_at });
 });
 
 app.post("/v1/account", async (c) => {
@@ -156,7 +166,7 @@ app.post("/v1/account", async (c) => {
 
 app.patch("/v1/account", async (c) => {
   const id = requireAdmin(await principal(c));
-  const body = (await c.req.json()) as { handle?: string; daily_cap_micros?: number | null; oauth_daily_cap_micros?: number | null; paused?: boolean; auto_recharge?: { threshold_usd: number; amount_usd: number } | null };
+  const body = (await c.req.json()) as { handle?: string; daily_cap_micros?: number | null; oauth_daily_cap_micros?: number | null; paused?: boolean; telephony_countries?: string[]; auto_recharge?: { threshold_usd: number; amount_usd: number } | null };
   const acct = await getAccount(c.env, id);
   if (body.auto_recharge !== undefined) {
     if (body.auto_recharge === null) {
@@ -185,6 +195,12 @@ app.patch("/v1/account", async (c) => {
     const v = body.oauth_daily_cap_micros;
     if (v !== null && !(Number.isInteger(v) && v >= 0)) throw new ApiError("bad_request", "oauth_daily_cap_micros must be a non-negative integer or null");
     await c.env.DB.prepare("UPDATE accounts SET oauth_daily_cap_micros = ? WHERE id = ?").bind(v, id).run();
+  }
+  if (body.telephony_countries !== undefined) {
+    const list = parseCountries(body.telephony_countries);
+    if (!list) throw new ApiError("bad_request", `telephony_countries must be an array of: ${Object.keys(INTL_COUNTRIES).join(", ")}`);
+    await c.env.DB.prepare("UPDATE accounts SET telephony_countries = ? WHERE id = ?").bind(list.length ? JSON.stringify(list) : null, id).run();
+    await syncAccountEndpoints(c.env, id); // numbers in countries no longer allowed stop receiving
   }
   if (body.daily_cap_micros !== undefined || body.paused !== undefined) {
     const row = await c.env.DB.prepare("SELECT paused, daily_cap_micros FROM accounts WHERE id = ?").bind(id).first<{ paused: number; daily_cap_micros: number | null }>();

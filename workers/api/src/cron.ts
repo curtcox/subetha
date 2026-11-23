@@ -1,11 +1,12 @@
 // Scheduled jobs (PLAN §7, §8, §14): rent metering, freeze/cleanup, reconciliation, Twilio
 // repricing, and the nightly D1 backup.
-import { rentNanos, type PriceTable, type SkuPrice } from "@subetha/pricing";
+import { livePriceMicros, rentNanos, type PriceTable, type SkuPrice } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { audit, invalidateAccount } from "./accounts.ts";
 import { backupDatabase } from "./backup.ts";
 import { syncAccountEndpoints } from "./control.ts";
 import { accountStub } from "./durable/account.ts";
+import { DEST_PRICES_KEY, INTL_COUNTRIES, type DestinationPrices } from "./delivery/destinations.ts";
 import type { Env } from "./types.ts";
 
 const PRICES = prices as unknown as PriceTable;
@@ -17,6 +18,7 @@ export async function runCron(cron: string, env: Env, now: number) {
     await meterRent(env, now);
     await reconcile(env, now);
     await checkTwilioPrices(env);
+    await repriceDestinations(env, now);
     await deleteExpiredFiles(env, now);
     // Device codes live 10 minutes; approved ones are kept a day for the device's last poll.
     await env.DB.prepare("DELETE FROM device_codes WHERE expires_at < ?").bind(now - 86_400_000).run();
@@ -119,6 +121,53 @@ export async function checkTwilioPrices(env: Env) {
     // Leave the circuit as it was; an open one expires after two days without a successful check.
     console.error("twilio repricing failed", e);
   }
+}
+
+/** A provider price above this per SMS segment or call minute is treated as unpriced (toll-fraud guard). */
+export const MAX_PROVIDER_USD = 0.5;
+
+/**
+ * Prices every opt-in country outside the US from Twilio's live prices (PLAN §8, rule 5): the
+ * highest current outbound SMS price and voice prefix price for the country, marked up with the
+ * `deliver_*_intl` SKUs. Countries Twilio can't price (or prices absurdly) are left out, and
+ * left-out destinations are rejected. The table expires after three days without a refresh.
+ */
+export async function repriceDestinations(env: Env, now: number) {
+  if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN) return;
+  const headers = { authorization: `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`)}` };
+  const get = async <T>(path: string): Promise<T | null> => {
+    try {
+      const r = await fetch(`https://pricing.twilio.com/v2/${path}`, { headers });
+      return r.ok ? ((await r.json()) as T) : null;
+    } catch {
+      return null;
+    }
+  };
+  const nums = (xs: { current_price?: string }[] | undefined) => (xs ?? []).map((p) => Number(p.current_price ?? 0)).filter((n) => Number.isFinite(n) && n > 0);
+  const perTier = (sku: string, usd: number) => {
+    if (!(usd > 0 && usd <= MAX_PROVIDER_USD)) return undefined;
+    const out: Record<string, number> = {};
+    for (const t of PRICES.tiers) {
+      const p = livePriceMicros(PRICES, sku, "twilio", usd, t.id);
+      if (p === null) return undefined;
+      out[t.id] = p;
+    }
+    return out;
+  };
+  const table: DestinationPrices = { updated_at: now, countries: {} };
+  let reached = 0;
+  for (const iso of Object.keys(INTL_COUNTRIES)) {
+    const sms = await get<{ outbound_sms_prices?: { prices?: { current_price?: string }[] }[] }>(`Messaging/Countries/${iso}`);
+    const voice = await get<{ outbound_prefix_prices?: { current_price?: string }[] }>(`Voice/Countries/${iso}`);
+    if (sms || voice) reached++;
+    const smsUsd = Math.max(0, ...(sms?.outbound_sms_prices ?? []).flatMap((c) => nums(c.prices)));
+    const voiceUsd = Math.max(0, ...nums(voice?.outbound_prefix_prices));
+    const entry = { sms: perTier("deliver_sms_intl", smsUsd), voice: perTier("deliver_voice_intl", voiceUsd), provider_usd: { sms: smsUsd || undefined, voice: voiceUsd || undefined } };
+    if (entry.sms || entry.voice) table.countries[iso] = entry;
+  }
+  // Twilio unreachable: keep yesterday's table until it expires rather than replacing it with nothing.
+  if (!reached) return;
+  await env.CACHE.put(DEST_PRICES_KEY, JSON.stringify(table), { expirationTtl: 3 * 86_400 });
 }
 
 export async function deleteExpiredFiles(env: Env, now: number) {

@@ -3,7 +3,7 @@ import { HANDLE_RE, ulid } from "@subetha/sdk/protocol";
 import { ApiError } from "./errors.ts";
 import type { Env, TopicMeta, TopicPolicy } from "./types.ts";
 
-export interface AccountRow { id: string; handle: string | null; clerk_id: string | null; email: string | null; topups_12mo_micros: number; daily_cap_micros: number | null; oauth_daily_cap_micros?: number | null; paused: number; created_at: number }
+export interface AccountRow { id: string; handle: string | null; clerk_id: string | null; email: string | null; topups_12mo_micros: number; daily_cap_micros: number | null; oauth_daily_cap_micros?: number | null; telephony_countries?: string | null; paused: number; created_at: number }
 
 const RESERVED_HANDLES = new Set(["admin", "api", "subetha", "root", "system", "support", "help", "www", "mail", "docs", "console", "status", "billing", "security", "abuse", "ntfy", "mcp", "v1"]);
 

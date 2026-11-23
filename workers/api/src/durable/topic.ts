@@ -9,6 +9,7 @@ import { asResult, rpcError, type RpcResult } from "../errors.ts";
 import { planDeliveries } from "../routing.ts";
 import { smsBody, smsSegments, voiceMinutes } from "../delivery/twilio.ts";
 import { renderText } from "../delivery/senders.ts";
+import { DEST_PRICES_KEY, destUnitPrice, type DestinationPrices } from "../delivery/destinations.ts";
 import type { Caller, DeliveryJob, Env, PublishInput, PublishResult, QueuedSubscription, SubscriptionFilter, TopicMeta } from "../types.ts";
 import { accountStub } from "./account.ts";
 
@@ -117,6 +118,17 @@ export class TopicDO extends DurableObject<Env> {
 
   private queuedSubs(): QueuedSubscription[] {
     return this.sql.exec<{ json: string }>("SELECT json FROM subs").toArray().map((r) => JSON.parse(r.json));
+  }
+
+  private destCache: { at: number; prices: DestinationPrices | null } | null = null;
+  /** Live per-country SMS/voice prices, re-read from KV at most every five minutes. */
+  private async destPrices(): Promise<DestinationPrices | null> {
+    if (!this.queuedSubs().some((s) => s.country)) return null;
+    const now = Date.now();
+    if (!this.destCache || now - this.destCache.at > 300_000) {
+      this.destCache = { at: now, prices: await this.env.CACHE.get<DestinationPrices>(DEST_PRICES_KEY, "json") };
+    }
+    return this.destCache.prices;
   }
 
   private tier(): string {
@@ -264,6 +276,8 @@ export class TopicDO extends DurableObject<Env> {
   }
 
   private async publishInner(input: PublishInput): Promise<PublishResult> {
+    // Read before any check below: a KV read lets other requests interleave.
+    const dest = await this.destPrices();
     let created = false;
     if (!this.meta) {
       if (!input.autoCreateOwner) throw rpcError("no_funded_owner", "topic has no owner; create it first");
@@ -353,6 +367,7 @@ export class TopicDO extends DurableObject<Env> {
       nowMs,
       units: { sms: smsSegments(smsBody(env)), voice: voiceMinutes(renderText(env, 1500)) },
       tags: env.tags ?? [],
+      destPrice: (t, country) => (t === "sms" || t === "voice" ? destUnitPrice(dest, t, country, this.tier()) : null),
     });
     let publishPrice = actionPriceMicros(PRICES, "publish", this.tier());
     if (input.attachmentBytes) {

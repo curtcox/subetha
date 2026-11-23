@@ -145,9 +145,11 @@ describe("verified paid endpoints", () => {
     expect(((await ok.json()) as { verified: boolean }).verified).toBe(true);
   });
 
-  it("rejects non-US phone numbers and sends SMS codes via Twilio", async () => {
+  it("rejects unsupported and non-opted-in numbers and sends SMS codes via Twilio", async () => {
     const a = await bootstrap("texter", 1);
-    expect((await SELF.fetch(`${BASE}/v1/endpoints`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ kind: "sms", address: "+447700900123" }) })).status).toBe(400);
+    // Outside the US only after opting in (destinations.test.ts); premium-rate never.
+    expect((await SELF.fetch(`${BASE}/v1/endpoints`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ kind: "sms", address: "+447700900123" }) })).status).toBe(403);
+    expect((await SELF.fetch(`${BASE}/v1/endpoints`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ kind: "sms", address: "+19005550123" }) })).status).toBe(400);
     const calls = stubProviders(() => new Response(JSON.stringify({ sid: "SM1", num_segments: "1" }), { status: 201 }));
     const r = await SELF.fetch(`${BASE}/v1/endpoints`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ kind: "sms", address: "+14155550123" }) });
     expect(r.status).toBe(201);

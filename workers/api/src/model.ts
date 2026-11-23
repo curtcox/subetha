@@ -43,6 +43,8 @@ export interface QueuedSubscription {
   /** Escalation: deliver via this transport only if unacked after `after_s` seconds. */
   after_s?: number;
   min_priority?: number;
+  /** ISO country of an SMS/voice number outside the US: priced per destination (PLAN §8, rule 5). */
+  country?: string;
 }
 
 export interface PlannedDelivery {

@@ -333,6 +333,35 @@ paths:
           content:
             application/json:
               schema: { type: object, additionalProperties: true }
+  /v1/prices/destinations:
+    get:
+      tags: [meta]
+      operationId: destinationPrices
+      summary: Today's SMS and voice prices for numbers outside the US
+      description: |
+        Refreshed daily from Twilio's live prices (each country's highest current price, marked up
+        with the `deliver_sms_intl` / `deliver_voice_intl` SKUs). Prices are µ$ per SMS segment or
+        call minute, per tier. A `null` price means the country isn't priced today, and numbers
+        there aren't served. Accounts opt into countries with `telephony_countries`.
+      security: []
+      responses:
+        "200":
+          description: Per-country prices.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated_at: { type: [integer, "null"], description: Unix seconds of the last refresh. }
+                  countries:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        calling_code: { type: string }
+                        sms_usd_micros: { type: [object, "null"], additionalProperties: { type: integer } }
+                        voice_usd_micros_per_minute: { type: [object, "null"], additionalProperties: { type: integer } }
   /v1/status:
     get:
       tags: [meta]
@@ -410,7 +439,7 @@ paths:
     patch:
       tags: [account]
       operationId: updateAccount
-      summary: Set the handle (once), the account daily cap, or the kill switch
+      summary: Set the handle (once), caps, the kill switch, auto-recharge, or SMS/voice countries
       requestBody:
         required: true
         content:
@@ -425,6 +454,13 @@ paths:
                   minimum: 0
                   description: Daily spend cap per OAuth client (MCP agents signed in through the authorization server). `null` = $1; `0` turns OAuth access off.
                 paused: { type: boolean, description: Account-wide kill switch. }
+                telephony_countries:
+                  type: array
+                  items: { type: string, pattern: "^[A-Z]{2}$" }
+                  description: |
+                    Countries outside the US whose numbers may be SMS/voice endpoints (opt-in per
+                    country; see `GET /v1/prices/destinations` for the list and today's prices).
+                    Removing a country stops deliveries to its numbers. `[]` = US only.
                 auto_recharge:
                   description: |
                     Off-session top-up with the saved card when the balance drops below
@@ -1846,6 +1882,7 @@ components:
         reserved_usd_micros: { type: integer }
         daily_cap_micros: { type: [integer, "null"], description: Account-wide daily spend cap. }
         oauth_daily_cap_micros: { type: [integer, "null"], description: "Daily cap per OAuth client; null = the $1 default, 0 = OAuth off." }
+        telephony_countries: { type: array, items: { type: string }, description: "Opt-in countries outside the US for SMS/voice endpoints." }
         paused: { type: boolean }
         created_at: { type: integer }
 

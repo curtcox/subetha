@@ -1,13 +1,13 @@
-// Twilio SMS and voice (US only for now; PLAN §6, §8 fraud protection).
+// Twilio SMS and voice: US numbers, plus opt-in countries priced per destination (PLAN §6, §8).
 import { base64urlEncode, utf8 } from "@subetha/sdk/protocol";
 import { timingSafeEqual } from "../crypto.ts";
 import type { Env } from "../types.ts";
 import { httpFailure, loadEndpoint, PermanentError, registerSender, renderText } from "./senders.ts";
 import { CALL_TIME_LIMIT_S, smsBody, smsSegments } from "./units.ts";
+import { phoneCountry } from "./destinations.ts";
 
 export { CALL_TIME_LIMIT_S, SMS_MAX_CHARS, smsBody, smsSegments, voiceMinutes } from "./units.ts";
 
-export const US_E164 = /^\+1[2-9]\d{2}[2-9]\d{6}$/;
 
 function twilioAuth(env: Env) {
   if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN || !env.TWILIO_FROM) throw new PermanentError("Twilio is not configured");
@@ -17,7 +17,7 @@ function twilioAuth(env: Env) {
 }
 
 export async function sendSms(env: Env, to: string, body: string): Promise<{ sid: string; segments: number }> {
-  if (!US_E164.test(to)) throw new PermanentError("only US numbers are supported");
+  if (!phoneCountry(to)) throw new PermanentError("unsupported destination");
   const t = twilioAuth(env);
   const r = await fetch(`${t.base}/2010-04-01/Accounts/${t.sid}/Messages.json`, {
     method: "POST",
@@ -39,7 +39,7 @@ export function voiceTwiml(text: string, ackUrl: string | null): string {
 }
 
 export async function makeCall(env: Env, to: string, twiml: string, statusCallback?: string): Promise<{ sid: string }> {
-  if (!US_E164.test(to)) throw new PermanentError("only US numbers are supported");
+  if (!phoneCountry(to)) throw new PermanentError("unsupported destination");
   const t = twilioAuth(env);
   const r = await fetch(`${t.base}/2010-04-01/Accounts/${t.sid}/Calls.json`, {
     method: "POST",
