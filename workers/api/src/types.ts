@@ -117,4 +117,6 @@ export interface DeliveryJob {
   sub: QueuedSubscription;
   reservation: { ref: string; micros: number };
   attempt: number;
+  /** The planned SKU (e.g. MMS_SKU for an SMS subscriber getting an MMS); absent on older jobs. */
+  sku?: string | null;
 }

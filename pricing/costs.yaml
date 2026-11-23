@@ -95,6 +95,15 @@ skus:
     markup: 0.4
     components: { twilio: 0.0083, carrier_fee: 0.003, queue_ops: 0.0000012, overhead: 0.0002 }
     floor_usd: 0.0005
+  # A message with an image attachment goes to US numbers as one MMS (text + picture) instead
+  # of SMS segments. No transports: the planner picks it for SMS subscriptions when it applies.
+  deliver_mms_us:
+    description: Send one MMS (text plus an image attachment) to a verified US number
+    unit: message
+    charge: action
+    markup: 0.4
+    components: { twilio: 0.022, carrier_fee: 0.01, queue_ops: 0.0000012, overhead: 0.0003 }
+    floor_usd: 0.001
   inbound_sms_us:
     description: Receive one SMS segment on a SubEtha number
     unit: segment

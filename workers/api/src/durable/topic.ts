@@ -7,7 +7,7 @@ import { actionPriceMicros, rentNanos, type PriceTable } from "@subetha/pricing"
 import prices from "@subetha/pricing/prices.json";
 import { asResult, rpcError, type RpcResult } from "../errors.ts";
 import { planDeliveries } from "../routing.ts";
-import { smsBody, smsSegments, voiceMinutes } from "../delivery/twilio.ts";
+import { mmsMedia, smsBody, smsSegments, voiceMinutes } from "../delivery/twilio.ts";
 import { renderText } from "../delivery/senders.ts";
 import { DEST_PRICES_KEY, destUnitPrice, type DestinationPrices } from "../delivery/destinations.ts";
 import type { Caller, DeliveryJob, Env, PublishInput, PublishResult, QueuedSubscription, SubscriptionFilter, TopicMeta } from "../types.ts";
@@ -368,6 +368,7 @@ export class TopicDO extends DurableObject<Env> {
       units: { sms: smsSegments(smsBody(env)), voice: voiceMinutes(renderText(env, 1500)) },
       tags: env.tags ?? [],
       destPrice: (t, country) => (t === "sms" || t === "voice" ? destUnitPrice(dest, t, country, this.tier()) : null),
+      mms: mmsMedia(env) !== null,
     });
     let publishPrice = actionPriceMicros(PRICES, "publish", this.tier());
     if (input.attachmentBytes) {
@@ -458,7 +459,7 @@ export class TopicDO extends DurableObject<Env> {
         await this.recordDelivery(env.id!, { sub: sub.id, transport: d.transport, result: "not sent", error: r.code });
         continue;
       }
-      jobs.push({ body: { topic: meta.name, owner: meta.owner, message: env, sub, reservation: { ref, micros: d.cost_micros }, attempt: 0 }, delaySeconds: d.after_s || undefined });
+      jobs.push({ body: { topic: meta.name, owner: meta.owner, message: env, sub, reservation: { ref, micros: d.cost_micros }, attempt: 0, sku: d.sku }, delaySeconds: d.after_s || undefined });
     }
     if (jobs.length && this.env.DELIVERY) await this.env.DELIVERY.sendBatch(jobs);
     } catch (e) {

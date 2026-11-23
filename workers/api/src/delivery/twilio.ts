@@ -3,10 +3,10 @@ import { base64urlEncode, utf8 } from "@subetha/sdk/protocol";
 import { timingSafeEqual } from "../crypto.ts";
 import type { Env } from "../types.ts";
 import { httpFailure, loadEndpoint, PermanentError, registerSender, renderText } from "./senders.ts";
-import { CALL_TIME_LIMIT_S, smsBody, smsSegments } from "./units.ts";
+import { CALL_TIME_LIMIT_S, MMS_MAX_CHARS, MMS_SKU, mmsMedia, smsBody, smsSegments } from "./units.ts";
 import { phoneCountry } from "./destinations.ts";
 
-export { CALL_TIME_LIMIT_S, SMS_MAX_CHARS, smsBody, smsSegments, voiceMinutes } from "./units.ts";
+export { CALL_TIME_LIMIT_S, MMS_SKU, mmsMedia, SMS_MAX_CHARS, smsBody, smsSegments, voiceMinutes } from "./units.ts";
 
 
 function twilioAuth(env: Env) {
@@ -16,13 +16,14 @@ function twilioAuth(env: Env) {
   return { base, sid: env.TWILIO_ACCOUNT_SID, auth: `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`)}`, from: env.TWILIO_FROM };
 }
 
-export async function sendSms(env: Env, to: string, body: string): Promise<{ sid: string; segments: number }> {
+/** Sends an SMS, or an MMS when `mediaUrl` is given (Twilio fetches the image from it). */
+export async function sendSms(env: Env, to: string, body: string, mediaUrl?: string): Promise<{ sid: string; segments: number }> {
   if (!phoneCountry(to)) throw new PermanentError("unsupported destination");
   const t = twilioAuth(env);
   const r = await fetch(`${t.base}/2010-04-01/Accounts/${t.sid}/Messages.json`, {
     method: "POST",
     headers: { authorization: t.auth, "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ To: to, From: t.from, Body: body }).toString(),
+    body: new URLSearchParams({ To: to, From: t.from, Body: body, ...(mediaUrl ? { MediaUrl: mediaUrl } : {}) }).toString(),
   });
   const text = await r.text();
   if (!r.ok) throw httpFailure(r.status, text);
@@ -73,6 +74,12 @@ export async function ackToken(secret: string, topic: string, id: string): Promi
 
 registerSender("sms", async (job, env) => {
   const ep = await loadEndpoint(env, job.sub.endpoint);
+  // Planned as an MMS: one message with the picture, at the reserved MMS price.
+  const media = job.sku === MMS_SKU ? mmsMedia(job.message) : null;
+  if (media) {
+    const r = await sendSms(env, ep.address, renderText(job.message, MMS_MAX_CHARS), media);
+    return { costMicros: job.reservation.micros, detail: { sid: r.sid, mms: true } };
+  }
   const r = await sendSms(env, ep.address, smsBody(job.message));
   // Reservation was for the estimated segments; settle to what Twilio reports (never more).
   const perSegment = Math.floor(job.reservation.micros / Math.max(1, smsSegments(smsBody(job.message))));

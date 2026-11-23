@@ -2,6 +2,22 @@
 // calculator and route simulator can bundle it (apps/site/src/tools.ts).
 import type { Envelope } from "@subetha/sdk/protocol";
 
+/** SKU for one MMS to a US number; the planner uses it instead of SMS segments when it applies. */
+export const MMS_SKU = "deliver_mms_us";
+/** Twilio accepts JPEG, PNG and GIF up to 5 MB on every US carrier. */
+export const MMS_MAX_BYTES = 5 * 1024 * 1024;
+export const MMS_MAX_CHARS = 1600;
+
+/**
+ * The image an SMS subscriber gets as an MMS, or null for a plain SMS: the attachment must be an
+ * unencrypted JPEG, PNG or GIF of known size up to MMS_MAX_BYTES (Twilio fetches it by URL).
+ */
+export function mmsMedia(m: Pick<Envelope, "attachment" | "enc">): string | null {
+  const a = m.attachment;
+  if (m.enc || !a?.url || !/^https?:\/\//.test(a.url) || !a.type || !/^image\/(jpeg|png|gif)$/i.test(a.type)) return null;
+  return typeof a.size === "number" && a.size > 0 && a.size <= MMS_MAX_BYTES ? a.url : null;
+}
+
 /** Human-readable rendering used by text transports (email, SMS, voice, Slack). */
 export function renderText(m: Pick<Envelope, "title" | "message" | "enc">, max = Infinity): string {
   const body = m.enc ? "[encrypted message — open in a SubEtha app]" : (m.message ?? "");

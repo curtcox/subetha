@@ -266,6 +266,31 @@
       "markup": 0.4,
       "floor_nanos": 500000
     },
+    "deliver_mms_us": {
+      "description": "Send one MMS (text plus an image attachment) to a verified US number",
+      "unit": "message",
+      "charge": "action",
+      "transports": [],
+      "cost_nanos": 32301200,
+      "components_nanos": {
+        "twilio": 22000000,
+        "carrier_fee": 10000000,
+        "queue_ops": 1200,
+        "overhead": 300000
+      },
+      "price_nanos": {
+        "standard": 46222000,
+        "bulk": 42992000,
+        "volume": 39762000
+      },
+      "margin": {
+        "standard": 0.3012,
+        "bulk": 0.2487,
+        "volume": 0.1876
+      },
+      "markup": 0.4,
+      "floor_nanos": 1000000
+    },
     "inbound_sms_us": {
       "description": "Receive one SMS segment on a SubEtha number",
       "unit": "segment",

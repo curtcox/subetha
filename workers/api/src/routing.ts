@@ -1,6 +1,7 @@
 // Delivery planning (PLAN §5): which transports each subscriber gets, in what order, at what cost.
 import { EDGE_TRANSPORTS, type RouteMode, type Transport } from "@subetha/sdk/protocol";
 import { actionPriceMicros, skuForTransport, type PriceTable } from "@subetha/pricing";
+import { MMS_SKU } from "./delivery/units.ts";
 import type { PlannedDelivery, QueuedSubscription, TopicPolicy } from "./model.ts";
 
 export interface PlanInput {
@@ -22,6 +23,8 @@ export interface PlanInput {
   units?: Partial<Record<Transport, number>>;
   /** Unit price (µ$) of SMS/voice to a country outside the US at this tier, or null if unpriced. */
   destPrice?: (transport: Transport, country: string) => number | null;
+  /** The message carries an image for MMS: US SMS subscribers get one MMS (MMS_SKU) instead of segments. */
+  mms?: boolean;
 }
 
 export interface Plan {
@@ -88,6 +91,9 @@ export function planDeliveries(input: PlanInput): Plan {
       }
       sku = `deliver_${t}_intl`;
       cost = unit * (input.units?.[t] ?? 1);
+    } else if (t === "sms" && input.mms && input.prices.skus[MMS_SKU]) {
+      sku = MMS_SKU;
+      cost = actionPriceMicros(input.prices, MMS_SKU, input.tier);
     }
     const after = input.mode === "all" ? 0 : input.mode === "fast" ? Math.min(sub.after_s ?? 0, 5) : sub.after_s ?? 0;
     deliveries.push({ subscriber: sub.id, transport: t, sku, cost_micros: cost, after_s: after });
