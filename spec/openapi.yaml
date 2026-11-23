@@ -960,6 +960,9 @@ paths:
                     (`{"endpoint":…,"keys":{"p256dh":…,"auth":…}}`); APNs device token (hex);
                     FCM registration token; LXMF destination hash (32 hex).
                 name: { type: string }
+                credential_id:
+                  type: string
+                  description: Optional BYO push credential id (`pcred_…`) for `apns` or `fcm` endpoints.
       responses:
         "201":
           description: Created.
@@ -996,6 +999,7 @@ paths:
               properties:
                 name: { type: string, maxLength: 100 }
                 inbound_topic: { type: [string, "null"] }
+                credential_id: { type: [string, "null"], description: "APNs/FCM endpoints: bind to a BYO push credential id (`null` = account default or operator credentials)." }
       responses:
         "200":
           description: Updated.
@@ -1104,6 +1108,97 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+
+  # ------------------------------------------------------------------ push credentials (BYO)
+  /v1/push/credentials:
+    get:
+      tags: [endpoints]
+      operationId: listPushCredentials
+      summary: List BYO APNs and FCM push credentials (private keys redacted)
+      responses:
+        "200":
+          description: Stored push credentials for this account.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credentials:
+                    type: array
+                    items: { $ref: "#/components/schemas/PushCredential" }
+    post:
+      tags: [endpoints]
+      operationId: createPushCredential
+      summary: Add BYO APNs or FCM credentials for your own mobile app
+      description: |
+        Private keys are validated with WebCrypto on upload, stored write-only, and never returned
+        in responses. The first credential of a kind becomes the account default for that kind;
+        endpoints can also pin a specific `credential_id`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind: { enum: [apns, fcm] }
+                name: { type: string, maxLength: 100 }
+                is_default: { type: boolean }
+                key_p8: { type: string, description: "APNs: PEM-encoded PKCS#8 P-256 private key (.p8)." }
+                key_id: { type: string, pattern: "^[A-Z0-9]{10}$", description: "APNs: 10-character Apple Key ID." }
+                team_id: { type: string, pattern: "^[A-Z0-9]{10}$", description: "APNs: 10-character Apple Team ID." }
+                topic: { type: string, description: "APNs: app bundle identifier (apns-topic)." }
+                sandbox: { type: boolean, description: "APNs: send to api.sandbox.push.apple.com." }
+                service_account: { description: "FCM: Firebase service-account JSON string or object." }
+                project_id: { type: string, description: "FCM: Firebase project id (if not using service_account)." }
+                client_email: { type: string, description: "FCM: service-account email." }
+                private_key: { type: string, description: "FCM: PEM-encoded PKCS#8 RSA private key." }
+                private_key_id: { type: string, description: "FCM: optional key id." }
+      responses:
+        "201":
+          description: Created (private key omitted).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PushCredential" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/push/credentials/{id}:
+    patch:
+      tags: [endpoints]
+      operationId: updatePushCredential
+      summary: Rename a push credential or make it the account default
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 100 }
+                is_default: { type: boolean }
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PushCredential" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [endpoints]
+      operationId: deletePushCredential
+      summary: Delete a BYO push credential
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema: { type: object, properties: { deleted: { const: true } } }
+        "404": { $ref: "#/components/responses/Error" }
 
   # ------------------------------------------------------------------ subscriptions
   /v1/subscriptions:
@@ -2198,6 +2293,22 @@ components:
         created_at: { type: integer }
         name: { type: string }
         inbound_topic: { type: string, description: "SMS endpoints: the topic that texts from this number publish to." }
+        credential_id: { type: string, description: "APNs/FCM endpoints: pinned BYO push credential id." }
+
+    PushCredential:
+      type: object
+      properties:
+        id: { type: string, examples: [pcred_01JD0000000000000000000000] }
+        kind: { enum: [apns, fcm] }
+        name: { type: string }
+        is_default: { type: boolean }
+        created_at: { type: integer }
+        key_id: { type: string, description: "APNs only." }
+        team_id: { type: string, description: "APNs only." }
+        topic: { type: string, description: "APNs only (bundle id)." }
+        sandbox: { type: boolean, description: "APNs only." }
+        project_id: { type: string, description: "FCM only." }
+        client_email: { type: string, description: "FCM only." }
 
     SubscriptionFilter:
       type: object

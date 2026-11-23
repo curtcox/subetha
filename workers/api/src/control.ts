@@ -18,6 +18,7 @@ import { DEST_PRICES_KEY, destUnitPrice, INTL_COUNTRIES, phoneCountry, type Dest
 import type { Env, Principal, QueuedSubscription, SubscriptionFilter } from "./types.ts";
 import { registerDeviceRoutes } from "./devices.ts";
 import { registerInspectorRoutes } from "./inspector.ts";
+import { registerPushCredentialRoutes } from "./push-credentials.ts";
 import { CIRCUIT_KEY } from "./cron.ts";
 
 const PRICES = prices as unknown as PriceTable;
@@ -61,8 +62,13 @@ const maskAddress = (kind: string, a: string) =>
   kind === "email" ? a.replace(/^(.).*(@.*)$/, "$1…$2") : kind === "sms" || kind === "voice" ? a.slice(0, 2) + "…" + a.slice(-4) : kind === "webpush" ? "(browser)" : a.length > 40 ? a.slice(0, 37) + "…" : a;
 
 function publicEndpoint(e: EndpointRecord) {
-  const cfg = JSON.parse(e.config || "{}") as { name?: string; inbound_topic?: string };
-  return { id: e.id, kind: e.kind, address: maskAddress(e.kind, e.address), verified: !!e.verified_at, created_at: e.created_at, ...(cfg.name ? { name: cfg.name } : {}), ...(cfg.inbound_topic ? { inbound_topic: cfg.inbound_topic } : {}) };
+  const cfg = JSON.parse(e.config || "{}") as { name?: string; inbound_topic?: string; credential_id?: string };
+  return {
+    id: e.id, kind: e.kind, address: maskAddress(e.kind, e.address), verified: !!e.verified_at, created_at: e.created_at,
+    ...(cfg.name ? { name: cfg.name } : {}),
+    ...(cfg.inbound_topic ? { inbound_topic: cfg.inbound_topic } : {}),
+    ...(cfg.credential_id ? { credential_id: cfg.credential_id } : {}),
+  };
 }
 
 export async function loadDestPrices(env: Env): Promise<DestinationPrices | null> {
@@ -174,6 +180,7 @@ async function topicsForEndpoint(env: Env, endpointId: string): Promise<string[]
 export function registerControlRoutes(app: App, principal: PrincipalFn) {
   registerDeviceRoutes(app, principal);
   registerInspectorRoutes(app, principal);
+  registerPushCredentialRoutes(app, principal);
   // ---------------- endpoints ----------------
   app.get("/v1/endpoints", async (c) => {
     const id = requireAdmin(await principal(c));
@@ -184,7 +191,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
   app.post("/v1/endpoints", async (c) => {
     const p = await principal(c);
     const accountId = requireAdmin(p);
-    const body = (await c.req.json()) as { kind?: Transport; address?: string; name?: string };
+    const body = (await c.req.json()) as { kind?: Transport; address?: string; name?: string; credential_id?: string };
     const kind = body.kind!;
     if (!CREATABLE.includes(kind)) throw new ApiError("bad_request", kind === "slack" ? "Slack endpoints are created by installing the Slack app (GET /v1/slack/install)" : `kind must be one of ${CREATABLE.join(", ")}`);
     const address = validateAddress(kind, body.address);
@@ -195,6 +202,13 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     const now = Date.now();
     const id = `ep_${ulid()}`;
     const config: Record<string, unknown> = { name: body.name ?? "" };
+    if (body.credential_id !== undefined) {
+      if (kind !== "apns" && kind !== "fcm") throw new ApiError("bad_request", "credential_id applies to apns and fcm endpoints only");
+      if (typeof body.credential_id !== "string" || !body.credential_id) throw new ApiError("bad_request", "invalid credential_id");
+      const cred = await c.env.DB.prepare("SELECT id FROM push_credentials WHERE id = ? AND account_id = ? AND kind = ?").bind(body.credential_id, accountId, kind).first();
+      if (!cred) throw new ApiError("not_found", `no such ${kind} push credential`);
+      config.credential_id = body.credential_id;
+    }
     let secret: string | undefined;
     if (kind === "webhook") config.secret = secret = `whsec_${randomBase32(20)}`;
     const code = NEEDS_CODE.includes(kind) ? randomDigits(6) : null;
@@ -236,7 +250,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     const accountId = requireAdmin(p);
     const e = await c.env.DB.prepare("SELECT * FROM endpoints WHERE id = ? AND account_id = ?").bind(c.req.param("id"), accountId).first<EndpointRecord>();
     if (!e) throw new ApiError("not_found");
-    const body = (await c.req.json()) as { name?: unknown; inbound_topic?: unknown };
+    const body = (await c.req.json()) as { name?: unknown; inbound_topic?: unknown; credential_id?: unknown };
     const cfg = JSON.parse(e.config || "{}") as Record<string, unknown>;
     if (body.name !== undefined) {
       if (typeof body.name !== "string" || body.name.length > 100) throw new ApiError("bad_request", "name must be a string of up to 100 characters");
@@ -250,6 +264,16 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
         const meta = await topicStub(c.env, body.inbound_topic).getMeta();
         if (!meta || meta.owner !== accountId) throw new ApiError("forbidden", "inbound_topic must be a topic you own");
         cfg.inbound_topic = body.inbound_topic;
+      }
+    }
+    if (body.credential_id !== undefined) {
+      if (e.kind !== "apns" && e.kind !== "fcm") throw new ApiError("bad_request", "credential_id applies to apns and fcm endpoints only");
+      if (body.credential_id === null) delete cfg.credential_id;
+      else {
+        if (typeof body.credential_id !== "string" || !body.credential_id) throw new ApiError("bad_request", "invalid credential_id");
+        const cred = await c.env.DB.prepare("SELECT id FROM push_credentials WHERE id = ? AND account_id = ? AND kind = ?").bind(body.credential_id, accountId, e.kind).first();
+        if (!cred) throw new ApiError("not_found", `no such ${e.kind} push credential`);
+        cfg.credential_id = body.credential_id;
       }
     }
     e.config = JSON.stringify(cfg);

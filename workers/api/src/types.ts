@@ -58,6 +58,7 @@ export interface Env {
   APNS_TEAM_ID?: string;
   APNS_TOPIC?: string;
   APNS_ENDPOINT?: string; // default https://api.push.apple.com (needs HTTP/2; see docs)
+  APNS_SANDBOX_ENDPOINT?: string; // default https://api.sandbox.push.apple.com (for BYO sandbox APNs creds)
   APNS_RELAY_SECRET?: string; // sent as x-relay-secret when APNS_ENDPOINT is gateways/apns-relay
   LXMF_GATEWAY_URL?: string;
   LXMF_GATEWAY_SECRET?: string;

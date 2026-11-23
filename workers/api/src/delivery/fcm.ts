@@ -3,6 +3,7 @@
 // cached in module scope until shortly before it expires. The endpoint address is the FCM
 // registration token. FCM also delivers to iOS (via APNs), which avoids the HTTP/2 issue in apns.ts.
 import type { Env } from "../types.ts";
+import { resolvePushCredential, type FcmCredentialConfig } from "../push-credentials.ts";
 import { alertText, pemToDer, signJwt, trimEnvelope, unverifyEndpoint } from "./push.ts";
 import { httpFailure, loadEndpoint, PermanentError, registerSender } from "./senders.ts";
 
@@ -31,8 +32,8 @@ export function parseServiceAccount(env: Env): ServiceAccount {
   return sa;
 }
 
-export async function fcmAccessToken(sa: ServiceAccount, now = Math.floor(Date.now() / 1000)): Promise<string> {
-  const cacheKey = `${sa.client_email}:${sa.private_key_id ?? ""}`;
+export async function fcmAccessToken(sa: ServiceAccount, now = Math.floor(Date.now() / 1000), cacheScope = "env"): Promise<string> {
+  const cacheKey = `${cacheScope}:${sa.project_id}:${sa.client_email}:${sa.private_key_id ?? ""}`;
   const hit = tokenCache.get(cacheKey);
   if (hit && hit.exp - 300 > now) return hit.token;
   const key = await crypto.subtle.importKey("pkcs8", pemToDer(sa.private_key) as BufferSource, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
@@ -89,8 +90,10 @@ export function fcmMessage(token: string, m: Parameters<typeof alertText>[0]) {
 
 registerSender("fcm", async (job, env) => {
   const ep = await loadEndpoint(env, job.sub.endpoint);
-  const sa = parseServiceAccount(env);
-  const token = await fcmAccessToken(sa);
+  const byo = await resolvePushCredential<FcmCredentialConfig>(env, ep.account_id, "fcm", typeof ep.cfg.credential_id === "string" ? ep.cfg.credential_id : undefined);
+  const sa: ServiceAccount = byo ? byo.config : parseServiceAccount(env);
+  const cacheScope = byo ? byo.id : "env";
+  const token = await fcmAccessToken(sa, Math.floor(Date.now() / 1000), cacheScope);
   const r = await fetch(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(sa.project_id)}/messages:send`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json; charset=utf-8" },
@@ -106,7 +109,7 @@ registerSender("fcm", async (job, env) => {
     throw new PermanentError(`FCM token rejected (HTTP ${r.status}): ${body.error?.message ?? text.slice(0, 200)}`);
   }
   if (r.status === 401) {
-    tokenCache.clear(); // stale access token: mint a new one on retry
+    tokenCache.delete(`${cacheScope}:${sa.project_id}:${sa.client_email}:${sa.private_key_id ?? ""}`); // stale access token: mint a new one on retry
     throw new Error(`FCM HTTP 401: ${text.slice(0, 200)}`);
   }
   throw httpFailure(r.status, text);

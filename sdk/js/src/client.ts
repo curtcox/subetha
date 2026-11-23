@@ -503,6 +503,11 @@ export class SubEtha {
   revokeToken(id: string) { return this.request("DELETE", `/v1/tokens/${encodeURIComponent(id)}`); }
   topics() { return this.request<{ topics: { name: string; policy: Record<string, unknown> }[] }>("GET", "/v1/topics"); }
   configureTopic(topic: string, policy: Record<string, unknown>) { return this.request("PUT", `/v1/topics/${topic}`, { policy }); }
+  listPushCredentials() { return this.request<{ credentials: Record<string, unknown>[] }>("GET", "/v1/push/credentials"); }
+  createPushCredential(body: { kind: "apns" | "fcm"; name?: string; is_default?: boolean; key_p8?: string; key_id?: string; team_id?: string; topic?: string; sandbox?: boolean; service_account?: string | Record<string, unknown>; project_id?: string; client_email?: string; private_key?: string; private_key_id?: string }) {
+    return this.request<Record<string, unknown>>("POST", "/v1/push/credentials", body);
+  }
+  deletePushCredential(id: string) { return this.request("DELETE", `/v1/push/credentials/${encodeURIComponent(id)}`); }
   trace(topic: string, id: string) { return this.request<Record<string, unknown>>("GET", `/v1/traces/${id}?topic=${encodeURIComponent(topic)}`); }
   checkout(amountUsd: number, o: { saveCard?: boolean; successUrl?: string; cancelUrl?: string } = {}) {
     return this.request<{ url: string }>("POST", "/v1/billing/checkout", {

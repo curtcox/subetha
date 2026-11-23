@@ -82,6 +82,13 @@ Firebase.
 **APNs setup:** set `APNS_KEY_P8` (the `.p8` key, PEM), `APNS_KEY_ID`, `APNS_TEAM_ID`, and
 `APNS_TOPIC` (the app's bundle id).
 
+**BYO credentials (your own app):** to push to your own iOS bundle ID or Firebase project, upload
+your APNs `.p8` key or Firebase service-account JSON via `POST /v1/push/credentials`. Private keys
+are verified with WebCrypto on upload, stored write-only, and never returned by `GET`. The first
+credential of each kind becomes your account default; you can also pin a specific `credential_id`
+when creating or updating an `apns` or `fcm` endpoint (including `sandbox: true` for APNs
+development builds).
+
 > **HTTP/2.** APNs only accepts HTTP/2, and a Worker's outbound `fetch()` isn't guaranteed to
 > negotiate it with `api.push.apple.com`. Run the APNs relay in
 > [`gateways/apns-relay`](https://github.com/curtcox/subetha/tree/main/gateways/apns-relay) (a

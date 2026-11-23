@@ -351,3 +351,140 @@ describe("apns sender", () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe("BYO push credentials (PLAN §6)", () => {
+  it("validates, stores write-only, and delivers APNs with account default, sandbox, and pinned credentials", async () => {
+    clearApnsTokenCache();
+    const a = await bootstrap("byoapns", 2);
+    const b = await bootstrap("byoapns2", 1);
+    const topic = "@byoapns/push";
+    await publish(topic, "init", auth(a.token));
+
+    // Rejects invalid key_p8 and key_id.
+    const bad = await SELF.fetch(`${BASE}/v1/push/credentials`, {
+      method: "POST", headers: auth(a.token),
+      body: JSON.stringify({ kind: "apns", key_id: "BAD", team_id: "TEAM123456", topic: "com.acme.app", key_p8: "not-a-key" }),
+    });
+    expect(bad.status).toBe(400);
+
+    const kpProd = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])) as CryptoKeyPair;
+    const pemProd = toPem((await crypto.subtle.exportKey("pkcs8", kpProd.privateKey)) as ArrayBuffer);
+    const c1r = await SELF.fetch(`${BASE}/v1/push/credentials`, {
+      method: "POST", headers: auth(a.token),
+      body: JSON.stringify({ kind: "apns", name: "Acme Prod", key_id: "BYOKEY0001", team_id: "BYOTEAM001", topic: "com.acme.app", key_p8: pemProd }),
+    });
+    expect(c1r.status).toBe(201);
+    const c1 = (await c1r.json()) as Record<string, unknown>;
+    expect(c1).toMatchObject({ kind: "apns", name: "Acme Prod", is_default: true, key_id: "BYOKEY0001", team_id: "BYOTEAM001", topic: "com.acme.app", sandbox: false });
+    expect(c1.key_p8).toBeUndefined();
+
+    // GET never returns private keys.
+    const list = (await (await SELF.fetch(`${BASE}/v1/push/credentials`, { headers: auth(a.token) })).json()) as { credentials: Record<string, unknown>[] };
+    expect(list.credentials).toHaveLength(1);
+    expect(list.credentials[0]!.key_p8).toBeUndefined();
+
+    // Endpoint without explicit credential_id uses account default even when operator env is empty.
+    const ep1 = (await (await SELF.fetch(`${BASE}/v1/endpoints`, {
+      method: "POST", headers: auth(a.token), body: JSON.stringify({ kind: "apns", address: "a1".repeat(32) }),
+    })).json()) as { id: string };
+    const calls = stubProviders(() => new Response(null, { status: 200 }));
+    const job1: DeliveryJob = {
+      topic, owner: a.account_id,
+      message: { topic, id: "01JD00000000000000000000B1", title: "Hi", message: "byo", priority: 4 },
+      sub: { id: "s1", transport: "apns", endpoint: ep1.id },
+      reservation: { ref: await reserve(E, a.account_id, 1000), micros: 1000 }, attempt: 0,
+    };
+    expect(await processJob(job1, E)).toBe("delivered");
+    expect(calls[0]!.url).toBe(`https://api.push.apple.com/3/device/${"a1".repeat(32)}`);
+    expect(calls[0]!.headers["apns-topic"]).toBe("com.acme.app");
+    const jwt1 = decodeJwt(calls[0]!.headers.authorization!.replace(/^bearer /, ""));
+    expect(jwt1.header.kid).toBe("BYOKEY0001");
+    expect(jwt1.claims.iss).toBe("BYOTEAM001");
+    expect(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, kpProd.publicKey, bs(jwt1.sig), bs(jwt1.input))).toBe(true);
+
+    // Second sandbox credential, explicitly pinned on an endpoint.
+    const kpDev = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])) as CryptoKeyPair;
+    const pemDev = toPem((await crypto.subtle.exportKey("pkcs8", kpDev.privateKey)) as ArrayBuffer);
+    const c2 = (await (await SELF.fetch(`${BASE}/v1/push/credentials`, {
+      method: "POST", headers: auth(a.token),
+      body: JSON.stringify({ kind: "apns", name: "Acme Dev", key_id: "BYOKEY0002", team_id: "BYOTEAM002", topic: "com.acme.app.dev", sandbox: true, key_p8: pemDev }),
+    })).json()) as { id: string; is_default: boolean; sandbox: boolean };
+    expect(c2.is_default).toBe(false);
+    expect(c2.sandbox).toBe(true);
+
+    // Another account cannot pin c2.
+    const steal = await SELF.fetch(`${BASE}/v1/endpoints`, {
+      method: "POST", headers: auth(b.token), body: JSON.stringify({ kind: "apns", address: "b2".repeat(32), credential_id: c2.id }),
+    });
+    expect(steal.status).toBe(404);
+
+    const ep2 = (await (await SELF.fetch(`${BASE}/v1/endpoints`, {
+      method: "POST", headers: auth(a.token), body: JSON.stringify({ kind: "apns", address: "b2".repeat(32), credential_id: c2.id }),
+    })).json()) as { id: string; credential_id: string };
+    expect(ep2.credential_id).toBe(c2.id);
+
+    const calls2 = stubProviders(() => new Response(null, { status: 200 }));
+    const job2: DeliveryJob = {
+      topic, owner: a.account_id,
+      message: { topic, id: "01JD00000000000000000000B2", title: "Dev", message: "sandbox", priority: 3 },
+      sub: { id: "s2", transport: "apns", endpoint: ep2.id },
+      reservation: { ref: await reserve(E, a.account_id, 1000), micros: 1000 }, attempt: 0,
+    };
+    expect(await processJob(job2, E)).toBe("delivered");
+    expect(calls2[0]!.url).toBe(`https://api.sandbox.push.apple.com/3/device/${"b2".repeat(32)}`);
+    expect(calls2[0]!.headers["apns-topic"]).toBe("com.acme.app.dev");
+
+    // Deleting a pinned credential fails permanently (does NOT silently fall back).
+    expect((await SELF.fetch(`${BASE}/v1/push/credentials/${c2.id}`, { method: "DELETE", headers: auth(a.token) })).status).toBe(200);
+    const calls3 = stubProviders(() => new Response(null, { status: 200 }));
+    const job3: DeliveryJob = { ...job2, reservation: { ref: await reserve(E, a.account_id, 1000), micros: 1000 } };
+    expect(await processJob(job3, E)).toBe("failed");
+    expect(calls3).toHaveLength(0);
+  });
+
+  it("validates and delivers FCM using BYO service account JSON and blocks custom token_uri", async () => {
+    clearFcmTokenCache();
+    const a = await bootstrap("byofcm", 2);
+    const topic = "@byofcm/push";
+    await publish(topic, "init", auth(a.token));
+
+    const kp = (await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"])) as CryptoKeyPair;
+    const sa = {
+      type: "service_account", project_id: "acme-mobile-app", private_key_id: "byokid",
+      client_email: "push@acme-mobile-app.iam.gserviceaccount.com",
+      private_key: toPem((await crypto.subtle.exportKey("pkcs8", kp.privateKey)) as ArrayBuffer),
+    };
+
+    // Rejects non-Google token_uri (SSRF defense).
+    const ssrf = await SELF.fetch(`${BASE}/v1/push/credentials`, {
+      method: "POST", headers: auth(a.token),
+      body: JSON.stringify({ kind: "fcm", service_account: { ...sa, token_uri: "https://evil.example/token" } }),
+    });
+    expect(ssrf.status).toBe(400);
+
+    const cr = await SELF.fetch(`${BASE}/v1/push/credentials`, {
+      method: "POST", headers: auth(a.token),
+      body: JSON.stringify({ kind: "fcm", name: "Acme Firebase", service_account: JSON.stringify(sa) }),
+    });
+    expect(cr.status).toBe(201);
+    const cred = (await cr.json()) as Record<string, unknown>;
+    expect(cred).toMatchObject({ kind: "fcm", name: "Acme Firebase", is_default: true, project_id: "acme-mobile-app", client_email: sa.client_email });
+    expect(cred.private_key).toBeUndefined();
+
+    const ep = (await (await SELF.fetch(`${BASE}/v1/endpoints`, {
+      method: "POST", headers: auth(a.token), body: JSON.stringify({ kind: "fcm", address: "byo-fcm-token-" + "z".repeat(40) }),
+    })).json()) as { id: string };
+
+    const calls = stubProviders((c) => c.url.includes("oauth2.googleapis.com")
+      ? Response.json({ access_token: "ya29.byo", expires_in: 3600 })
+      : Response.json({ name: "projects/acme-mobile-app/messages/99" }));
+    const job: DeliveryJob = {
+      topic, owner: a.account_id,
+      message: { topic, id: "01JD00000000000000000000B3", title: "Ping", message: "hello fcm", priority: 4 },
+      sub: { id: "s3", transport: "fcm", endpoint: ep.id },
+      reservation: { ref: await reserve(E, a.account_id, 1000), micros: 1000 }, attempt: 0,
+    };
+    expect(await processJob(job, E)).toBe("delivered");
+    expect(calls.find((c) => c.url.includes("fcm.googleapis.com"))!.url).toBe("https://fcm.googleapis.com/v1/projects/acme-mobile-app/messages:send");
+  });
+});
