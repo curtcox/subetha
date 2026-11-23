@@ -16,7 +16,7 @@ in test mode), `http://localhost:8787` (`wrangler dev`).
 | Publish (ntfy) | `PUT`/`POST /{topic}`, `POST /` (JSON), `GET /file/{id}/{name}` (attachments) |
 | Subscribe (ntfy) | `GET /{topics}/json`, `/sse`, `/raw`, `/ws`, `/auth`; `?poll=1`, `since`, `priority`, `tags` |
 | Meta | `GET /v1/health`, `/v1/status`, `/v1/prices`, `/v1/config` |
-| Account & billing | `GET`/`POST`/`PATCH /v1/account`, `GET /v1/balance`, `GET /v1/ledger`, `POST /v1/billing/checkout` |
+| Account & billing | `GET`/`POST`/`PATCH /v1/account`, `GET /v1/balance`, `GET /v1/ledger`, `GET /v1/payments`, `GET /v1/payments/{id}/receipt`, `POST /v1/billing/checkout` |
 | Tokens | `GET`/`POST /v1/tokens`, `DELETE /v1/tokens/{id}` |
 | Topics | `GET /v1/topics`, `GET`/`PUT /v1/topics/{topic}` |
 | Traces & acks | `GET /v1/traces/{id}?topic=`, `POST /v1/ack` |

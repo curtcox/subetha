@@ -520,6 +520,41 @@ paths:
                   entries:
                     type: array
                     items: { type: object, additionalProperties: true }
+  /v1/payments:
+    get:
+      tags: [billing]
+      operationId: listPayments
+      summary: Card payments credited to the account (newest first)
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+      responses:
+        "200":
+          description: Payments, with the top-up fee and credit for each and any refund or dispute.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payments:
+                    type: array
+                    items: { $ref: "#/components/schemas/Payment" }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/payments/{id}/receipt:
+    get:
+      tags: [billing]
+      operationId: getReceipt
+      summary: A printable HTML receipt for one payment
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: The Stripe payment intent id. }
+      responses:
+        "200":
+          description: The receipt.
+          content:
+            text/html:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/usage:
     get:
       tags: [account]
@@ -1889,6 +1924,18 @@ components:
         oauth_daily_cap_micros: { type: [integer, "null"], description: "Daily cap per OAuth client; null = the $1 default, 0 = OAuth off." }
         telephony_countries: { type: array, items: { type: string }, description: "Opt-in countries outside the US for SMS/voice endpoints." }
         paused: { type: boolean }
+        created_at: { type: integer }
+
+    Payment:
+      type: object
+      properties:
+        id: { type: string, description: Stripe payment intent id. }
+        kind: { type: string, enum: [checkout, auto_recharge] }
+        amount_micros: { type: integer }
+        fee_micros: { type: integer }
+        credit_micros: { type: integer }
+        refunded_micros: { type: integer }
+        disputed: { type: boolean }
         created_at: { type: integer }
 
     Token:

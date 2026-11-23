@@ -25,6 +25,8 @@ export async function createCheckoutSession(env: Env, opts: { accountId: string;
       "line_items[0][price_data][unit_amount]": cents,
       "line_items[0][price_data][product_data][name]": "SubEtha balance top-up",
       "payment_intent_data[metadata][account_id]": opts.accountId,
+      // Stripe emails its own receipt too; GET /v1/payments/{id}/receipt has ours.
+      "payment_intent_data[receipt_email]": opts.email ?? undefined,
       "metadata[account_id]": opts.accountId,
       "metadata[amount_micros]": opts.amountMicros,
       client_reference_id: opts.accountId,

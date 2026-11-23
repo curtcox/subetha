@@ -256,9 +256,28 @@ async function loadBilling() {
   $("capDaily").value = toUsdInput(me.daily_cap_micros);
   $("capOauth").value = toUsdInput(me.oauth_daily_cap_micros);
   $("capPaused").checked = !!me.paused;
+  loadPayments();
   const [{ entries }, prices] = await Promise.all([client.ledger(), client.prices()]);
   $("ledgerRows").innerHTML = entries.slice().reverse().map((e) => `<tr><td>${e.seq}</td><td>${e.kind}</td><td>${usd(e.amount)}</td><td>${usd(e.available_after)}</td><td><code>${esc(e.ref)}</code></td><td>${new Date(e.time).toLocaleString()}</td></tr>`).join("");
   $("priceTable").innerHTML = `<table>${Object.entries(prices.skus).map(([id, s]) => `<tr><td>${esc(s.description)}</td><td>$${(s.price_nanos.standard / 1e9).toPrecision(3)} / ${esc(s.unit)}</td></tr>`).join("")}</table>`;
+}
+async function loadPayments() {
+  try {
+    const { payments } = await client.payments();
+    $("paymentsEmpty").hidden = payments.length > 0;
+    $("paymentRows").innerHTML = payments.map((p) => {
+      const status = p.disputed ? '<span class="bad">disputed</span>' : p.refunded_micros ? `refunded ${usd(p.refunded_micros)}` : p.kind === "auto_recharge" ? "auto-recharge" : "paid";
+      return `<tr><td>${new Date(p.created_at).toLocaleDateString()}</td><td>${usd(p.amount_micros)}</td><td>${usd(p.fee_micros)}</td><td>${usd(p.credit_micros)}</td><td>${status}</td><td><button class="secondary" data-receipt="${esc(p.id)}">Receipt</button></td></tr>`;
+    }).join("");
+    document.querySelectorAll("[data-receipt]").forEach((b) => b.onclick = async () => {
+      // The receipt needs the bearer token, so fetch it and open it from a blob URL.
+      const win = window.open("", "_blank");
+      try {
+        const url = URL.createObjectURL(new Blob([await client.receipt(b.dataset.receipt)], { type: "text/html" }));
+        if (win) win.location.href = url; else location.href = url;
+      } catch (e) { if (win) win.close(); alert(`receipt: ${e.code ?? "error"}: ${e.message}`); }
+    });
+  } catch (e) { $("paymentRows").innerHTML = `<tr><td colspan="6">${esc(e.code ?? "error")}: ${esc(e.message)}</td></tr>`; }
 }
 $("topupBtn").onclick = async () => {
   try { location.href = (await client.checkout(Number($("topupAmt").value))).url; } catch (e) { alert(`${e.code}: ${e.message}`); }

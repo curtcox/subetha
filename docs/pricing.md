@@ -58,6 +58,13 @@ then turn it on with `PATCH /v1/account`:
 When the balance drops below the threshold, the saved card is charged `amount_usd` (same fee as
 any top-up). A declined charge turns auto-recharge off. `{"auto_recharge": null}` turns it off.
 
+### Payments and receipts
+
+`GET /v1/payments` (admin) lists the card payments credited to the account: amount paid, top-up
+fee, credit added, and any refund or dispute. `GET /v1/payments/{id}/receipt` returns a printable
+HTML receipt for one of them, and the console's Billing tab links to each. Stripe also emails its
+own receipt to the account's address.
+
 ### Ledger
 
 The ledger is append-only: `topup`, `reserve`, `settle`, `release`, `refund`, and `adjust`

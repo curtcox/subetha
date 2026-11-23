@@ -16,6 +16,7 @@ import type { Env, Principal, TopicMeta } from "./types.ts";
 import { registerControlRoutes, syncAccountEndpoints } from "./control.ts";
 import { DEST_PRICES_KEY, INTL_COUNTRIES, parseCountries, type DestinationPrices } from "./delivery/destinations.ts";
 import { mcpChallenge, registerMcp } from "./mcp.ts";
+import { registerPaymentRoutes } from "./payments.ts";
 import { USAGE_LABELS } from "./usage.ts";
 
 const PRICES = prices as unknown as PriceTable;
@@ -275,7 +276,7 @@ app.post("/v1/hooks/stripe", async (c) => {
     if (!accountId) throw new ApiError("bad_request", "missing account_id metadata");
     const { creditMicros, feeMicros } = topupSplit(PRICES, amountMicros);
     await accountStub(c.env, accountId).topup(creditMicros, String(obj.id), `stripe amount=${amountMicros} fee=${feeMicros}`);
-    if (typeof obj.payment_intent === "string") await c.env.DB.prepare("INSERT OR IGNORE INTO stripe_payments (payment_intent, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?)").bind(obj.payment_intent, accountId, amountMicros, Date.now()).run();
+    if (typeof obj.payment_intent === "string") await c.env.DB.prepare("INSERT OR IGNORE INTO stripe_payments (payment_intent, account_id, amount_micros, fee_micros, kind, created_at) VALUES (?, ?, ?, ?, 'checkout', ?)").bind(obj.payment_intent, accountId, amountMicros, feeMicros, Date.now()).run();
     await c.env.DB.batch([
       c.env.DB.prepare("INSERT INTO stripe_events (id, type, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?, ?)").bind(evt.id, evt.type, accountId, amountMicros, Date.now()),
       c.env.DB.prepare("UPDATE accounts SET topups_12mo_micros = topups_12mo_micros + ?, stripe_customer_id = COALESCE(?, stripe_customer_id) WHERE id = ?").bind(amountMicros, typeof obj.customer === "string" ? obj.customer : null, accountId),
@@ -287,7 +288,7 @@ app.post("/v1/hooks/stripe", async (c) => {
     if (evt.type === "payment_intent.succeeded") {
       const { creditMicros, feeMicros } = topupSplit(PRICES, amountMicros);
       await accountStub(c.env, accountId).topup(creditMicros, String(obj.id), `auto-recharge amount=${amountMicros} fee=${feeMicros}`);
-      await c.env.DB.prepare("INSERT OR IGNORE INTO stripe_payments (payment_intent, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?)").bind(String(obj.id), accountId, amountMicros, Date.now()).run();
+      await c.env.DB.prepare("INSERT OR IGNORE INTO stripe_payments (payment_intent, account_id, amount_micros, fee_micros, kind, created_at) VALUES (?, ?, ?, ?, 'auto_recharge', ?)").bind(String(obj.id), accountId, amountMicros, feeMicros, Date.now()).run();
       await c.env.DB.prepare("UPDATE accounts SET topups_12mo_micros = topups_12mo_micros + ? WHERE id = ?").bind(amountMicros, accountId).run();
     } else {
       await accountStub(c.env, accountId).autoRechargeFailed("card declined");
@@ -416,6 +417,7 @@ app.post("/v1/ack", async (c) => {
 });
 
 registerControlRoutes(app, principal);
+registerPaymentRoutes(app, principal);
 registerMcp(app);
 
 // ---------------- local development ----------------

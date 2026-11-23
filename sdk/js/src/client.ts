@@ -375,6 +375,14 @@ export class SubEtha {
   account() { return this.request<{ id: string; handle: string | null; balance_usd_micros: number; tier: string }>("GET", "/v1/account"); }
   balance() { return this.request<{ available_usd_micros: number; reserved_usd_micros: number }>("GET", "/v1/balance"); }
   ledger(after = 0) { return this.request<{ entries: unknown[] }>("GET", `/v1/ledger?after=${after}`); }
+  /** The HTML receipt for one payment (GET /v1/payments/{id}/receipt). */
+  async receipt(id: string): Promise<string> {
+    const r = await this.f(`${this.baseUrl}/v1/payments/${encodeURIComponent(id)}/receipt`, { headers: this.headers() });
+    const text = await r.text();
+    if (!r.ok) throw new SubEthaError(r.status, (() => { try { return JSON.parse(text); } catch { return { message: text }; } })());
+    return text;
+  }
+  payments(limit = 50) { return this.request<{ payments: { id: string; kind: "checkout" | "auto_recharge"; amount_micros: number; fee_micros: number; credit_micros: number; refunded_micros: number; disputed: boolean; created_at: number }[] }>("GET", `/v1/payments?limit=${limit}`); }
   prices() { return this.request<Record<string, unknown>>("GET", "/v1/prices"); }
   createToken(body: { name?: string; scopes: string[]; transports?: Transport[]; daily_cap_usd?: number; total_cap_usd?: number; origins?: string[]; ips?: string[]; expires_in_s?: number }) {
     return this.request<{ id: string; token: string; scopes: string[] }>("POST", "/v1/tokens", body);

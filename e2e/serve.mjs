@@ -29,6 +29,8 @@ const vars = {
   TWILIO_ACCOUNT_SID: "ACe2e",
   TWILIO_AUTH_TOKEN: "e2e-twilio-token",
   TWILIO_FROM: "+15005550006",
+  // Lets tests post signed Stripe webhooks (payments.spec.ts).
+  STRIPE_WEBHOOK_SECRET: "whsec_e2e",
 };
 const dev = spawn("pnpm", ["exec", "wrangler", "dev", "--port", port, "--persist-to", state, ...Object.entries(vars).flatMap(([k, v]) => ["--var", `${k}:${v}`])], { cwd: api, env, stdio: "inherit" });
 const stop = () => { twilio.close(); dev.kill("SIGTERM"); };
