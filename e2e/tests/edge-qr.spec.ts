@@ -53,6 +53,8 @@ test.use({
 
 test("the Edge lab scans an animated QR from the camera (jsQR fallback)", async ({ page }) => {
   expect(frames.sourceBlocks).toBeGreaterThan(1);
+  // Hide native BarcodeDetector (present on macOS Chromium) so the jsQR fallback is always exercised.
+  await page.addInitScript(() => { delete (globalThis as { BarcodeDetector?: unknown }).BarcodeDetector; });
   await page.goto("/tools/edge.html");
   await expect(page.locator("#who")).toContainText("This tab signs as dev_");
   expect(await page.evaluate(() => "BarcodeDetector" in globalThis)).toBe(false);
