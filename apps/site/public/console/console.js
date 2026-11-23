@@ -319,11 +319,17 @@ function syncFormFromPolicy(p) {
   $("polPaused").checked = !!p.paused;
   $("polRetentionH").value = p.retention_s != null ? String(Math.round((p.retention_s / 3600) * 100) / 100) : "";
   $("polDailyCap").value = p.daily_cap_micros != null ? String(p.daily_cap_micros / 1e6) : "";
+  $("polMonthlyCap").value = p.monthly_cap_micros != null ? String(p.monthly_cap_micros / 1e6) : "";
   $("polMaxMsg").value = p.max_cost_per_message_micros != null ? String(p.max_cost_per_message_micros / 1e6) : "";
   $("polQuietStart").value = p.quiet_hours?.start ?? "";
   $("polQuietEnd").value = p.quiet_hours?.end ?? "";
   $("polAllow").value = (p.allow_transports ?? []).join(", ");
   $("polDeny").value = (p.deny_transports ?? []).join(", ");
+  $("polAnonRate").value = p.anon_rate_per_min != null ? String(p.anon_rate_per_min) : "";
+  $("polAnonCap").value = p.anon_daily_cap_micros != null ? String(p.anon_daily_cap_micros / 1e6) : "";
+  $("polMinPrio").value = p.min_priority ? Object.entries(p.min_priority).map(([k, v]) => `${k}:${v}`).join(", ") : "";
+  $("polPublishers").value = (p.allowed_publishers ?? []).join(", ");
+  $("polReaders").value = (p.allowed_readers ?? []).join(", ");
   $("polEmailSenders").value = (p.email_senders ?? []).join(", ");
 }
 function syncPolicyFromForm() {
@@ -340,12 +346,30 @@ function syncPolicyFromForm() {
   if (ret !== "") p.retention_s = Math.round(Number(ret) * 3600); else delete p.retention_s;
   const daily = $("polDailyCap").value.trim();
   if (daily !== "") p.daily_cap_micros = Math.round(Number(daily) * 1e6); else delete p.daily_cap_micros;
+  const monthly = $("polMonthlyCap").value.trim();
+  if (monthly !== "") p.monthly_cap_micros = Math.round(Number(monthly) * 1e6); else delete p.monthly_cap_micros;
   const maxm = $("polMaxMsg").value.trim();
   if (maxm !== "") p.max_cost_per_message_micros = Math.round(Number(maxm) * 1e6); else delete p.max_cost_per_message_micros;
   const qs = $("polQuietStart").value.trim(), qe = $("polQuietEnd").value.trim();
   if (qs && qe) p.quiet_hours = { start: qs, end: qe }; else delete p.quiet_hours;
   setList("allow_transports", $("polAllow").value);
   setList("deny_transports", $("polDeny").value);
+  const anonRate = $("polAnonRate").value.trim();
+  if (anonRate !== "") p.anon_rate_per_min = Math.round(Number(anonRate)); else delete p.anon_rate_per_min;
+  const anonCap = $("polAnonCap").value.trim();
+  if (anonCap !== "") p.anon_daily_cap_micros = Math.round(Number(anonCap) * 1e6); else delete p.anon_daily_cap_micros;
+  const minPrioRaw = $("polMinPrio").value.trim();
+  if (minPrioRaw) {
+    const mp = {};
+    for (const part of minPrioRaw.split(",")) {
+      const [k, v] = part.split(":").map((s) => s.trim());
+      const n = Number(v);
+      if (k && Number.isInteger(n) && n >= 1 && n <= 5) mp[k] = n;
+    }
+    if (Object.keys(mp).length) p.min_priority = mp; else delete p.min_priority;
+  } else delete p.min_priority;
+  setList("allowed_publishers", $("polPublishers").value);
+  setList("allowed_readers", $("polReaders").value);
   setList("email_senders", $("polEmailSenders").value);
   $("topicPolicy").value = JSON.stringify(p, null, 2);
 }
@@ -480,16 +504,28 @@ $("tokCreate").onclick = async () => {
       ips: $("tokIps").value ? list($("tokIps").value) : undefined,
     });
     const topicHint = t.scopes[0]?.includes(":") ? t.scopes[0].split(":").slice(1).join(":").replace(/\*$/, "test") : "<topic>";
-    out.textContent = `${t.token}\n\nShown once. Example:\ncurl -H "Authorization: Bearer ${t.token}" -d hi ${location.origin}/${topicHint}`;
+    const origins = list($("tokOrigins").value);
+    const embed = origins.length
+      ? `\n\nWeb embed (publishable token for ${origins.join(", ")}):\n<script src="${location.origin}/sdk.js"></script>\n<${t.scopes[0]?.startsWith("subscribe:") ? "subetha-feed" : "subetha-send"} topic="${topicHint}" token="${t.token}"></${t.scopes[0]?.startsWith("subscribe:") ? "subetha-feed" : "subetha-send"}>`
+      : "";
+    out.textContent = `${t.token}\n\nShown once. Example:\ncurl -H "Authorization: Bearer ${t.token}" -d hi ${location.origin}/${topicHint}${embed}`;
     loadTokens();
   } catch (e) { out.textContent = `${e.code}: ${e.message}`; }
 };
 
 const toUsdInput = (micros) => (micros == null ? "" : String(micros / 1e6));
 const fromUsdInput = (v) => (v.trim() === "" ? null : Math.round(Number(v) * 1e6));
+const listOrNull = (v) => { const xs = v.split(",").map((s) => s.trim()).filter(Boolean); return xs.length ? xs : null; };
 $("capSave").onclick = async () => {
   try {
-    await client.request("PATCH", "/v1/account", { daily_cap_micros: fromUsdInput($("capDaily").value), oauth_daily_cap_micros: fromUsdInput($("capOauth").value), paused: $("capPaused").checked });
+    await client.request("PATCH", "/v1/account", {
+      daily_cap_micros: fromUsdInput($("capDaily").value),
+      monthly_cap_micros: fromUsdInput($("capMonthly").value),
+      allow_transports: listOrNull($("capAllow").value),
+      deny_transports: listOrNull($("capDeny").value),
+      oauth_daily_cap_micros: fromUsdInput($("capOauth").value),
+      paused: $("capPaused").checked,
+    });
     me = await client.account();
     $("capMsg").textContent = "Saved.";
   } catch (e) { $("capMsg").textContent = `${e.code}: ${e.message}`; }
@@ -549,15 +585,29 @@ $("arOff").onclick = async () => {
   } catch (e) { $("arMsg").textContent = `${e.code ?? "error"}: ${e.message}`; }
 };
 
+let limitsDirty = false;
+for (const id of ["capDaily", "capMonthly", "capAllow", "capDeny", "capOauth", "capPaused"]) {
+  $(id).addEventListener("input", () => { limitsDirty = true; });
+  $(id).addEventListener("change", () => { limitsDirty = true; });
+}
+function renderLimits(a) {
+  $("capDaily").value = toUsdInput(a.daily_cap_micros);
+  $("capMonthly").value = toUsdInput(a.monthly_cap_micros);
+  $("capAllow").value = (a.allow_transports ?? []).join(", ");
+  $("capDeny").value = (a.deny_transports ?? []).join(", ");
+  $("capOauth").value = toUsdInput(a.oauth_daily_cap_micros);
+  $("capPaused").checked = !!a.paused;
+}
+
 async function loadBilling() {
+  limitsDirty = false;
+  if (me) renderLimits(me);
   me = await client.account();
   showBalance(me);
   renderAutoRecharge();
   loadTelephonyCountries();
   client.request("GET", "/v1/usage?days=30").then((u) => renderUsageChart($("usageChart"), u)).catch((e) => { $("usageChart").textContent = `${e.code ?? "error"}: ${e.message}`; });
-  $("capDaily").value = toUsdInput(me.daily_cap_micros);
-  $("capOauth").value = toUsdInput(me.oauth_daily_cap_micros);
-  $("capPaused").checked = !!me.paused;
+  if (!limitsDirty) renderLimits(me);
   loadPayments();
   const [{ entries }, prices] = await Promise.all([client.ledger(), client.prices()]);
   $("ledgerRows").innerHTML = entries.slice().reverse().map((e) => `<tr><td>${e.seq}</td><td>${e.kind}</td><td>${usd(e.amount)}</td><td>${usd(e.available_after)}</td><td><code>${esc(e.ref)}</code></td><td>${new Date(e.time).toLocaleString()}</td></tr>`).join("");
@@ -749,7 +799,30 @@ $("thisDevRevoke").onclick = async () => {
 async function loadDevices() {
   const { devices } = await client.request("GET", "/v1/devices");
   renderThisBrowser(devices);
-  $("devRows").innerHTML = devices.map((d) => `<tr><td>${esc(d.name || "")}${browserDeviceKey?.deviceId === d.id && !d.revoked_at ? ' <span class="muted">(this browser)</span>' : ""}</td><td><code title="${esc(d.id)}">${esc(d.id.slice(0, 14))}…</code></td><td>${esc((d.capabilities ?? []).join(", "))}</td><td>${esc(when(d.last_seen_at))}</td><td>${d.revoked_at ? '<span class="bad">revoked</span>' : '<span class="ok">active</span>'}</td><td>${d.revoked_at ? "" : `<button class="secondary" data-devrevoke="${esc(d.id)}">Revoke</button>`}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No devices yet.</td></tr>`;
+  const devPolicy = (d) => [
+    d.allow_transports?.length ? `allow: ${d.allow_transports.join(",")}` : "",
+    d.deny_transports?.length ? `deny: ${d.deny_transports.join(",")}` : "",
+  ].filter(Boolean).join(" · ");
+  const devStatus = (d) => d.revoked_at ? '<span class="bad">revoked</span>' : d.paused ? '<span class="bad">paused</span>' : '<span class="ok">active</span>';
+  $("devRows").innerHTML = devices.map((d) => {
+    const pol = devPolicy(d);
+    const actions = d.revoked_at ? "" : `<button class="secondary" data-devpause="${esc(d.id)}" data-paused="${d.paused ? "1" : "0"}">${d.paused ? "Resume" : "Pause"}</button> <button class="secondary" data-devtr="${esc(d.id)}">Transports…</button> <button class="secondary" data-devrevoke="${esc(d.id)}">Revoke</button>`;
+    return `<tr><td>${esc(d.name || "")}${browserDeviceKey?.deviceId === d.id && !d.revoked_at ? ' <span class="muted">(this browser)</span>' : ""}${pol ? `<br><small class="muted">${esc(pol)}</small>` : ""}</td><td><code title="${esc(d.id)}">${esc(d.id.slice(0, 14))}…</code></td><td>${esc((d.capabilities ?? []).join(", "))}</td><td>${esc(when(d.last_seen_at))}</td><td>${devStatus(d)}</td><td>${actions}</td></tr>`;
+  }).join("") || `<tr><td colspan="6" class="muted">No devices yet.</td></tr>`;
+  document.querySelectorAll("[data-devpause]").forEach((b) => b.onclick = async () => {
+    const paused = b.dataset.paused !== "1";
+    await client.request("PATCH", `/v1/devices/${encodeURIComponent(b.dataset.devpause)}`, { paused }).catch((e) => alert(`${e.code}: ${e.message}`));
+    loadDevices();
+  });
+  document.querySelectorAll("[data-devtr]").forEach((b) => b.onclick = async () => {
+    const d = devices.find((x) => x.id === b.dataset.devtr);
+    const deny = prompt("Deny transports for this device (comma-separated, blank = none):", (d?.deny_transports ?? []).join(","));
+    if (deny === null) return;
+    const allow = prompt("Allow transports for this device (comma-separated, blank = all):", (d?.allow_transports ?? []).join(","));
+    if (allow === null) return;
+    await client.request("PATCH", `/v1/devices/${encodeURIComponent(b.dataset.devtr)}`, { deny_transports: listOrNull(deny), allow_transports: listOrNull(allow) }).catch((e) => alert(`${e.code}: ${e.message}`));
+    loadDevices();
+  });
   document.querySelectorAll("[data-devrevoke]").forEach((b) => b.onclick = async () => {
     if (!confirm("Revoke this device? It can no longer sign requests.")) return;
     await client.request("DELETE", `/v1/devices/${encodeURIComponent(b.dataset.devrevoke)}`).catch((e) => alert(e.message));

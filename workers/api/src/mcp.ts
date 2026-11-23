@@ -18,7 +18,9 @@ export const TOOLS = [
       topic: topicProp, message: { type: "string" }, title: { type: "string" },
       priority: { type: "integer", minimum: 1, maximum: 5 }, tags: { type: "array", items: { type: "string" } },
       click: { type: "string" }, route_mode: { enum: ["any", "fast", "all", "cheap"] },
-      max_cost_usd: { type: "number" }, idempotency_key: { type: "string" },
+      max_cost_usd: { type: "number" }, deny: { type: "array", items: { type: "string" } },
+      allow: { type: "array", items: { type: "string" } }, deadline_s: { type: "integer", minimum: 1 },
+      idempotency_key: { type: "string" },
     } },
   },
   {
@@ -44,7 +46,12 @@ export const TOOLS = [
   {
     name: "estimate_cost",
     description: "Dry run: return the delivery plan and the cost estimate (µ$) of publishing a message, without delivering it.",
-    inputSchema: { type: "object", required: ["topic"], properties: { topic: topicProp, message: { type: "string", default: "test" }, priority: { type: "integer", minimum: 1, maximum: 5 }, route_mode: { enum: ["any", "fast", "all", "cheap"] } } },
+    inputSchema: { type: "object", required: ["topic"], properties: {
+      topic: topicProp, message: { type: "string", default: "test" },
+      priority: { type: "integer", minimum: 1, maximum: 5 }, route_mode: { enum: ["any", "fast", "all", "cheap"] },
+      max_cost_usd: { type: "number" }, deny: { type: "array", items: { type: "string" } },
+      allow: { type: "array", items: { type: "string" } }, deadline_s: { type: "integer", minimum: 1 },
+    } },
   },
 ] as const;
 
@@ -71,13 +78,25 @@ async function runTool(name: string, a: Args, call: Call): Promise<unknown> {
     case "publish": {
       const env: Record<string, unknown> = { topic, message: String(a.message ?? "") };
       for (const k of ["title", "priority", "tags", "click"]) if (a[k] !== undefined) env[k] = a[k];
-      if (a.route_mode || a.max_cost_usd !== undefined) env.route = { mode: a.route_mode, max_cost_usd_micros: a.max_cost_usd !== undefined ? Math.floor(Number(a.max_cost_usd) * 1e6) : undefined };
+      const route: Record<string, unknown> = {};
+      if (a.route_mode) route.mode = a.route_mode;
+      if (a.max_cost_usd !== undefined) route.max_cost_usd_micros = Math.floor(Number(a.max_cost_usd) * 1e6);
+      if (Array.isArray(a.deny)) route.deny = a.deny;
+      if (Array.isArray(a.allow)) route.allow = a.allow;
+      if (a.deadline_s !== undefined) route.deadline_s = Number(a.deadline_s);
+      if (Object.keys(route).length) env.route = route;
       return asJson(await call("/", { method: "POST", body: JSON.stringify(env), headers: { "content-type": "application/json", ...(a.idempotency_key ? { "idempotency-key": String(a.idempotency_key) } : {}) } }));
     }
     case "estimate_cost": {
       const env: Record<string, unknown> = { topic, message: String(a.message ?? "test") };
       if (a.priority) env.priority = a.priority;
-      if (a.route_mode) env.route = { mode: a.route_mode };
+      const route: Record<string, unknown> = {};
+      if (a.route_mode) route.mode = a.route_mode;
+      if (a.max_cost_usd !== undefined) route.max_cost_usd_micros = Math.floor(Number(a.max_cost_usd) * 1e6);
+      if (Array.isArray(a.deny)) route.deny = a.deny;
+      if (Array.isArray(a.allow)) route.allow = a.allow;
+      if (a.deadline_s !== undefined) route.deadline_s = Number(a.deadline_s);
+      if (Object.keys(route).length) env.route = route;
       return asJson(await call("/", { method: "POST", body: JSON.stringify(env), headers: { "content-type": "application/json", "x-dry-run": "1" } }));
     }
     case "poll": {

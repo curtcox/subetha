@@ -34,7 +34,7 @@ describe("MCP server", () => {
     expect(pub.structuredContent).toMatchObject({ message: "hello agent", priority: 4 });
     const polled = await call("poll", { topic: "@agent/inbox" });
     expect((polled.structuredContent.messages as unknown[]).length).toBe(1);
-    const est = await call("estimate_cost", { topic: "@agent/inbox" });
+    const est = await call("estimate_cost", { topic: "@agent/inbox", deny: ["sms"], deadline_s: 60 });
     expect(est.structuredContent.estimate_usd_micros).toBeGreaterThan(0);
     expect((await call("list_topics", {})).structuredContent).toMatchObject({ topics: [{ name: "@agent/inbox" }] });
 

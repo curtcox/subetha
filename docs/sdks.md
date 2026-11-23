@@ -58,9 +58,9 @@ they're visible to anyone who views the page.
 
 <!-- include: samples/web/feed.html -->
 
-`<subetha-feed>` takes `topic` (comma-separated for several), `token`, `since`, `max`, and
+`<subetha-feed>` takes `topic` (comma-separated for several), `token`, `since`, `max`, `priority`, `tags`, and
 `base-url`; its items are styleable with `::part(list)` and `::part(item)`, and it fires a
-`message` event. `<subetha-send>` takes `topic`, `token`, `placeholder`, and `label`, and fires
+`message` event. `<subetha-send>` takes `topic`, `token`, `placeholder`, `label`, `title`, `priority`, and `tags`, and fires
 `sent` and `error`.
 
 ## CLI

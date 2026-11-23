@@ -202,3 +202,28 @@ test("the topic policy controls configure retention, signatures, and the topic k
   expect(blocked.status()).toBe(403);
   expect(((await blocked.json()) as { error: string }).error).toBe("topic_paused");
 });
+
+test("billing limits configure monthly caps and account transport policies, and publishable tokens show web embed snippets", async ({ page, request }) => {
+  const acct = await bootstrap(request, 1);
+  await signIn(page, acct.token);
+
+  // Account monthly cap + deny_transports in Billing -> Limits.
+  await page.locator('#tabs button[data-tab="billing"]').click();
+  await page.locator("#capMonthly").fill("25");
+  await page.locator("#capDeny").fill("sms, voice");
+  await page.locator("#capSave").click();
+  await expect(page.locator("#capMsg")).toHaveText("Saved.");
+  const after = (await (await request.get("/v1/account", { headers: auth(acct.token) })).json()) as { monthly_cap_micros: number | null; deny_transports: string[] | null };
+  expect(after.monthly_cap_micros).toBe(25_000_000);
+  expect(after.deny_transports).toEqual(["sms", "voice"]);
+
+  // Publishable (origin-bound) token outputs a drop-in web component snippet.
+  await page.locator('#tabs button[data-tab="tokens"]').click();
+  await page.locator("#tokName").fill("site-widget");
+  await page.locator("#tokScopes").fill(`publish:@${acct.handle}/contact`);
+  await page.locator("#tokDaily").fill("0.25");
+  await page.locator("#tokOrigins").fill("https://example.com");
+  await page.locator("#tokCreate").click();
+  await expect(page.locator("#tokOut")).toContainText("<subetha-send");
+  await expect(page.locator("#tokOut")).toContainText("/sdk.js");
+});

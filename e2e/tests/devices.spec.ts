@@ -42,8 +42,16 @@ test("a device enrolled from the console publishes with signed requests until it
   await device.publish(topic, "garage door closed");
   await expect(page.locator("#inbox li").first()).toContainText("garage door closed");
 
-  // Revoked in the console, the device can't publish any more.
+  // Pausing in the console blocks the device until resumed; revoking locks it out permanently.
   await page.locator('#tabs button[data-tab="devices"]').click();
+  await row.locator("button", { hasText: "Pause" }).click();
+  await expect(row).toContainText("paused");
+  const pausedErr = await device.publish(topic, "while paused").then(() => null, (e: { code?: string }) => e);
+  expect(pausedErr?.code).toBe("topic_paused");
+  await row.locator("button", { hasText: "Resume" }).click();
+  await expect(row).toContainText("active");
+  await device.publish(topic, "back online");
+
   page.once("dialog", (d) => d.accept());
   await row.locator("button", { hasText: "Revoke" }).click();
   await expect(row).toContainText("revoked");

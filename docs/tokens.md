@@ -75,16 +75,15 @@ can cost you. Use one for [`<subetha-feed>` / `<subetha-send>`](sdks.md#web-comp
 | `allow_transports`, `deny_transports` | Transports deliveries may / may not use. |
 | `min_priority` | Per-transport minimum priority, e.g. `{"sms": 4, "voice": 5}`. |
 | `max_cost_per_message_micros` | Drop deliveries beyond this cost per message. |
-| `daily_cap_micros` | Daily cap on owner-side spend for this topic (deliveries and reads). |
+| `daily_cap_micros`, `monthly_cap_micros` | Daily and monthly caps on owner-side spend for this topic (deliveries and reads). |
 | `retention_s` | How long messages are kept (default 12 h, up to 30 days). Longer costs more rent. |
 | `quiet_hours` | `{"start": "22:00", "end": "07:00"}` (UTC): paid transports are suppressed. |
 | `email_senders` | Who may publish by [inbound email](transports.md#email): addresses, `@domain`, or `*`. |
 | `paused` | Kill switch: reject publishes. |
 
 The effective rules for any delivery are the intersection of the account, topic, subscription,
-token, and message settings. Nothing a publisher sends can widen what the owner allows.
+device, token, and message settings. Nothing a publisher sends can widen what the owner allows.
 
-## Account-level controls
+## Account- and device-level controls
 
-`PATCH /v1/account` sets an account-wide `daily_cap_micros` and an account kill switch
-(`paused`). Every change to tokens, topics, endpoints, and devices is written to an audit log: `GET /v1/audit` (admin), or the console's **Audit log** tab.
+`PATCH /v1/account` sets account-wide `daily_cap_micros`, `monthly_cap_micros`, `allow_transports` / `deny_transports`, and an account kill switch (`paused`). `PATCH /v1/devices/{id}` pauses or resumes a single device (`paused`) and sets per-device `allow_transports` / `deny_transports`. Every change to tokens, topics, endpoints, and devices is written to an audit log: `GET /v1/audit` (admin), or the console's **Audit log** tab.

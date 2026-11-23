@@ -102,13 +102,13 @@ Several independent limits stop spending before it surprises anyone. Each return
 | Limit | Set with |
 |---|---|
 | Per token, per day and in total | `daily_cap_usd`, `total_cap_usd` on [`POST /v1/tokens`](tokens.md) |
-| Per topic, per day (owner-side spend, including reads) | topic policy `daily_cap_micros` |
+| Per topic, per day and per month (owner-side spend, including reads) | topic policy `daily_cap_micros`, `monthly_cap_micros` |
 | Per message | topic policy `max_cost_per_message_micros`; per publish `X-Max-Cost` |
 | Anonymous publishing, per topic per day | topic policy `anon_daily_cap_micros` (default $1) |
-| Per account, per day | `PATCH /v1/account {"daily_cap_micros": …}` |
+| Per account, per day and per month | `PATCH /v1/account {"daily_cap_micros": …, "monthly_cap_micros": …}` |
 | **New-funds hold** | automatic: until your first top-up is 7 days old, SMS and voice spend is capped at $5 in total |
 
-Plus a kill switch at every level: `paused` on a topic policy or on the account.
+Plus a kill switch at every level: `paused` on a topic policy, on a device (`PATCH /v1/devices/{id}`), or on the account.
 
 ## Running out
 
