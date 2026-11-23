@@ -42,6 +42,15 @@ from .request import (
 from .topic import HANDLE_RE, TOPIC_RE, ParsedTopic, is_topic, parse_topic, secret_topic
 from .ulid import ULID_RE, is_ulid, ulid, ulid_time
 from .xchacha import hchacha20, xchacha_open, xchacha_seal
+from .keywrap import (
+    KID_RE,
+    WRAP_ALG,
+    ed25519_to_x25519_public,
+    unwrap_topic_key,
+    wrap_aad,
+    wrap_topic_key,
+    x25519_secret_from_seed,
+)
 
 __all__ = [
     "COVERED_REQUEST_HEADERS", "UNSIGNED_BY_CONVENTION", "headers_to_sign", "new_request_nonce",
@@ -55,4 +64,6 @@ __all__ = [
     "is_topic", "is_ulid", "parse_priority", "parse_topic", "public_key_from_device_id", "secret_topic",
     "sign_envelope", "signing_bytes", "ulid", "ulid_time", "validate_envelope", "verify_envelope",
     "xchacha_open", "xchacha_seal",
+    "KID_RE", "WRAP_ALG", "ed25519_to_x25519_public", "unwrap_topic_key", "wrap_aad", "wrap_topic_key",
+    "x25519_secret_from_seed",
 ]

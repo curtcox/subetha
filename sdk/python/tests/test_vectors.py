@@ -172,3 +172,37 @@ def test_request_signing(case):
     h = sign_request(key, case["method"], case["url"], body, case["headers"], time=case["time"], nonce=REQS["nonce"])
     assert h["X-Device-Signed-Headers"] == case["signed_headers"]
     assert h["X-Device-Signature"] == case["signature"]
+
+
+# ---- wrapped topic keys (spec §5.1) ----
+
+WRAP = E2EE["key_wrap"]
+
+
+def test_key_wrap_deterministic_and_unwraps():
+    from subetha.protocol import device_key_from_seed, ed25519_to_x25519_public, unwrap_topic_key, wrap_aad, wrap_topic_key, x25519_secret_from_seed
+
+    seed = hex_decode(WRAP["recipient_seed"])
+    dev = device_key_from_seed(seed)
+    assert ed25519_to_x25519_public(dev.public_key).hex() == WRAP["recipient_x25519_public"]
+    assert x25519_secret_from_seed(seed).hex() == WRAP["recipient_x25519_secret"]
+    w = wrap_topic_key(hex_decode(E2EE["key"]), WRAP["wrapped"]["topic"], WRAP["wrapped"]["kid"], dev.device_id,
+                       ephemeral_secret=hex_decode(WRAP["ephemeral_secret"]), nonce=hex_decode(WRAP["nonce"]))
+    assert w == WRAP["wrapped"]
+    assert wrap_aad(w) == WRAP["aad"].encode("utf-8")
+    assert unwrap_topic_key(WRAP["wrapped"], dev) == hex_decode(E2EE["key"])
+    assert unwrap_topic_key(WRAP["wrapped"], seed) == hex_decode(E2EE["key"])
+
+
+@pytest.mark.parametrize("case", WRAP["invalid"], ids=lambda c: c["name"])
+def test_key_wrap_invalid(case):
+    from subetha.protocol import unwrap_topic_key
+
+    assert unwrap_topic_key(case["wrapped"], hex_decode(WRAP["recipient_seed"])) is None
+
+
+def test_ed25519_to_x25519():
+    from subetha.protocol import ed25519_to_x25519_public
+
+    for c in WRAP["ed25519_to_x25519"]:
+        assert ed25519_to_x25519_public(hex_decode(c["ed25519"])).hex() == c["x25519"]

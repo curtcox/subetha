@@ -209,3 +209,28 @@ def test_device_signed_requests_replace_the_bearer_token():
     key.private_key.public_key().verify(base64url_decode(req.headers["x-device-signature"]), data)
     with pytest.raises(ValueError):
         Client(sign_requests=True)
+
+
+def test_share_and_load_topic_keys():
+    import json as _json
+
+    from subetha.protocol import device_key_from_seed
+
+    dev = device_key_from_seed(bytes([7]) * 32)
+    store: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "PUT" and req.url.path == "/v1/keys":
+            keys = _json.loads(req.content)["keys"]
+            store.extend(dict(k, created_at=len(store) + 1) for k in keys)
+            return httpx.Response(200, json={"stored": len(keys)})
+        if req.method == "GET" and req.url.path == "/v1/keys":
+            return httpx.Response(200, json={"keys": store})
+        return httpx.Response(404, json={"error": "not_found"})
+
+    c = Client("https://relay.test", token="tk", device_key=dev, transport=httpx.MockTransport(handler))
+    assert c.share_topic_key("@a/vault", "k1", bytes([1]) * 32, [dev.device_id]) == 1
+    assert c.share_topic_key("@a/vault", "k2", bytes([2]) * 32, [dev.device_id]) == 1
+    assert c.load_topic_keys() == {"@a/vault": ("k2", bytes([2]) * 32)}
+    other = device_key_from_seed(bytes([8]) * 32)
+    assert c.load_topic_keys(device_key=other) == {}

@@ -46,5 +46,7 @@ device = Client(device_key=key, sign_requests=True)   # X-Device-* headers, no t
 
 `subetha.protocol` has canonical JSON, base32/base64url, ULIDs, the topic grammar, envelope
 validation, device keys, Ed25519 sign/verify, device-signed requests (`sign_request`), XChaCha20-Poly1305 E2EE (`encrypt_envelope`,
-`decrypt_envelope`), and the `Deduper`. Names mirror the TypeScript reference in
+`decrypt_envelope`), wrapped topic keys (`wrap_topic_key`, `unwrap_topic_key`; spec §5.1), and the
+`Deduper`. The client's `share_topic_key`, `list_wrapped_keys`, and `load_topic_keys` hand topic keys
+to enrolled devices through the relay. Names mirror the TypeScript reference in
 `sdk/js/src/protocol` in snake_case.

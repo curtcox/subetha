@@ -22,7 +22,9 @@ from .protocol import (
     sign_envelope,
     sign_request,
     ulid,
+    unwrap_topic_key,
     validate_envelope,
+    wrap_topic_key,
 )
 
 DEFAULT_BASE_URL = "https://subetha.org"
@@ -336,6 +338,37 @@ class Client:
                     return
             elif delay > 0:
                 self.sleep(delay)
+
+    # -- wrapped topic keys (spec §5.1) --
+
+    def share_topic_key(self, topic: str, kid: str, key: bytes, device_ids: Sequence[str]) -> int:
+        """Wraps ``key`` for each device and uploads the wrapped keys (``PUT /v1/keys``). Needs an
+        admin token for a topic you own. Returns how many were stored."""
+        wrapped = [wrap_topic_key(key, topic, kid, d) for d in device_ids]
+        stored = 0
+        for i in range(0, len(wrapped), 100):
+            stored += int(self._json(self._http.put("/v1/keys", json={"keys": wrapped[i : i + 100]})).get("stored", 0))
+        return stored
+
+    def list_wrapped_keys(self, topic: str | None = None) -> list[dict[str, Any]]:
+        """As a device, the wrapped keys addressed to it; as an admin, all of your topics'."""
+        return list(self._json(self._http.get("/v1/keys", params={"topic": topic} if topic else None)).get("keys", []))
+
+    def load_topic_keys(self, topic: str | None = None, device_key: DeviceKey | None = None) -> dict[str, tuple[str, bytes]]:
+        """Fetches and opens the wrapped keys addressed to this device. Returns ``{topic: (kid,
+        key)}`` with the newest key per topic, ready for ``decrypt_envelope``/``encrypt_envelope``."""
+        dk = device_key or self.device_key
+        if dk is None:
+            raise ValueError("load_topic_keys needs a device_key")
+        best: dict[str, tuple[int, str, bytes]] = {}
+        for w in self.list_wrapped_keys(topic):
+            at = int(w.pop("created_at", 0))
+            if w.get("to") != dk.device_id:
+                continue
+            key = unwrap_topic_key(w, dk)
+            if key is not None and (w["topic"] not in best or at >= best[w["topic"]][0]):
+                best[w["topic"]] = (at, w["kid"], key)
+        return {t: (kid, key) for t, (_, kid, key) in best.items()}
 
     # -- helpers --
 
