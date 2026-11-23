@@ -36,6 +36,7 @@ pub mod routing;
 pub mod sign;
 pub mod store;
 pub mod topic;
+pub mod transport;
 pub mod ulid;
 
 pub use canonical::{canonical_envelope, canonicalize};

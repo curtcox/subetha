@@ -22,29 +22,32 @@ impl UlidGenerator {
         Self::default()
     }
 
-    /// Generates a ULID for `now_ms`. Within the same millisecond the random part is
-    /// incremented so ids stay strictly increasing.
+    /// Generates a ULID for `now_ms`. Within the same millisecond (or if the clock steps
+    /// backward) the random part is incremented so ids stay strictly increasing.
     pub fn next(&mut self, now_ms: u64, random: impl FnOnce(&mut [u8; 16])) -> String {
-        let rand = if self.last_time == Some(now_ms) {
-            let mut r = self.last_random;
-            for d in r.iter_mut().rev() {
-                if *d < 31 {
-                    *d += 1;
-                    break;
+        let (ts, rand) = match self.last_time {
+            Some(last) if now_ms <= last => {
+                let mut r = self.last_random;
+                for d in r.iter_mut().rev() {
+                    if *d < 31 {
+                        *d += 1;
+                        break;
+                    }
+                    *d = 0;
                 }
-                *d = 0;
+                (last, r)
             }
-            r
-        } else {
-            let mut r = [0u8; 16];
-            random(&mut r);
-            r.iter_mut().for_each(|d| *d &= 31);
-            r
+            _ => {
+                let mut r = [0u8; 16];
+                random(&mut r);
+                r.iter_mut().for_each(|d| *d &= 31);
+                (now_ms, r)
+            }
         };
-        self.last_time = Some(now_ms);
+        self.last_time = Some(ts);
         self.last_random = rand;
         let mut out = [0u8; 26];
-        let mut n = now_ms;
+        let mut n = ts;
         for i in (0..10).rev() {
             out[i] = CROCKFORD[(n % 32) as usize];
             n /= 32;
@@ -70,13 +73,13 @@ pub fn now_secs() -> u64 {
 
 /// A fresh ULID for the current time.
 pub fn ulid() -> String {
-    ulid_at(now_ms())
+    let mut g = GLOBAL.lock().unwrap_or_else(|e| e.into_inner());
+    g.next(now_ms(), |r| fill_random(r))
 }
 
-/// A fresh ULID for the given time (ms).
+/// A fresh ULID for the given time (ms), without mutating the global wall-clock generator.
 pub fn ulid_at(now_ms: u64) -> String {
-    let mut g = GLOBAL.lock().unwrap_or_else(|e| e.into_inner());
-    g.next(now_ms, |r| fill_random(r))
+    UlidGenerator::new().next(now_ms, |r| fill_random(r))
 }
 
 fn crockford_value(c: u8) -> Option<u64> {
@@ -133,7 +136,17 @@ mod tests {
     }
 
     #[test]
+    fn monotonic_on_backward_clock_step() {
+        let mut g = UlidGenerator::new();
+        let a = g.next(100, |r| *r = [0; 16]);
+        let b = g.next(50, |_| unreachable!());
+        assert!(a < b, "{a} {b}");
+        assert_eq!(ulid_time(&b).unwrap(), 100);
+    }
+
+    #[test]
     fn global_ids_increase() {
+        let _ = ulid_at(1_000);
         let ids: Vec<String> = (0..50).map(|_| ulid()).collect();
         assert!(ids.windows(2).all(|w| w[0] < w[1]));
     }

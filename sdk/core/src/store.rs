@@ -160,8 +160,8 @@ impl<T: Clone> Outbox<T> {
             .filter(|id| {
                 let it = &self.items[id.as_str()];
                 it.next_attempt_ms <= now_ms
-                    && !it.expires_ms.is_some_and(|e| e <= now_ms)
-                    && !max.is_some_and(|m| it.attempts >= m)
+                    && it.expires_ms.is_none_or(|e| e > now_ms)
+                    && max.is_none_or(|m| it.attempts < m)
             })
             .cloned()
             .collect();
