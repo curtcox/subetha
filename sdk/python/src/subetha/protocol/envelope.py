@@ -22,7 +22,7 @@ from .xchacha import xchacha_open, xchacha_seal
 
 TRANSPORTS = (
     "ws", "sse", "poll", "webpush", "apns", "fcm", "webhook", "email", "slack",
-    "sms", "voice", "mcp", "lxmf", "ble", "audio", "qr", "lan",
+    "sms", "voice", "whatsapp", "mcp", "lxmf", "ble", "audio", "qr", "lan",
 )
 EDGE_TRANSPORTS = ("ble", "audio", "qr", "lan")
 ROUTE_MODES = ("any", "fast", "all", "cheap")

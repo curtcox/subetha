@@ -414,6 +414,57 @@
       "markup": 0.4,
       "floor_nanos": 2000000
     },
+    "deliver_whatsapp": {
+      "description": "Send one WhatsApp message (text, or text + image) via Twilio to a verified number",
+      "unit": "message",
+      "charge": "action",
+      "transports": [
+        "whatsapp"
+      ],
+      "cost_nanos": 20501200,
+      "components_nanos": {
+        "twilio": 5000000,
+        "meta_fee": 15000000,
+        "queue_ops": 1200,
+        "overhead": 500000
+      },
+      "price_nanos": {
+        "standard": 29702000,
+        "bulk": 27652000,
+        "volume": 25602000
+      },
+      "margin": {
+        "standard": 0.3098,
+        "bulk": 0.2586,
+        "volume": 0.1992
+      },
+      "markup": 0.4,
+      "floor_nanos": 1000000
+    },
+    "inbound_whatsapp": {
+      "description": "Receive one inbound WhatsApp message (plus optional picture) on a SubEtha WhatsApp sender",
+      "unit": "message",
+      "charge": "action",
+      "transports": [],
+      "cost_nanos": 5302000,
+      "components_nanos": {
+        "twilio": 5000000,
+        "media_fetch": 2000,
+        "overhead": 300000
+      },
+      "price_nanos": {
+        "standard": 7923000,
+        "bulk": 7393000,
+        "volume": 6863000
+      },
+      "margin": {
+        "standard": 0.3308,
+        "bulk": 0.2828,
+        "volume": 0.2275
+      },
+      "markup": 0.4,
+      "floor_nanos": 500000
+    },
     "deliver_lxmf": {
       "description": "Deliver over the hosted Reticulum/LXMF gateway",
       "unit": "delivery",

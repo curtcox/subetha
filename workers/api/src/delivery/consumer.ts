@@ -35,7 +35,7 @@ export async function processJob(job: DeliveryJob, env: Env): Promise<"delivered
   let sent = false;
   try {
     if (!send) throw new PermanentError(`no sender for transport ${job.sub.transport}`);
-    const telephony = job.sub.transport === "sms" || job.sub.transport === "voice";
+    const telephony = job.sub.transport === "sms" || job.sub.transport === "voice" || job.sub.transport === "whatsapp";
     if (telephony) {
       const circuit = await checkTelephonyCircuit(env, job.owner);
       if (circuit) throw new PermanentError(`telephony paused: ${circuit}`);

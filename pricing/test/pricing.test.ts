@@ -26,7 +26,7 @@ describe("generated price table", () => {
   });
 
   it("every relay transport has a SKU; edge transports have none", () => {
-    for (const t of ["ws", "sse", "poll", "webpush", "apns", "fcm", "webhook", "email", "slack", "sms", "voice", "mcp", "lxmf"]) expect(skuForTransport(committed, t), t).not.toBeNull();
+    for (const t of ["ws", "sse", "poll", "webpush", "apns", "fcm", "webhook", "email", "slack", "sms", "voice", "whatsapp", "mcp", "lxmf"]) expect(skuForTransport(committed, t), t).not.toBeNull();
     for (const t of ["ble", "audio", "qr", "lan"]) expect(skuForTransport(committed, t)).toBeNull();
   });
 });

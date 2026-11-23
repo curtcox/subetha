@@ -40,6 +40,7 @@ pub enum Transport {
     Slack,
     Sms,
     Voice,
+    Whatsapp,
     Mcp,
     Lxmf,
     Ble,
@@ -49,7 +50,7 @@ pub enum Transport {
 }
 
 impl Transport {
-    pub const ALL: [Transport; 17] = [
+    pub const ALL: [Transport; 18] = [
         Transport::Ws,
         Transport::Sse,
         Transport::Poll,
@@ -61,6 +62,7 @@ impl Transport {
         Transport::Slack,
         Transport::Sms,
         Transport::Voice,
+        Transport::Whatsapp,
         Transport::Mcp,
         Transport::Lxmf,
         Transport::Ble,
@@ -83,6 +85,7 @@ impl Transport {
             Transport::Slack => "slack",
             Transport::Sms => "sms",
             Transport::Voice => "voice",
+            Transport::Whatsapp => "whatsapp",
             Transport::Mcp => "mcp",
             Transport::Lxmf => "lxmf",
             Transport::Ble => "ble",

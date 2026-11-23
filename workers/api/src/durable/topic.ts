@@ -511,7 +511,7 @@ export class TopicDO extends DurableObject<Env> {
       const sub = subs.get(d.subscriber);
       if (!sub || !this.env.DELIVERY) continue;
       const ref = `dlv:${env.id}:${sub.id}:${ulid()}`;
-      const r = await accountStub(this.env, meta.owner).reserve(d.cost_micros, ref, null, {}, d.transport === "sms" || d.transport === "voice" ? "telephony" : null);
+      const r = await accountStub(this.env, meta.owner).reserve(d.cost_micros, ref, null, {}, d.transport === "sms" || d.transport === "voice" || d.transport === "whatsapp" ? "telephony" : null);
       if (!r.ok) {
         this.trace(env.id!, {}, storeUntil);
         await this.recordDelivery(env.id!, { sub: sub.id, transport: d.transport, result: "not sent", error: r.code });

@@ -9,7 +9,7 @@ import { xchachaOpen, xchachaSeal } from "./xchacha.ts";
 
 export const TRANSPORTS = [
   "ws", "sse", "poll", "webpush", "apns", "fcm", "webhook", "email", "slack",
-  "sms", "voice", "mcp", "lxmf", "ble", "audio", "qr", "lan",
+  "sms", "voice", "whatsapp", "mcp", "lxmf", "ble", "audio", "qr", "lan",
 ] as const;
 export type Transport = (typeof TRANSPORTS)[number];
 export const EDGE_TRANSPORTS: readonly Transport[] = ["ble", "audio", "qr", "lan"];

@@ -965,7 +965,7 @@ paths:
               type: object
               required: [kind, address]
               properties:
-                kind: { enum: [email, sms, voice, webhook, webpush, apns, fcm, lxmf] }
+                kind: { enum: [email, sms, voice, whatsapp, webhook, webpush, apns, fcm, lxmf] }
                 address:
                   type: string
                   description: |
@@ -1718,7 +1718,27 @@ paths:
     post:
       tags: [hooks]
       operationId: twilioInboundSms
-      summary: Inbound SMS (STOP, ACK <id>, or publish to the bound topic)
+      summary: Inbound SMS/MMS or WhatsApp (STOP, ACK <id>, or publish to the bound topic)
+      security: []
+      parameters:
+        - { name: X-Twilio-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { type: object, additionalProperties: { type: string } }
+      responses:
+        "200":
+          description: TwiML.
+          content:
+            text/xml:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/hooks/twilio/whatsapp:
+    post:
+      tags: [hooks]
+      operationId: twilioInboundWhatsapp
+      summary: Inbound WhatsApp via Twilio (STOP, ACK <id>, or publish to the bound topic)
       security: []
       parameters:
         - { name: X-Twilio-Signature, in: header, required: true, schema: { type: string } }
@@ -2114,7 +2134,7 @@ components:
 
   schemas:
     Transport:
-      enum: [ws, sse, poll, webpush, apns, fcm, webhook, email, slack, sms, voice, mcp, lxmf, ble, audio, qr, lan]
+      enum: [ws, sse, poll, webpush, apns, fcm, webhook, email, slack, sms, voice, whatsapp, mcp, lxmf, ble, audio, qr, lan]
       description: Transport ids (spec §10). `ble`, `audio`, `qr`, and `lan` are edge transports and never touch the relay.
 
     Envelope:

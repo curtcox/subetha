@@ -19,6 +19,8 @@ Generated from `pricing/costs.yaml`. Every SKU at every tier must have a margin 
 | `deliver_voice_us` | minute | $0.0169 | $0.0247 | $0.0230 | $0.0213 | 31.5% | 26.4% | 20.6% |
 | `deliver_sms_intl` | segment | $0.0505 | $0.0717 | $0.0667 | $0.0616 | 29.6% | 24.2% | 18.0% |
 | `deliver_voice_intl` | minute | $0.0534 | $0.0768 | $0.0714 | $0.0661 | 30.4% | 25.2% | 19.2% |
+| `deliver_whatsapp` | message | $0.0205 | $0.0297 | $0.0277 | $0.0256 | 31.0% | 25.9% | 19.9% |
+| `inbound_whatsapp` | message | $0.005302 | $0.007923 | $0.007393 | $0.006863 | 33.1% | 28.3% | 22.8% |
 | `deliver_lxmf` | delivery | $0.0000152 | $0.000051 | $0.000047 | $0.000043 | 70.2% | 67.7% | 64.6% |
 | `api_request` | request | $0.000001 | $0.000003 | $0.000003 | $0.000003 | 66.7% | 66.7% | 66.7% |
 | `attachment_upload` | upload | $0.0000068 | $0.000017 | $0.000015 | $0.000014 | 60.0% | 54.7% | 51.4% |

@@ -143,6 +143,7 @@ app.get("/v1/status", async (c) => {
     slack: !!(e.DELIVERY && e.SLACK_CLIENT_ID),
     sms: !!(e.DELIVERY && e.TWILIO_ACCOUNT_SID) && !circuit,
     voice: !!(e.DELIVERY && e.TWILIO_ACCOUNT_SID) && !circuit,
+    whatsapp: !!(e.DELIVERY && e.TWILIO_ACCOUNT_SID && e.TWILIO_WHATSAPP_FROM) && !circuit,
     lxmf: !!(e.DELIVERY && e.LXMF_GATEWAY_URL),
   };
   const ok = d1.ok && kv.ok;

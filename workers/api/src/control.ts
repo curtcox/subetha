@@ -13,7 +13,7 @@ import { topicStub } from "./durable/topic.ts";
 import { ApiError, unwrap } from "./errors.ts";
 import { EMAIL_RE, sendEmail } from "./delivery/email.ts";
 import { verifySlackSignature } from "./delivery/slack.ts";
-import { ackToken, fetchInboundMedia, makeCall, sendSms, verifyTwilioSignature, voiceMinutes, voiceTwiml } from "./delivery/twilio.ts";
+import { ackToken, fetchInboundMedia, makeCall, sendSms, sendWhatsApp, verifyTwilioSignature, voiceMinutes, voiceTwiml } from "./delivery/twilio.ts";
 import { DEST_PRICES_KEY, destUnitPrice, INTL_COUNTRIES, phoneCountry, type DestinationPrices } from "./delivery/destinations.ts";
 import type { Env, Principal, QueuedSubscription, SubscriptionFilter } from "./types.ts";
 import { registerDeviceRoutes } from "./devices.ts";
@@ -29,8 +29,8 @@ type PrincipalFn = (c: Context<Vars>) => Promise<Principal>;
 
 const VERIFY_TTL_MS = 30 * 60_000;
 const MAX_PENDING_VERIFICATIONS = 5;
-const NEEDS_CODE: Transport[] = ["email", "sms", "voice"];
-const CREATABLE: Transport[] = ["email", "sms", "voice", "webhook", "webpush", "apns", "fcm", "lxmf"];
+const NEEDS_CODE: Transport[] = ["email", "sms", "voice", "whatsapp"];
+const CREATABLE: Transport[] = ["email", "sms", "voice", "whatsapp", "webhook", "webpush", "apns", "fcm", "lxmf"];
 
 interface EndpointRecord { id: string; account_id: string; kind: Transport; address: string; config: string; verify_code_hash: string | null; verify_attempts: number; verified_at: number | null; created_at: number }
 
@@ -46,21 +46,22 @@ export function assertPublicWebhook(address: string, baseUrl: string) {
 
 export function validateAddress(kind: Transport, address: unknown): string {
   if (typeof address !== "string" || !address) throw new ApiError("bad_request", "address is required");
+  const normalized = kind === "whatsapp" && address.toLowerCase().startsWith("whatsapp:") ? address.slice(9) : address;
   const ok =
-    kind === "email" ? EMAIL_RE.test(address) :
-    kind === "sms" || kind === "voice" ? phoneCountry(address) !== null :
-    kind === "webhook" ? /^https:\/\/[^\s/]+(\/\S*)?$/.test(address) :
-    kind === "webpush" ? (() => { try { const s = JSON.parse(address); return /^https:\/\//.test(s.endpoint) && typeof s.keys?.p256dh === "string" && typeof s.keys?.auth === "string"; } catch { return false; } })() :
-    kind === "apns" ? /^[0-9a-f]{64,200}$/i.test(address) :
-    kind === "fcm" ? /^[\w:.-]{20,4096}$/.test(address) :
-    kind === "lxmf" ? /^[0-9a-f]{32}$/i.test(address) :
+    kind === "email" ? EMAIL_RE.test(normalized) :
+    kind === "sms" || kind === "voice" || kind === "whatsapp" ? phoneCountry(normalized) !== null :
+    kind === "webhook" ? /^https:\/\/[^\s/]+(\/\S*)?$/.test(normalized) :
+    kind === "webpush" ? (() => { try { const s = JSON.parse(normalized); return /^https:\/\//.test(s.endpoint) && typeof s.keys?.p256dh === "string" && typeof s.keys?.auth === "string"; } catch { return false; } })() :
+    kind === "apns" ? /^[0-9a-f]{64,200}$/i.test(normalized) :
+    kind === "fcm" ? /^[\w:.-]{20,4096}$/.test(normalized) :
+    kind === "lxmf" ? /^[0-9a-f]{32}$/i.test(normalized) :
     false;
-  if (!ok) throw new ApiError("bad_request", kind === "sms" || kind === "voice" ? `unsupported phone number: use E.164 (+…) for the US or one of ${Object.keys(INTL_COUNTRIES).join(", ")}; premium-rate and non-geographic numbers are not served` : `invalid ${kind} address`);
-  return address;
+  if (!ok) throw new ApiError("bad_request", kind === "sms" || kind === "voice" || kind === "whatsapp" ? `unsupported phone number: use E.164 (+…) for the US or one of ${Object.keys(INTL_COUNTRIES).join(", ")}; premium-rate and non-geographic numbers are not served` : `invalid ${kind} address`);
+  return normalized;
 }
 
 const maskAddress = (kind: string, a: string) =>
-  kind === "email" ? a.replace(/^(.).*(@.*)$/, "$1…$2") : kind === "sms" || kind === "voice" ? a.slice(0, 2) + "…" + a.slice(-4) : kind === "webpush" ? "(browser)" : a.length > 40 ? a.slice(0, 37) + "…" : a;
+  kind === "email" ? a.replace(/^(.).*(@.*)$/, "$1…$2") : kind === "sms" || kind === "voice" || kind === "whatsapp" ? a.slice(0, 2) + "…" + a.slice(-4) : kind === "webpush" ? "(browser)" : a.length > 40 ? a.slice(0, 37) + "…" : a;
 
 function publicEndpoint(e: EndpointRecord) {
   const cfg = JSON.parse(e.config || "{}") as { name?: string; inbound_topic?: string; credential_id?: string };
@@ -84,15 +85,18 @@ export const optedCountries = (json: string | null | undefined): string[] => (js
  * destination is served: US numbers use the static SKU; other countries must be opted into by the
  * account and have a current live price.
  */
-export async function telephonyUnitPrice(env: Env, accountId: string, kind: "sms" | "voice", address: string): Promise<number> {
+export async function telephonyUnitPrice(env: Env, accountId: string, kind: "sms" | "voice" | "whatsapp", address: string): Promise<number> {
   const country = phoneCountry(address);
   if (!country) throw new ApiError("bad_request", "unsupported phone number");
   const tier = await accountTier(env, accountId);
-  if (country === "US") return actionPriceMicros(PRICES, skuForTransport(PRICES, kind)!, tier);
-  const row = await env.DB.prepare("SELECT telephony_countries FROM accounts WHERE id = ?").bind(accountId).first<{ telephony_countries: string | null }>();
-  if (!optedCountries(row?.telephony_countries).includes(country)) {
-    throw new ApiError("forbidden", `${INTL_COUNTRIES[country]!.name} (${country}) isn't enabled for this account; add it to telephony_countries with PATCH /v1/account`);
+  if (country !== "US") {
+    const row = await env.DB.prepare("SELECT telephony_countries FROM accounts WHERE id = ?").bind(accountId).first<{ telephony_countries: string | null }>();
+    if (!optedCountries(row?.telephony_countries).includes(country)) {
+      throw new ApiError("forbidden", `${INTL_COUNTRIES[country]!.name} (${country}) isn't enabled for this account; add it to telephony_countries with PATCH /v1/account`);
+    }
   }
+  if (kind === "whatsapp") return actionPriceMicros(PRICES, "deliver_whatsapp", tier);
+  if (country === "US") return actionPriceMicros(PRICES, skuForTransport(PRICES, kind)!, tier);
   const p = destUnitPrice(await loadDestPrices(env), kind, country, tier);
   if (p === null) throw new ApiError("provider_unavailable", `no current ${kind} price for ${country}; try again later`);
   return p;
@@ -118,18 +122,18 @@ async function releaseVerifySend(env: Env, dest: string, sentAt: number) {
 }
 
 async function sendCode(env: Env, e: EndpointRecord, code: string) {
-  const telephony = e.kind === "sms" || e.kind === "voice";
+  const telephony = e.kind === "sms" || e.kind === "voice" || e.kind === "whatsapp";
   // One code per destination per hour, and a few pending verifications per account per day:
   // verification sends go to unverified numbers/addresses, so they're the abuse surface.
   const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM endpoints WHERE account_id = ? AND verified_at IS NULL AND created_at > ?").bind(e.account_id, Date.now() - 86_400_000).first<{ n: number }>();
   if ((pending?.n ?? 0) > MAX_PENDING_VERIFICATIONS) throw new ApiError("rate_limited", "too many unverified endpoints in the last day");
-  if (telephony && (await checkTelephonyCircuit(env, e.account_id))) throw new ApiError("provider_unavailable", "SMS and voice are temporarily paused");
+  if (telephony && (await checkTelephonyCircuit(env, e.account_id))) throw new ApiError("provider_unavailable", "SMS, WhatsApp, and voice are temporarily paused");
   const dest = `${e.kind}:${e.address.toLowerCase()}`;
   const sentAt = await claimVerifySend(env, dest);
   if (sentAt === null) throw new ApiError("rate_limited", "a code was sent to this destination recently; try again in an hour");
-  // The verification message costs the same as a delivery and is paid before it is sent; SMS and
-  // calls count toward the new-funds telephony hold.
-  const price = e.kind === "sms" || e.kind === "voice"
+  // The verification message costs the same as a delivery and is paid before it is sent; SMS,
+  // WhatsApp, and calls count toward the new-funds telephony hold.
+  const price = e.kind === "sms" || e.kind === "voice" || e.kind === "whatsapp"
     ? await telephonyUnitPrice(env, e.account_id, e.kind, e.address)
     : actionPriceMicros(PRICES, skuForTransport(PRICES, e.kind)!, await accountTier(env, e.account_id));
   const ref = `verify:${e.id}:${ulid()}`;
@@ -139,12 +143,13 @@ async function sendCode(env: Env, e: EndpointRecord, code: string) {
     await releaseVerifySend(env, dest, sentAt);
     throw r.code === "insufficient_balance"
       ? new ApiError("insufficient_balance", "balance can't cover the verification message", { shortfall_usd_micros: r.shortfall })
-      : new ApiError("spend_cap_exceeded", "SMS/voice spend is limited for new funds; try again later or use email");
+      : new ApiError("spend_cap_exceeded", "SMS/WhatsApp/voice spend is limited for new funds; try again later or use email");
   }
   await account.settle(ref, price);
   const text = `Your SubEtha verification code is ${code}. If you didn't request this, ignore it.`;
   if (e.kind === "email") await sendEmail(env, { to: e.address, subject: `SubEtha verification code ${code}`, text });
   else if (e.kind === "sms") await sendSms(env, e.address, text);
+  else if (e.kind === "whatsapp") await sendWhatsApp(env, e.address, text);
   else await makeCall(env, e.address, voiceTwiml(`Your SubEtha verification code is ${code.split("").join(", ")}. Again: ${code.split("").join(", ")}.`, null));
 }
 
@@ -157,12 +162,13 @@ export async function syncTopicSubscriptions(env: Env, topic: string) {
   const subs: QueuedSubscription[] = [];
   for (const r of results) {
     // Numbers outside the US deliver only while the owner keeps their country enabled.
-    const country = r.kind === "sms" || r.kind === "voice" ? phoneCountry(r.address) : null;
-    if ((r.kind === "sms" || r.kind === "voice") && (!country || (country !== "US" && !optedCountries(r.telephony_countries).includes(country)))) continue;
+    const isPhone = r.kind === "sms" || r.kind === "voice" || r.kind === "whatsapp";
+    const country = isPhone ? phoneCountry(r.address) : null;
+    if (isPhone && (!country || (country !== "US" && !optedCountries(r.telephony_countries).includes(country)))) continue;
     subs.push({
       id: r.id, transport: r.kind, endpoint: r.endpoint_id, address: r.kind === "webpush" ? undefined : r.address,
       filter: JSON.parse(r.filter) as SubscriptionFilter, after_s: r.after_s || undefined, min_priority: r.min_priority ?? undefined,
-      ...(country && country !== "US" ? { country } : {}),
+      ...((r.kind === "sms" || r.kind === "voice") && country && country !== "US" ? { country } : {}),
     });
   }
   await topicStub(env, topic).setSubscriptions(subs);
@@ -197,7 +203,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     const kind = body.kind!;
     if (!CREATABLE.includes(kind)) throw new ApiError("bad_request", kind === "slack" ? "Slack endpoints are created by installing the Slack app (GET /v1/slack/install)" : `kind must be one of ${CREATABLE.join(", ")}`);
     const address = validateAddress(kind, body.address);
-    if (kind === "sms" || kind === "voice") await telephonyUnitPrice(c.env, accountId, kind, address);
+    if (kind === "sms" || kind === "voice" || kind === "whatsapp") await telephonyUnitPrice(c.env, accountId, kind, address);
     if (kind === "webhook") assertPublicWebhook(address, c.env.BASE_URL);
     // Web Push endpoints are URLs we POST to as well (the browser's push service).
     if (kind === "webpush") assertPublicWebhook(JSON.parse(address).endpoint, c.env.BASE_URL);
@@ -259,7 +265,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
       cfg.name = body.name;
     }
     if (body.inbound_topic !== undefined) {
-      if (e.kind !== "sms") throw new ApiError("bad_request", "inbound_topic applies to sms endpoints only");
+      if (e.kind !== "sms" && e.kind !== "whatsapp") throw new ApiError("bad_request", "inbound_topic applies to sms and whatsapp endpoints only");
       if (body.inbound_topic === null) delete cfg.inbound_topic;
       else {
         if (typeof body.inbound_topic !== "string" || !isTopic(body.inbound_topic)) throw new ApiError("invalid_topic");
@@ -426,46 +432,56 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     return twiml(c);
   });
 
-  // Inbound SMS from a verified number publishes to the topic bound to that endpoint (config.inbound_topic).
-  app.post("/v1/hooks/twilio/sms", async (c) => {
+  // Inbound SMS/MMS or WhatsApp from a verified number publishes to the topic bound to that endpoint (config.inbound_topic).
+  const handleTwilioInbound = async (c: Context<Vars>, forceWhatsapp = false) => {
     const params = await twilioParams(c);
-    const from = params.From ?? "", body = (params.Body ?? "").trim();
+    const rawFrom = params.From ?? "";
+    const isWhatsapp = forceWhatsapp || rawFrom.toLowerCase().startsWith("whatsapp:");
+    const from = rawFrom.toLowerCase().startsWith("whatsapp:") ? rawFrom.slice(9) : rawFrom;
+    const kind: "sms" | "whatsapp" = isWhatsapp ? "whatsapp" : "sms";
+    const body = (params.Body ?? "").trim();
     if (/^(help|info)$/i.test(body)) {
       return twiml(c, "<Response><Message>SubEtha notifications. Manage at subetha.us/console. Reply STOP to opt out. Msg &amp; data rates may apply.</Message></Response>");
     }
     // The same number can be verified on several accounts; the oldest one with an inbound topic wins.
-    const ep = await c.env.DB.prepare("SELECT * FROM endpoints WHERE kind = 'sms' AND address = ? AND verified_at IS NOT NULL ORDER BY json_extract(config, '$.inbound_topic') IS NULL, created_at LIMIT 1").bind(from).first<EndpointRecord>();
+    const ep = await c.env.DB.prepare("SELECT * FROM endpoints WHERE kind = ? AND address = ? AND verified_at IS NOT NULL ORDER BY json_extract(config, '$.inbound_topic') IS NULL, created_at LIMIT 1").bind(kind, from).first<EndpointRecord>();
     if (!ep) return twiml(c);
     if (/^(stop|stopall|unsubscribe|cancel|end|quit)$/i.test(body)) {
-      await c.env.DB.prepare("UPDATE endpoints SET verified_at = NULL WHERE kind IN ('sms','voice') AND address = ?").bind(from).run();
+      if (isWhatsapp) await c.env.DB.prepare("UPDATE endpoints SET verified_at = NULL WHERE kind = 'whatsapp' AND address = ?").bind(from).run();
+      else await c.env.DB.prepare("UPDATE endpoints SET verified_at = NULL WHERE kind IN ('sms','voice') AND address = ?").bind(from).run();
       for (const t of await topicsForEndpoint(c.env, ep.id)) await syncTopicSubscriptions(c.env, t);
       return twiml(c);
     }
     const ackMatch = /^ack\s+([0-9a-z]{26})$/i.exec(body);
     const cfg = JSON.parse(ep.config) as { inbound_topic?: string };
     if (ackMatch) {
-      for (const t of await topicsForEndpoint(c.env, ep.id)) await topicStub(c.env, t).ack(ackMatch[1]!, "sms");
+      for (const t of await topicsForEndpoint(c.env, ep.id)) await topicStub(c.env, t).ack(ackMatch[1]!, kind);
       return twiml(c);
     }
     if (!cfg.inbound_topic) return twiml(c);
-    // An MMS's first picture becomes the message's attachment (billed as inbound_mms_us, plus
-    // the attachment's upload and storage like any publish); other media types are dropped.
+    // First image attachment becomes the message's attachment; other media types are dropped.
     const media = Number(params.NumMedia ?? 0) > 0 && c.env.FILES ? await fetchInboundMedia(c.env, params.MediaUrl0 ?? "").catch(() => null) : null;
-    const sku = media ? "inbound_mms_us" : "inbound_sms_us";
+    const sku = isWhatsapp ? "inbound_whatsapp" : media ? "inbound_mms_us" : "inbound_sms_us";
     const price = actionPriceMicros(PRICES, sku, await accountTier(c.env, ep.account_id));
     const charge = await accountStub(c.env, ep.account_id).charge(price, `insms:${params.MessageSid}`, null, {}, true);
     if (!charge.ok) return twiml(c);
-    emitMetric(c.env, { accountId: ep.account_id, event: "inbound_sms", transport: "sms", sku, revenueMicros: price, providerCostMicros: estimatedCostMicros(sku) });
+    emitMetric(c.env, { accountId: ep.account_id, event: isWhatsapp ? "inbound_whatsapp" : "inbound_sms", transport: kind, sku, revenueMicros: price, providerCostMicros: estimatedCostMicros(sku) });
     const stored = media ? await storeAttachment(c.env, media) : null;
-    const envelope = { topic: cfg.inbound_topic, message: (body || (media ? `You received a file: ${media.name}` : "")).slice(0, 4096), tags: ["sms"], sms_from: maskAddress("sms", from), ...(stored ? { attachment: stored.attachment } : {}) };
+    const envelope = {
+      topic: cfg.inbound_topic,
+      message: (body || (media ? `You received a file: ${media.name}` : "")).slice(0, 4096),
+      tags: [kind],
+      ...(isWhatsapp ? { whatsapp_from: maskAddress("whatsapp", from) } : { sms_from: maskAddress("sms", from) }),
+      ...(stored ? { attachment: stored.attachment } : {}),
+    };
     let result;
     try {
       result = unwrap(await topicStub(c.env, cfg.inbound_topic).publish({
         envelope: envelope as never,
         caller: { accountId: ep.account_id, tokenId: null, deviceId: null, caps: { daily: null, total: null }, transports: null },
-        autoCreateOwner: null, idempotencyKey: `sms:${params.MessageSid}`, bodyHash: params.MessageSid ?? "", dryRun: false,
+        autoCreateOwner: null, idempotencyKey: `${kind}:${params.MessageSid}`, bodyHash: params.MessageSid ?? "", dryRun: false,
         attachmentBytes: media?.bytes.length,
-        route: { mode: "any", maxCost: null, deny: ["sms"], allow: null },
+        route: { mode: "any", maxCost: null, deny: [kind], allow: null },
       }));
     } catch (e) {
       if (stored) await discardAttachment(c.env, stored.fileId);
@@ -473,7 +489,9 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     }
     if (stored) await recordAttachment(c.env, stored.fileId, media!, cfg.inbound_topic, result);
     return twiml(c);
-  });
+  };
+  app.post("/v1/hooks/twilio/sms", (c) => handleTwilioInbound(c, false));
+  app.post("/v1/hooks/twilio/whatsapp", (c) => handleTwilioInbound(c, true));
 
   // ---------------- Slack ----------------
   app.get("/v1/slack/install", async (c) => {

@@ -145,6 +145,21 @@ skus:
     markup: 0.4
     components: { twilio: 0.05, tts: 0.0024, overhead: 0.001 }
     floor_usd: 0.002
+  deliver_whatsapp:
+    description: Send one WhatsApp message (text, or text + image) via Twilio to a verified number
+    unit: message
+    transports: [whatsapp]
+    charge: action
+    markup: 0.4
+    components: { twilio: 0.005, meta_fee: 0.015, queue_ops: 0.0000012, overhead: 0.0005 }
+    floor_usd: 0.001
+  inbound_whatsapp:
+    description: Receive one inbound WhatsApp message (plus optional picture) on a SubEtha WhatsApp sender
+    unit: message
+    charge: action
+    markup: 0.4
+    components: { twilio: 0.005, media_fetch: 0.000002, overhead: 0.0003 }
+    floor_usd: 0.0005
   deliver_lxmf:
     description: Deliver over the hosted Reticulum/LXMF gateway
     unit: delivery

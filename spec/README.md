@@ -248,7 +248,7 @@ Codes are stable and listed in `errors.json`.
 ## 10. Transport ids
 
 `ws`, `sse`, `poll`, `webpush`, `apns`, `fcm`, `webhook`, `email`, `slack`, `sms`, `voice`,
-`mcp`, `lxmf`, `ble`, `audio`, `qr`, `lan`. Edge transports are `ble`, `audio`, `qr`, `lan`.
+`whatsapp`, `mcp`, `lxmf`, `ble`, `audio`, `qr`, `lan`. Edge transports are `ble`, `audio`, `qr`, `lan`.
 
 ## 11. Edge framings
 

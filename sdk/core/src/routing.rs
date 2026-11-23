@@ -265,7 +265,7 @@ mod tests {
         assert_eq!(p.permitted(), vec![Ws, Sms]);
         assert_eq!(p.max_cost_usd_micros, Some(20_000));
         assert_eq!(intersect_policies([]), Policy::unrestricted());
-        assert_eq!(Policy::unrestricted().permitted().len(), 17);
+        assert_eq!(Policy::unrestricted().permitted().len(), Transport::ALL.len());
     }
 
     #[test]

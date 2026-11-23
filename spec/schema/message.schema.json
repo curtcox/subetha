@@ -70,7 +70,7 @@
   },
   "$defs": {
     "transport": {
-      "enum": ["ws", "sse", "poll", "webpush", "apns", "fcm", "webhook", "email", "slack", "sms", "voice", "mcp", "lxmf", "ble", "audio", "qr", "lan"]
+      "enum": ["ws", "sse", "poll", "webpush", "apns", "fcm", "webhook", "email", "slack", "sms", "voice", "whatsapp", "mcp", "lxmf", "ble", "audio", "qr", "lan"]
     }
   }
 }

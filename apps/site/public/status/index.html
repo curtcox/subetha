@@ -27,7 +27,7 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const NAMES = { d1: "Database (D1)", kv: "Cache (KV)", queue: "Delivery queue", attachments: "Attachments (R2)" };
-  const TNAMES = { ws: "WebSocket", sse: "Server-sent events", poll: "JSON polling", mcp: "MCP server", webhook: "Webhooks", webpush: "Web Push", fcm: "FCM (Android)", apns: "APNs (iOS)", email: "Email", slack: "Slack", sms: "SMS (US)", voice: "Voice (US)", lxmf: "Reticulum / LXMF" };
+  const TNAMES = { ws: "WebSocket", sse: "Server-sent events", poll: "JSON polling", mcp: "MCP server", webhook: "Webhooks", webpush: "Web Push", fcm: "FCM (Android)", apns: "APNs (iOS)", email: "Email", slack: "Slack", sms: "SMS (US)", voice: "Voice (US)", whatsapp: "WhatsApp", lxmf: "Reticulum / LXMF" };
   const badge = (state, text) => `<span class="state state-${state}">${state === "ok" ? "●" : state === "bad" ? "▲" : "○"} ${esc(text)}</span>`;
   async function check() {
     const t0 = performance.now();

@@ -16,6 +16,30 @@ function twilioAuth(env: Env) {
   return { base, sid: env.TWILIO_ACCOUNT_SID, auth: `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`)}`, from: env.TWILIO_FROM };
 }
 
+/** Ensures a Twilio WhatsApp address has the `whatsapp:` prefix. */
+export const normalizeWhatsApp = (addr: string) => (addr.toLowerCase().startsWith("whatsapp:") ? `whatsapp:${addr.slice(9)}` : `whatsapp:${addr}`);
+
+/** Sends a WhatsApp message (text, or text + image when `mediaUrl` is given) via Twilio. */
+export async function sendWhatsApp(env: Env, to: string, body: string, mediaUrl?: string): Promise<{ sid: string }> {
+  if (!phoneCountry(to)) throw new PermanentError("unsupported destination");
+  if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN || !env.TWILIO_WHATSAPP_FROM) throw new PermanentError("Twilio WhatsApp is not configured");
+  const base = (env.TWILIO_API_BASE || "https://api.twilio.com").replace(/\/+$/, "");
+  const auth = `Basic ${btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`)}`;
+  const r = await fetch(`${base}/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Messages.json`, {
+    method: "POST",
+    headers: { authorization: auth, "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      To: normalizeWhatsApp(to),
+      From: normalizeWhatsApp(env.TWILIO_WHATSAPP_FROM),
+      Body: body,
+      ...(mediaUrl ? { MediaUrl: mediaUrl } : {}),
+    }).toString(),
+  });
+  const text = await r.text();
+  if (!r.ok) throw httpFailure(r.status, text);
+  return { sid: (JSON.parse(text) as { sid: string }).sid };
+}
+
 /** Sends an SMS, or an MMS when `mediaUrl` is given (Twilio fetches the image from it). */
 export async function sendSms(env: Env, to: string, body: string, mediaUrl?: string): Promise<{ sid: string; segments: number }> {
   if (!phoneCountry(to)) throw new PermanentError("unsupported destination");
@@ -113,4 +137,11 @@ registerSender("voice", async (job, env) => {
   const status = `${env.BASE_URL}/v1/hooks/twilio/voice-status?acct=${encodeURIComponent(job.owner)}&ref=${encodeURIComponent(res.ref)}&max=${res.micros}&t=${await ackToken(secret, job.owner, `${res.ref}:${res.micros}`)}`;
   const r = await makeCall(env, ep.address, voiceTwiml(renderText(job.message, 1500), ack), status);
   return { detail: { sid: r.sid }, deferSettle: true };
+});
+
+registerSender("whatsapp", async (job, env) => {
+  const ep = await loadEndpoint(env, job.sub.endpoint);
+  const media = mmsMedia(job.message);
+  const r = await sendWhatsApp(env, ep.address, renderText(job.message, MMS_MAX_CHARS), media ?? undefined);
+  return { costMicros: job.reservation.micros, detail: { sid: r.sid, ...(media ? { media: true } : {}) } };
 });
