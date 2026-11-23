@@ -17,7 +17,7 @@ connectivity to the relay.
 |---|---|
 | LXMF → topic | A message sent to a topic's LXMF address is published to the topic. The LXMF title becomes the message `title`, the content becomes `message`, and the sender's LXMF address goes in the extension field `lxmf_from`. |
 | topic → LXMF | Every message on the topic goes, as an LXMF message from the topic's address, to each LXMF peer that sent it `/subscribe`. |
-| Commands | `/subscribe`, `/unsubscribe`, `/status`, `/help`, sent as the message content. Start a message with `//` to publish text that begins with `/`. |
+| Commands | `/subscribe`, `/unsubscribe`, `/ack <id>`, `/status`, `/help`, sent as the message content. Start a message with `//` to publish text that begins with `/`. |
 
 Loop and duplicate protection:
 
