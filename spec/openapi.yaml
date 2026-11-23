@@ -807,6 +807,72 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
 
   # ------------------------------------------------------------------ traces & acks
+  /v1/keys:
+    put:
+      tags: [topics]
+      operationId: putWrappedKeys
+      summary: Upload E2EE topic keys wrapped to devices (spec §5.1)
+      description: |
+        Stores wrapped keys for topics you own, replacing any with the same topic, kid, and
+        recipient device. The relay can't open them. Up to 100 per request, 1000 per topic.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [keys]
+              properties:
+                keys:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { $ref: "#/components/schemas/WrappedKey" }
+      responses:
+        "200":
+          description: Stored.
+          content:
+            application/json:
+              schema: { type: object, properties: { stored: { type: integer } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    get:
+      tags: [topics]
+      operationId: listWrappedKeys
+      summary: Wrapped keys addressed to this device, or (admin) all of your topics' wrapped keys
+      parameters:
+        - { name: topic, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Wrapped keys, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      allOf:
+                        - { $ref: "#/components/schemas/WrappedKey" }
+                        - { type: object, properties: { created_at: { type: integer } } }
+        "402": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [topics]
+      operationId: deleteWrappedKeys
+      summary: Delete wrapped keys for one of your topics
+      parameters:
+        - { name: topic, in: query, required: true, schema: { type: string } }
+        - { name: kid, in: query, schema: { type: string } }
+        - { name: device, in: query, schema: { type: string }, description: Recipient device id. }
+      responses:
+        "200":
+          description: How many were deleted.
+          content:
+            application/json:
+              schema: { type: object, properties: { deleted: { type: integer } } }
+        "404": { $ref: "#/components/responses/Error" }
   /v1/traces/{id}:
     get:
       tags: [traces]
@@ -1925,6 +1991,19 @@ components:
         telephony_countries: { type: array, items: { type: string }, description: "Opt-in countries outside the US for SMS/voice endpoints." }
         paused: { type: boolean }
         created_at: { type: integer }
+
+    WrappedKey:
+      type: object
+      description: An E2EE topic key sealed to one device (spec §5.1). Uploads must have exactly these fields.
+      required: [alg, topic, kid, to, epk, nonce, ct]
+      properties:
+        alg: { const: x25519-xchacha20poly1305 }
+        topic: { type: string }
+        kid: { type: string, pattern: "^[A-Za-z0-9_.-]{1,64}$" }
+        to: { type: string, pattern: "^dev_[a-z2-7]{52}$" }
+        epk: { type: string, pattern: "^[A-Za-z0-9_-]{43}$" }
+        nonce: { type: string, pattern: "^[A-Za-z0-9_-]{32}$" }
+        ct: { type: string, pattern: "^[A-Za-z0-9_-]{64}$" }
 
     Payment:
       type: object

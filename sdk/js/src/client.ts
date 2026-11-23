@@ -1,8 +1,8 @@
 // SubEtha client: publish / subscribe over whatever works. Dependency-free; runs in browsers,
 // Node ≥ 18, Deno, Bun, and Workers.
 import {
-  base64urlEncode, decryptEnvelope, Deduper, utf8, encryptEnvelope, signEnvelope, signRequestV2, ulid, verifyEnvelope,
-  type DeviceKey, type Envelope, type RouteMode, type Transport,
+  base64urlEncode, decryptEnvelope, Deduper, utf8, encryptEnvelope, signEnvelope, signRequestV2, ulid, unwrapTopicKey, verifyEnvelope, wrapTopicKey,
+  type DeviceKey, type Envelope, type RouteMode, type Transport, type WrappedKey,
 } from "./protocol/index.ts";
 
 export interface ClientOptions {
@@ -134,6 +134,7 @@ export class SubEtha {
   private readonly token?: string;
   private f: typeof fetch;
   private readonly signer?: DeviceSigner;
+  private readonly deviceKey?: DeviceKey;
   private readonly verify: (env: Envelope) => boolean | Promise<boolean>;
   private readonly topicKeys: Record<string, { kid: string; key: Uint8Array }>;
   private readonly WS?: typeof WebSocket;
@@ -144,6 +145,7 @@ export class SubEtha {
     this.token = opts.token;
     this.f = opts.fetch ?? ((...a) => fetch(...a));
     this.signer = opts.signer ?? (opts.deviceKey ? webCryptoSigner(opts.deviceKey) : undefined);
+    this.deviceKey = opts.deviceKey;
     this.verify = opts.verifyEnvelope ?? ((env) => verifyEnvelope(env));
     this.topicKeys = opts.topicKeys ?? {};
     this.WS = opts.WebSocket ?? (globalThis as { WebSocket?: typeof WebSocket }).WebSocket;
@@ -375,6 +377,51 @@ export class SubEtha {
   account() { return this.request<{ id: string; handle: string | null; balance_usd_micros: number; tier: string }>("GET", "/v1/account"); }
   balance() { return this.request<{ available_usd_micros: number; reserved_usd_micros: number }>("GET", "/v1/balance"); }
   ledger(after = 0) { return this.request<{ entries: unknown[] }>("GET", `/v1/ledger?after=${after}`); }
+  /**
+   * Wraps a topic key for each device (spec §5.1) and uploads the wrapped keys (PUT /v1/keys).
+   * The relay stores them but can't read them. Needs an admin token for a topic you own.
+   */
+  async shareTopicKey(topic: string, kid: string, key: Uint8Array, deviceIds: string[]): Promise<{ stored: number }> {
+    const wrapped = await Promise.all(deviceIds.map((to) => wrapTopicKey(key, { topic, kid, to })));
+    let stored = 0;
+    for (let i = 0; i < wrapped.length; i += 100) {
+      stored += (await this.request<{ stored: number }>("PUT", "/v1/keys", { keys: wrapped.slice(i, i + 100) })).stored;
+    }
+    return { stored };
+  }
+
+  /** Wrapped keys: as a device, the ones addressed to it; as an admin, all of your topics' (GET /v1/keys). */
+  listWrappedKeys(topic?: string) {
+    return this.request<{ keys: (WrappedKey & { created_at: number })[] }>("GET", `/v1/keys${topic ? `?topic=${encodeURIComponent(topic)}` : ""}`);
+  }
+
+  /** Deletes wrapped keys for a topic, optionally only one kid and/or one device. */
+  deleteWrappedKeys(topic: string, o: { kid?: string; device?: string } = {}) {
+    const q = new URLSearchParams({ topic, ...(o.kid ? { kid: o.kid } : {}), ...(o.device ? { device: o.device } : {}) });
+    return this.request<{ deleted: number }>("DELETE", `/v1/keys?${q}`);
+  }
+
+  /**
+   * Fetches the wrapped keys addressed to this device, opens them with its device key, and uses
+   * them for E2EE from then on (the newest key per topic wins). Needs `signRequests` (or a token
+   * for the device's account plus `deviceKey`). Returns the topics whose keys were loaded.
+   */
+  async loadTopicKeys(o: { topic?: string; deviceKey?: DeviceKey } = {}): Promise<Record<string, { kid: string; key: Uint8Array }>> {
+    const dk = o.deviceKey ?? this.deviceKey;
+    if (!dk) throw new Error("loadTopicKeys needs a deviceKey");
+    const { keys } = await this.listWrappedKeys(o.topic);
+    const loaded: Record<string, { kid: string; key: Uint8Array; at: number }> = {};
+    for (const w of keys) {
+      if (w.to !== dk.deviceId) continue;
+      const { created_at: at, ...wrapped } = w;
+      const key = await unwrapTopicKey(wrapped, dk);
+      if (key && (!loaded[w.topic] || at >= loaded[w.topic]!.at)) loaded[w.topic] = { kid: w.kid, key, at };
+    }
+    const out: Record<string, { kid: string; key: Uint8Array }> = {};
+    for (const [t, { kid, key }] of Object.entries(loaded)) out[t] = this.topicKeys[t] = { kid, key };
+    return out;
+  }
+
   /** The HTML receipt for one payment (GET /v1/payments/{id}/receipt). */
   async receipt(id: string): Promise<string> {
     const r = await this.f(`${this.baseUrl}/v1/payments/${encodeURIComponent(id)}/receipt`, { headers: this.headers() });

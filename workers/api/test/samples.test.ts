@@ -101,6 +101,14 @@ describe("docs samples (TypeScript)", () => {
     expect(wire.message).not.toContain("4721");
   });
 
+  it("key-sharing.ts", async () => {
+    const { msg, wrapped } = await run("key-sharing");
+    expect(msg.message).toBe("Gate code is 0451");
+    expect(msg.enc).toBeUndefined();
+    expect(wrapped).toHaveLength(1);
+    expect(wrapped[0].alg).toBe("x25519-xchacha20poly1305");
+  });
+
   it("edge.ts", async () => {
     const { viaSound, again, seconds, sourceBlocks } = await run("edge");
     expect(viaSound.message).toBe("Door opened");

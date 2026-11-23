@@ -17,6 +17,7 @@ import { registerControlRoutes, syncAccountEndpoints } from "./control.ts";
 import { DEST_PRICES_KEY, INTL_COUNTRIES, parseCountries, type DestinationPrices } from "./delivery/destinations.ts";
 import { mcpChallenge, registerMcp } from "./mcp.ts";
 import { registerPaymentRoutes } from "./payments.ts";
+import { registerKeyRoutes } from "./keys.ts";
 import { USAGE_LABELS } from "./usage.ts";
 
 const PRICES = prices as unknown as PriceTable;
@@ -418,6 +419,7 @@ app.post("/v1/ack", async (c) => {
 
 registerControlRoutes(app, principal);
 registerPaymentRoutes(app, principal);
+registerKeyRoutes(app, principal);
 registerMcp(app);
 
 // ---------------- local development ----------------

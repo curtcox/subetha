@@ -118,6 +118,29 @@ encrypted messages show a short "encrypted message" notice instead of the text.
 
 If you sign *and* encrypt, the SDK encrypts first and signs the ciphertext.
 
+### Sharing keys with devices
+
+Instead of copying the key to each device by hand, the owner can seal it to enrolled devices'
+identity keys and leave the sealed copies on the relay ([spec §5.1](https://github.com/curtcox/subetha/blob/main/spec/README.md#51-wrapped-topic-keys)).
+Each device fetches only the copies addressed to it, with a signed request, and opens them with
+its own key; the relay can't. To rotate, share a new `kid`: devices switch to the newest one the
+next time they load keys (the SDK holds one key per topic, so messages sent under the old `kid`
+need the old key to read). To stop sharing with a device, delete its copies (and rotate, since it may
+have kept the old key).
+
+<!-- include: samples/ts/key-sharing.ts#snippet -->
+
+| Endpoint | Who | Does |
+|---|---|---|
+| `PUT /v1/keys` | admin | Stores up to 100 wrapped keys (`{"keys": [...]}`) for topics you own; same topic + kid + device replaces. |
+| `GET /v1/keys[?topic=]` | device | The wrapped keys addressed to the calling device. |
+| `GET /v1/keys[?topic=]` | admin | Every wrapped key for your topics. |
+| `DELETE /v1/keys?topic=[&kid=][&device=]` | admin | Deletes matching wrapped keys. |
+
+Each call is metered as one API request. In the TS SDK: `shareTopicKey`, `loadTopicKeys`,
+`listWrappedKeys`, `deleteWrappedKeys`; in the Rust core, `keywrap::wrap_topic_key` and
+`unwrap_topic_key`.
+
 ## Responses and errors
 
 A successful publish returns `200` with the stored envelope, plus `X-Message-Id` and

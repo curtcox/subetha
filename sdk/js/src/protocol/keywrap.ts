@@ -78,7 +78,7 @@ async function x25519(sk: CryptoKey, u: Uint8Array): Promise<Uint8Array> {
   let shared: Uint8Array;
   try {
     const pub = await crypto.subtle.importKey("raw", toBuf(u), { name: "X25519" }, false, []);
-    shared = new Uint8Array(await crypto.subtle.deriveBits({ name: "X25519", public: pub } as unknown as AlgorithmIdentifier, sk, 256));
+    shared = new Uint8Array(await crypto.subtle.deriveBits({ name: "X25519", public: pub } as unknown as Parameters<SubtleCrypto["deriveBits"]>[0], sk, 256));
   } catch {
     throw new Error("x25519 failed (low-order public key)");
   }
@@ -120,7 +120,7 @@ export async function wrapTopicKey(
 async function seedOf(device: DeviceKey | Uint8Array): Promise<Uint8Array> {
   if (device instanceof Uint8Array) return device;
   if (device.seed) return device.seed;
-  return new Uint8Array(await crypto.subtle.exportKey("pkcs8", device.privateKey)).slice(PKCS8_ED25519_PREFIX_LEN);
+  return new Uint8Array((await crypto.subtle.exportKey("pkcs8", device.privateKey)) as ArrayBuffer).slice(PKCS8_ED25519_PREFIX_LEN);
 }
 
 /**
