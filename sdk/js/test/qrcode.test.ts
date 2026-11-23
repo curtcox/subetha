@@ -1,6 +1,6 @@
 import jsQR from "jsqr";
 import { describe, expect, it } from "vitest";
-import { base45Encode, encodeQr, qrCapacity, type QrCode, type QrEcl } from "../src/edge/index.ts";
+import { base45Encode, encodeQr, qrCapacity, qrSvg, type QrCode, type QrEcl } from "../src/edge/index.ts";
 
 /** Renders to RGBA with a 4-module quiet zone and decodes with jsQR (an independent decoder). */
 function decode(qr: QrCode, scale = 3): { data: string; bytes: number[] } | null {
@@ -77,5 +77,14 @@ describe("QR encoder", () => {
       expect(qr.version).toBe(v);
       expect(decode(qr, 2)?.data, `v${v}`).toBe(text);
     }
+  });
+
+  it("renders a valid monochrome SVG with qrSvg", () => {
+    const qr = encodeQr("subetha://key?topic=%40alice%2Fdoor&kid=k1&key=abc", { ecl: "M" });
+    const svg = qrSvg(qr, 2);
+    const full = qr.size + 4;
+    expect(svg).toContain(`viewBox="0 0 ${full} ${full}"`);
+    expect(svg).toContain('<path d="M');
+    expect(svg).toMatch(/^<svg[\s\S]*<\/svg>$/);
   });
 });

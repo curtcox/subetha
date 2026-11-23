@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseActions, parseTopicPath } from "../src/ntfy.ts";
+import { parseActions, parseJsonPublish, parseTopicPath } from "../src/ntfy.ts";
 import { planDeliveries, inQuietHours } from "../src/routing.ts";
 import prices from "@subetha/pricing/prices.json";
 import type { PriceTable } from "@subetha/pricing";
@@ -25,6 +25,34 @@ describe("parseActions", () => {
       { action: "http", label: "Close", url: "https://c.d", clear: true },
     ]);
     expect(parseActions('[{"action":"view","label":"x","url":"y"}]')).toHaveLength(1);
+  });
+});
+
+describe("parseJsonPublish", () => {
+  it("normalizes PLAN §4 route.max_cost_usd to integer max_cost_usd_micros", async () => {
+    const req = new Request("https://subetha.test/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        topic: "@alice/doorbell",
+        message: "Opened",
+        route: { mode: "any", max_cost_usd: 0.02, deny: ["sms"], deadline_s: 60 },
+      }),
+    });
+    const parsed = await parseJsonPublish(req);
+    expect(parsed.route.maxCost).toBe(20_000);
+    expect(parsed.route.deadlineS).toBe(60);
+    expect(parsed.envelope.route?.max_cost_usd_micros).toBe(20_000);
+    expect((parsed.envelope.route as Record<string, unknown>)?.max_cost_usd).toBeUndefined();
+  });
+
+  it("rejects negative route.max_cost_usd", async () => {
+    const req = new Request("https://subetha.test/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ topic: "@alice/doorbell", message: "x", route: { max_cost_usd: -1 } }),
+    });
+    await expect(parseJsonPublish(req)).rejects.toThrow(/max_cost_usd/);
   });
 });
 

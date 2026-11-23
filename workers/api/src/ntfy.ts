@@ -187,6 +187,17 @@ export async function parseJsonPublish(req: Request): Promise<ParsedPublish> {
     if (body.markdown) env.content_type = "text/markdown";
     delete env.markdown;
   }
+  // PLAN §4 accepts decimal route.max_cost_usd in JSON requests; normalize to integer µ$ for the canonical envelope.
+  if (typeof body.route === "object" && body.route !== null && !Array.isArray(body.route)) {
+    const r = { ...(body.route as Record<string, unknown>) };
+    if (r.max_cost_usd !== undefined) {
+      const usd = Number(r.max_cost_usd);
+      if (!Number.isFinite(usd) || usd < 0) throw new ApiError("bad_request", "invalid route.max_cost_usd");
+      if (r.max_cost_usd_micros === undefined) r.max_cost_usd_micros = Math.floor(usd * 1e6);
+      delete r.max_cost_usd;
+      env.route = r as Envelope["route"];
+    }
+  }
   if (body.delay !== undefined) throw new ApiError("unsupported", "scheduled delivery is not supported in v0");
   return { envelope: env, route: parseRoute(req, url, env), dryRun: ["1", "true"].includes((req.headers.get("x-dry-run") ?? "").toLowerCase()), idempotencyKey: req.headers.get("idempotency-key") };
 }

@@ -367,3 +367,15 @@ export function drawQr(
     }
   }
 }
+
+/** Renders a QR code as a crisp, self-contained monochrome SVG string. */
+export function qrSvg(qr: QrCode, margin = 4): string {
+  const full = qr.size + margin * 2;
+  const parts: string[] = [];
+  for (let y = 0; y < qr.size; y++) {
+    for (let x = 0; x < qr.size; x++) {
+      if (qr.modules[y * qr.size + x]) parts.push(`M${x + margin},${y + margin}h1v1h-1z`);
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${full} ${full}" shape-rendering="crispEdges" role="img" aria-label="QR code"><rect width="${full}" height="${full}" fill="#fff"/><path d="${parts.join("")}" fill="#000"/></svg>`;
+}

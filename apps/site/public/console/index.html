@@ -148,9 +148,10 @@
         <fieldset id="keyDevices"><legend>Wrap new keys for these devices</legend></fieldset>
         <p><button id="keyNew">New key</button> <span id="keyMsg" class="muted"></span></p>
         <pre id="keyOut" hidden></pre>
+        <div id="keyQr" hidden style="margin:.75rem 0;max-width:220px"></div>
         <div class="scroll"><table><thead><tr><th>Key id</th><th>Device</th><th>Created</th><th></th></tr></thead><tbody id="keyRows"></tbody></table></div>
         <h4>Keys in this browser</h4>
-        <p class="muted">These decrypt the inbox and encrypt what this console sends to the topic. Paste a key shared with you out of band to add it.</p>
+        <p class="muted">These decrypt the inbox and encrypt what this console sends to the topic. Paste a key (or a <code>subetha://key?…</code> QR link) shared with you out of band to add it.</p>
         <div class="row"><input id="keyAddTopic" placeholder="@you/topic" aria-label="Topic"><input id="keyAddKid" placeholder="key id" aria-label="Key id"><input id="keyAddKey" placeholder="key (base64url, 43 characters)" aria-label="Key" autocomplete="off"><button id="keyAdd" class="secondary">Add</button></div>
         <p><label class="check"><input type="checkbox" id="keyRemember"> Remember keys in this browser (stored unencrypted in its local storage)</label> <button id="keyLoadBrowser" class="secondary" hidden>Load wrapped keys for this browser</button></p>
         <table><tbody id="localKeyRows"></tbody></table>
@@ -267,7 +268,8 @@
         <div class="card">
           <h3>Approve a device</h3>
           <p class="muted">Enter the code a device, CLI, or app is showing (<code>subetha login</code>, a sample app, a TV-style screen).</p>
-          <div class="row"><input id="devCode" placeholder="BCDF-GHJK" autocomplete="off" aria-label="Device code"><button id="devApprove">Approve</button></div>
+          <div class="row"><input id="devCode" placeholder="BCDF-GHJK" autocomplete="off" aria-label="Device code"><button id="devApprove">Approve</button><button id="devQrBtn" type="button" class="secondary">QR</button></div>
+          <div id="devQr" hidden style="margin:.75rem 0;max-width:200px"></div>
           <p id="devMsg" class="muted"></p>
         </div>
         <div class="card">
@@ -391,6 +393,7 @@
   </div>
 </main>
 <script src="/sdk.js"></script>
+<script src="/edge.js" defer></script>
 <script type="module" src="/console/console.js"></script>
 </body>
 </html>

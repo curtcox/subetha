@@ -434,10 +434,41 @@ async function loadKeyRows() {
     loadKeyRows();
   });
 }
+function renderQrInto(el, text, caption) {
+  const edge = window.SubEthaEdge;
+  if (!edge?.encodeQr || !edge?.qrSvg) { el.hidden = true; return; }
+  const svg = edge.qrSvg(edge.encodeQr(text, { ecl: "M" }), 3);
+  el.hidden = false;
+  el.innerHTML = `<div style="background:#fff;padding:6px;border-radius:6px;border:1px solid var(--border,#ddd)">${svg}</div>${caption ? `<small class="muted" style="display:block;margin-top:.35rem;word-break:break-all">${esc(caption)}</small>` : ""}`;
+}
+const keyShareUri = (topic, kid, key) => `subetha://key?topic=${encodeURIComponent(topic)}&kid=${encodeURIComponent(kid)}&key=${encodeURIComponent(key)}`;
+function parseKeyShare(text) {
+  const s = text.trim();
+  if (s.startsWith("subetha://key?")) {
+    const q = new URLSearchParams(s.slice("subetha://key?".length));
+    const topic = q.get("topic"), kid = q.get("kid"), key = q.get("key");
+    if (topic && kid && key) return { topic, kid, key };
+  }
+  if (s.startsWith("{")) {
+    try {
+      const o = JSON.parse(s);
+      if (o?.topic && o?.kid && o?.key) return { topic: String(o.topic), kid: String(o.kid), key: String(o.key) };
+    } catch { /* ignore */ }
+  }
+  return null;
+}
 function renderLocalKeys() {
   $("keyRemember").checked = rememberKeys();
   syncBrowserDeviceControls();
-  $("localKeyRows").innerHTML = Object.entries(keyring).map(([t, k]) => `<tr><td><code>${esc(t)}</code></td><td><code>${esc(k.kid)}</code></td><td><button class="secondary" data-keyforget="${esc(t)}">Forget</button></td></tr>`).join("") || `<tr><td class="muted">No keys in this browser.</td></tr>`;
+  $("localKeyRows").innerHTML = Object.entries(keyring).map(([t, k]) => `<tr><td><code>${esc(t)}</code></td><td><code>${esc(k.kid)}</code></td><td><button class="secondary" data-keyqr="${esc(t)}">QR</button> <button class="secondary" data-keyforget="${esc(t)}">Forget</button></td></tr>`).join("") || `<tr><td class="muted">No keys in this browser.</td></tr>`;
+  document.querySelectorAll("[data-keyqr]").forEach((b) => b.onclick = () => {
+    const t = b.dataset.keyqr, k = keyring[t];
+    if (!k) return;
+    const uri = keyShareUri(t, k.kid, k.key);
+    $("keyOut").hidden = false;
+    $("keyOut").textContent = `Topic: ${t}\nKey id: ${k.kid}\nKey: ${k.key}\nShare URI: ${uri}`;
+    renderQrInto($("keyQr"), uri, `Scan to import E2EE key for ${t}`);
+  });
   document.querySelectorAll("[data-keyforget]").forEach((b) => b.onclick = () => useKey(b.dataset.keyforget, null));
 }
 /** Adds (or with null, forgets) a topic key for this console, then re-subscribes so the inbox decrypts. */
@@ -461,12 +492,23 @@ $("keyNew").onclick = async () => {
     if (devices.length) await client.shareTopicKey(topic, kid, key, devices);
     const k = { kid, key: SubEtha.protocol.base64urlEncode(key) };
     useKey(topic, k);
+    const uri = keyShareUri(topic, kid, k.key);
     $("keyOut").hidden = false;
-    $("keyOut").textContent = `Topic: ${topic}\nKey id: ${kid}\nKey: ${k.key}\n\nThis browser now encrypts to ${topic} with it. To share it by hand, copy it now: SubEtha can't show it again.`;
+    $("keyOut").textContent = `Topic: ${topic}\nKey id: ${kid}\nKey: ${k.key}\nShare URI: ${uri}\n\nThis browser now encrypts to ${topic} with it. To share it out of band, scan the QR code or copy it now: SubEtha can't show it again.`;
+    renderQrInto($("keyQr"), uri, `Scan to import E2EE key for ${topic}`);
     say(devices.length ? `Wrapped for ${devices.length} device${devices.length > 1 ? "s" : ""}.` : "Not wrapped for any device.");
     loadKeyRows();
   } catch (e) { say(`${e.code ?? "error"}: ${e.message}`); }
 };
+for (const id of ["keyAddTopic", "keyAddKey"]) {
+  $(id).addEventListener("input", () => {
+    const parsed = parseKeyShare($(id).value);
+    if (!parsed) return;
+    $("keyAddTopic").value = parsed.topic;
+    $("keyAddKid").value = parsed.kid;
+    $("keyAddKey").value = parsed.key;
+  });
+}
 $("keyAdd").onclick = () => {
   const topic = $("keyAddTopic").value.trim(), kid = $("keyAddKid").value.trim(), key = $("keyAddKey").value.trim();
   try {
@@ -623,7 +665,8 @@ async function loadBilling() {
   loadPayments();
   const [{ entries }, prices] = await Promise.all([client.ledger(), client.prices()]);
   $("ledgerRows").innerHTML = entries.slice().reverse().map((e) => `<tr><td>${e.seq}</td><td>${e.kind}</td><td>${usd(e.amount)}</td><td>${usd(e.available_after)}</td><td><code>${esc(e.ref)}</code></td><td>${new Date(e.time).toLocaleString()}</td></tr>`).join("");
-  $("priceTable").innerHTML = `<table>${Object.entries(prices.skus).map(([id, s]) => `<tr><td>${esc(s.description)}</td><td>$${(s.price_nanos.standard / 1e9).toPrecision(3)} / ${esc(s.unit)}</td></tr>`).join("")}</table>`;
+  const tier = me.tier || "standard";
+  $("priceTable").innerHTML = `<p class="muted" style="margin-top:0">Current volume tier: <strong>${esc(tier)}</strong></p><table>${Object.entries(prices.skus).map(([id, s]) => `<tr><td>${esc(s.description)}</td><td>$${((s.price_nanos[tier] ?? s.price_nanos.standard) / 1e9).toPrecision(3)} / ${esc(s.unit)}</td></tr>`).join("")}</table>`;
 }
 async function loadPayments() {
   try {
@@ -874,6 +917,14 @@ async function loadDevices() {
     loadDevices();
   });
 }
+$("devQrBtn").onclick = () => {
+  const box = $("devQr");
+  const code = $("devCode").value.trim().toUpperCase();
+  const url = code ? `${location.origin}/console/#device=${encodeURIComponent(code)}` : `${location.origin}/console/#device`;
+  if (!box.hidden && box.dataset.url === url) { box.hidden = true; return; }
+  box.dataset.url = url;
+  renderQrInto(box, url, `Scan to open ${url}`);
+};
 $("devApprove").onclick = async () => {
   const say = (t) => { $("devMsg").textContent = t; };
   try {
