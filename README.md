@@ -22,13 +22,13 @@ curl -H "Authorization: Bearer $SUBETHA_TOKEN" https://subetha.us/@me/backups/js
   `since`, filters, several topics), a `TopicDO` per topic (fan-out, buffer, traces, acks) and an
   `AccountDO` per account (prepaid ledger, credit leases, caps, new-funds hold), D1, KV, Queues,
   rate limits, and a daily cron for rent metering, freezing (with freeze, deletion-warning, and deletion emails), reconciliation, and Twilio price checks.
-- **Control plane** (`/v1/*`): accounts (Clerk) with daily/monthly spend caps, transport allow/deny policies, and kill switches; Stripe Checkout top-ups (and opt-in auto-recharge) and webhooks; scoped and
+- **Control plane** (`/v1/*`): accounts (Clerk, with org admin role enforcement and `/v1/hooks/clerk` lifecycle webhook) with daily/monthly spend caps, transport allow/deny policies, rolling 12-month volume pricing tiers, and kill switches; Stripe Checkout top-ups (and opt-in auto-recharge) and webhooks; scoped and
   capped API tokens (including origin-bound publishable tokens and IP allow-lists); topic policies (including daily/monthly caps, rate/burst limits, timezone-aware quiet hours, `X-Deadline` / `route.deadline_s` enforcement, and `DELETE /v1/topics/{topic}`); traces, dry runs,
   idempotency keys, payment history and receipts, wrapped E2EE topic keys for enrolled devices (`/v1/keys`), endpoints with verification codes, BYO APNs/FCM push credentials (`/v1/push/credentials`), subscriptions with escalation and pause/update (`PATCH /v1/subscriptions/{id}`), device
   enrollment (device-code flow, request signatures, per-device pause kill switch, and transport allow/deny policies), Analytics Engine usage/cost telemetry, global & per-account telephony circuit breakers (list price, Twilio spend divergence, and chargeback protection), an audit log, `/v1/status`.
 - **Transports**: live WS/SSE/poll; Web Push, FCM, APNs; HMAC-signed webhooks; email out
   (Cloudflare Email Service or SES) and in (Email Routing); Slack (OAuth install, both
-  directions); Twilio SMS and voice (US, plus opt-in countries priced daily per destination, with STOP/HELP/ACK and DTMF ack); remote MCP server at
+  directions); Twilio SMS, MMS, WhatsApp, and voice (US, plus opt-in countries priced daily per destination, with STOP/HELP/ACK and DTMF ack); remote MCP server at
   `/mcp` (API tokens, or OAuth access tokens from Clerk with a per-client spend cap);
   Reticulum/LXMF through the gateway.
 - **SDKs**: TypeScript SDK + CLI + web components (`sdk/js`), Python SDK (`sdk/python`), Rust core
@@ -45,7 +45,7 @@ curl -H "Authorization: Bearer $SUBETHA_TOKEN" https://subetha.us/@me/backups/js
   test (`spec/openapi.yaml`), `llms.txt`, GitHub Pages (with a sample apps page: the live web
   sample, the Expo sample's web build, and Android APKs) and deploy workflows, infrastructure notes
   (`infra/`), legal drafts (`docs/legal/`).
-- **Web console and tools** (`apps/site`): the console (send/receive with attachments, full ntfy fields, inbox priority/tag filters, and direct trace links; topics with aggregate subscriber counts and structured policy controls; endpoints, Slack channel bindings, escalation subscriptions, and an endpoint inspector showing the signed webhook request/response plus an in-browser signature checker; devices including "this browser" as an enrolled device; E2EE topic keys to make, wrap, and unwrap in the browser; tokens with daily/total caps, expiry, origins, and IP allow-lists; billing with top-up, auto-recharge settings, payment receipts, usage chart, and limits; structured trace viewer; audit log; OpenAPI-driven API explorer; "copy as" curl/JS/Python/Swift/Kotlin/Dart), plus a pricing calculator and an offline route simulator at `/tools/` that bundle the relay's own price table and planner, and the Edge lab (sound, animated QR, and Bluetooth between nearby browsers).
+- **Web console and tools** (`apps/site`): the console (send/receive with attachments, full ntfy fields, inbox priority/tag filters, and direct trace links; topics with aggregate subscriber counts and structured policy controls; endpoints, Slack channel bindings, escalation subscriptions, and an endpoint inspector showing the signed webhook request/response plus an in-browser signature checker; devices including "this browser" as an enrolled device and device-approval QR codes; E2EE topic keys to make, wrap, unwrap, and share via QR in the browser; tokens with daily/total caps, expiry, origins, and IP allow-lists; billing with top-up, auto-recharge settings, payment receipts, volume tier pricing, usage chart, and limits; structured trace viewer; audit log; OpenAPI-driven API explorer; "copy as" curl/JS/Python/Swift/Kotlin/Dart), plus a pricing calculator and an offline route simulator at `/tools/` that bundle the relay's own price table and planner, and the Edge lab (sound, animated QR, and Bluetooth between nearby browsers).
 
 ## Repository layout
 

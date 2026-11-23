@@ -1,7 +1,8 @@
 # Cloudflare zone: subetha.us
 
-Short enough to apply by hand; codify in Terraform (`cloudflare` provider) once it stabilizes.
-Open question 5 in PLAN.md (is `subetha.us` on Cloudflare yet?) must be settled first.
+Declarative Terraform for these settings lives in [`infra/terraform/`](terraform/README.md); this
+page documents the same settings for applying by hand. Open question 5 in PLAN.md (is `subetha.us`
+on Cloudflare yet?) must be settled first.
 
 ## Hostnames
 

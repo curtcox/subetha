@@ -30,3 +30,9 @@ samples/android/app/src/main/jniLibs/
 # Browser e2e tests
 e2e/.state/
 playwright-report/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+infra/terraform/terraform.tfvars

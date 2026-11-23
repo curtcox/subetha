@@ -1,0 +1,7 @@
+cloudflare_account_id = "REPLACE_WITH_CLOUDFLARE_ACCOUNT_ID"
+zone_name             = "subetha.us"
+environments          = ["staging", "production"]
+enable_hsts           = false
+pages_subdomain       = ""
+spf_include           = ""
+manage_email_routing  = false

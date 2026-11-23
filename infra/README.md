@@ -10,11 +10,12 @@ environments (PLAN §7, §13).
 |---|---|
 | [`secrets.md`](secrets.md) | Every binding, variable, and secret the Worker reads, and where to get each |
 | [`cloudflare-zone.md`](cloudflare-zone.md) | DNS, custom domains, Email Routing, and zone settings for `subetha.us` |
+| [`terraform/`](terraform/README.md) | Terraform configuration for the Cloudflare zone, DNS, Email Routing, and D1/KV/R2/Queues bindings |
 | [`../.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) | Staging on push to `main`, production on `v*` tags |
 | [`../.github/workflows/pages.yml`](../.github/workflows/pages.yml) | GitHub Pages: docs, build info, pricing report |
 
-Terraform for the zone is not set up yet; the zone settings are short enough to apply by hand
-from `cloudflare-zone.md`.
+Use [`infra/terraform/`](terraform/README.md) to provision the zone settings and Cloudflare bindings
+declaratively, or run the `wrangler` commands below by hand.
 
 ## One-time setup per environment
 

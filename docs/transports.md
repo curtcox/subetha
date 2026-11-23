@@ -15,6 +15,7 @@ entirely on devices and never touch the relay.
 | Slack | `slack` | relay, in/out | channel (via the Slack app) | OAuth install |
 | SMS | `sms` | relay, in/out | E.164, US or an opt-in country | **yes** |
 | Voice | `voice` | relay | E.164, US or an opt-in country | **yes** |
+| WhatsApp | `whatsapp` | relay, in/out | E.164, US or an opt-in country | **yes** |
 | MCP | `mcp` | live (agents) | – | – |
 | Reticulum / LXMF | `lxmf` | gateway | 32-hex LXMF destination | no |
 | Bluetooth LE, audio, QR, LAN | `ble`, `audio`, `qr`, `lan` | edge | – | – (free, SDK only) |
