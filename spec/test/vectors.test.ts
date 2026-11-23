@@ -5,6 +5,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import {
   canonicalEnvelope, canonicalize, decryptEnvelope, deviceKeyFromSeed, encryptEnvelope, hexDecode, hexEncode, isTopic,
   signEnvelope, signRequestV2, utf8, validateEnvelope, verifyEnvelope,
+  ed25519ToX25519Public, isWrappedKey, unwrapTopicKey, wrapAad, wrapTopicKey, x25519SecretFromSeed,
 } from "@subetha/sdk/protocol";
 
 const load = (n: string) => JSON.parse(readFileSync(new URL(`../vectors/${n}`, import.meta.url), "utf8"));
@@ -78,6 +79,28 @@ describe("e2ee vectors", () => {
     expect(await verifyEnvelope(v.encrypted_signed)).toBe(true);
     expect(await decryptEnvelope(v.encrypted_signed, hexDecode(v.key))).toEqual(v.decrypted_signed);
     expect(validateSchema(v.encrypted_signed)).toBe(true);
+  });
+});
+
+describe("key wrap vectors", () => {
+  const v = load("e2ee.json");
+  const w = v.key_wrap;
+  it("wraps deterministically and unwraps", async () => {
+    const seed = hexDecode(w.recipient_seed);
+    const dev = await deviceKeyFromSeed(seed);
+    expect(hexEncode(ed25519ToX25519Public(dev.publicKey))).toBe(w.recipient_x25519_public);
+    expect(hexEncode(await x25519SecretFromSeed(seed))).toBe(w.recipient_x25519_secret);
+    const wrapped = await wrapTopicKey(hexDecode(v.key), { topic: w.wrapped.topic, kid: w.wrapped.kid, to: dev.deviceId }, { ephemeralSecret: hexDecode(w.ephemeral_secret), nonce: hexDecode(w.nonce) });
+    expect(wrapped).toEqual(w.wrapped);
+    const { ct: _ct, ...head } = wrapped;
+    expect(utf8.decode(wrapAad(head))).toBe(w.aad);
+    expect(isWrappedKey(w.wrapped)).toBe(true);
+    expect(hexEncode((await unwrapTopicKey(w.wrapped, seed))!)).toBe(v.key);
+    expect(hexEncode((await unwrapTopicKey(w.wrapped, dev))!)).toBe(v.key);
+  });
+  for (const c of w.invalid) it(`rejects ${c.name}`, async () => expect(await unwrapTopicKey(c.wrapped, hexDecode(w.recipient_seed))).toBeNull());
+  it("converts ed25519 keys to x25519", () => {
+    for (const c of w.ed25519_to_x25519) expect(hexEncode(ed25519ToX25519Public(hexDecode(c.ed25519)))).toBe(c.x25519);
   });
 });
 

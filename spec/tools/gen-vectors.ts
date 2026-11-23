@@ -4,7 +4,7 @@ import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  base64urlEncode, canonicalEnvelope, canonicalize, decryptEnvelope, deviceKeyFromSeed, encryptEnvelope, headersToSign, hexDecode, hexEncode, requestSigningInputV2, signEnvelope, signRequestV2, utf8, type Json,
+  base64urlEncode, canonicalEnvelope, canonicalize, decryptEnvelope, ed25519ToX25519Public, wrapAad, wrapTopicKey, x25519SecretFromSeed, deviceKeyFromSeed, encryptEnvelope, headersToSign, hexDecode, hexEncode, requestSigningInputV2, signEnvelope, signRequestV2, utf8, type Json,
 } from "@subetha/sdk/protocol";
 import {
   audioFrameSamples, audioTones, base45Encode, chunk, encodeBeacon, FountainEncoder, frameBlocks, LAN_CHUNK_MTU, modulate, robustSolitonCdf, SplitMix64,
@@ -132,6 +132,32 @@ write("e2ee.json", {
   encrypted,
   encrypted_signed: encSigned,
   decrypted_signed: await decryptEnvelope(encSigned, key),
+  key_wrap: await (async () => {
+    // §5.1: `key` wrapped for signatures.devices[0] with a fixed ephemeral secret and nonce.
+    const ephemeral = hexDecode("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+    const wrapNonce = hexDecode("c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7");
+    const wrapped = await wrapTopicKey(key, { topic: "@alice/secret", kid: "topic-key-3", to: signer.deviceId }, { ephemeralSecret: ephemeral, nonce: wrapNonce });
+    const { ct: _ct, ...head } = wrapped;
+    return {
+      description: "Wrapped topic key (spec §5.1). Wrapping `key` for `recipient_seed`'s device with `ephemeral_secret` and `nonce` must yield `wrapped` exactly; unwrapping it with `recipient_seed` must return `key`. Each entry of `invalid` must fail to unwrap with `recipient_seed`. `ed25519_to_x25519` pairs Ed25519 public keys with their Montgomery u-coordinates.",
+      recipient_seed: seeds[0],
+      recipient_x25519_public: hexEncode(ed25519ToX25519Public(signer.publicKey)),
+      recipient_x25519_secret: hexEncode(await x25519SecretFromSeed(signer.seed!)),
+      ephemeral_secret: hexEncode(ephemeral),
+      nonce: hexEncode(wrapNonce),
+      aad: new TextDecoder().decode(wrapAad(head)),
+      wrapped,
+      invalid: [
+        { name: "other recipient", wrapped: { ...wrapped, to: devices[1]!.device_id } },
+        { name: "kid changed", wrapped: { ...wrapped, kid: "topic-key-4" } },
+        { name: "topic changed", wrapped: { ...wrapped, topic: "@alice/other" } },
+        { name: "ciphertext flipped", wrapped: { ...wrapped, ct: (wrapped.ct[0] === "A" ? "B" : "A") + wrapped.ct.slice(1) } },
+        { name: "low-order epk", wrapped: { ...wrapped, epk: base64urlEncode(new Uint8Array(32)) } },
+        { name: "unknown alg", wrapped: { ...wrapped, alg: "x25519-aes256gcm" } },
+      ],
+      ed25519_to_x25519: devices.map((d) => ({ ed25519: d.public_key, x25519: hexEncode(ed25519ToX25519Public(hexDecode(d.public_key))) })),
+    };
+  })(),
 });
 
 // ---- edge framings (spec §11) ----

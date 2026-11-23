@@ -6,3 +6,4 @@ export * from "./request.ts";
 export * from "./topic.ts";
 export * from "./ulid.ts";
 export { xchachaSeal, xchachaOpen, hchacha20, poly1305 } from "./xchacha.ts";
+export * from "./keywrap.ts";

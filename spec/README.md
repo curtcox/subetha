@@ -107,6 +107,39 @@ Relays route ciphertext and never see keys. Signing happens **after** encryption
 cover the ciphertext. Decryption restores the protected fields, removes `enc`, and leaves every
 other field (including `sender` and `sig`) as received.
 
+### 5.1 Wrapped topic keys
+
+A topic key can be handed to an enrolled device through the relay by sealing it to the device's
+identity key. The relay stores and serves wrapped keys but can't open them.
+
+```jsonc
+{
+  "alg": "x25519-xchacha20poly1305",
+  "topic": "@alice/secret",
+  "kid": "topic-key-3",          // 1–64 of A–Z a–z 0–9 _ . -
+  "to": "dev_…",                 // recipient device id (§1.3)
+  "epk": "<base64url, 32 bytes>", // ephemeral X25519 public key
+  "nonce": "<base64url, 24 bytes>",
+  "ct": "<base64url, 48 bytes>"   // the sealed 32-byte topic key
+}
+```
+
+To wrap `key` for device `to`:
+
+1. `R` = the Montgomery u-coordinate of `to`'s Ed25519 public key, `u = (1 + y) / (1 − y) mod
+   2^255 − 19`, as 32 little-endian bytes. A public key that doesn't decompress to a curve point
+   is rejected.
+2. Pick a random X25519 secret `e`; `epk = X25519(e, 9)`; `shared = X25519(e, R)`. An all-zero
+   `shared` (low-order `R`) is rejected.
+3. `k = SHA-256("subetha-wrap-v1\n" ‖ shared ‖ epk ‖ R)`.
+4. `ct = XChaCha20-Poly1305(k, nonce, plaintext = key, aad = A)`, where `A` is the canonical
+   form (§3) of the object above without `ct`.
+
+To unwrap, the device derives its X25519 secret as the first 32 bytes of `SHA-512(seed)` (the
+same expanded secret Ed25519 uses; X25519 clamps it), checks that `to` is its own id, computes
+`shared = X25519(secret, epk)` (rejecting all-zero), then `k` and the AEAD as above. Any failure
+means the wrapped key is ignored.
+
 ## 6. Dedupe
 
 Receivers keep a set of recently seen ids (at least the ids of messages whose `expires` hasn't

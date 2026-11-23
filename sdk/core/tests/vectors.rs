@@ -164,6 +164,31 @@ fn e2ee_decrypted_signed() {
     assert!(dec.get("enc").is_none());
 }
 
+#[test]
+fn key_wrap_vectors() {
+    use subetha_core::keywrap::{ed25519_to_x25519_public, unwrap_topic_key, wrap_aad, wrap_topic_key_with, x25519_secret_from_seed, WrappedKey};
+    let v = load("e2ee.json");
+    let key = seed(&v["key"]);
+    let w = &v["key_wrap"];
+    let dev = DeviceKey::from_seed(&seed(&w["recipient_seed"]));
+    assert_eq!(hex_encode(&ed25519_to_x25519_public(&dev.public_key()).unwrap()), w["recipient_x25519_public"].as_str().unwrap());
+    assert_eq!(hex_encode(&x25519_secret_from_seed(&dev.seed())), w["recipient_x25519_secret"].as_str().unwrap());
+    let nonce: [u8; 24] = hex_decode(w["nonce"].as_str().unwrap()).unwrap().try_into().unwrap();
+    let expected: WrappedKey = serde_json::from_value(w["wrapped"].clone()).unwrap();
+    let wrapped = wrap_topic_key_with(&key, &expected.topic, &expected.kid, dev.device_id(), seed(&w["ephemeral_secret"]), nonce).unwrap();
+    assert_eq!(wrapped, expected, "wrapped key must match exactly");
+    assert_eq!(wrap_aad(&wrapped).unwrap(), w["aad"].as_str().unwrap());
+    assert_eq!(unwrap_topic_key(&expected, &dev), Some(key));
+    for c in w["invalid"].as_array().unwrap() {
+        let bad: WrappedKey = serde_json::from_value(c["wrapped"].clone()).unwrap();
+        assert_eq!(unwrap_topic_key(&bad, &dev), None, "{}", c["name"]);
+    }
+    for c in w["ed25519_to_x25519"].as_array().unwrap() {
+        let pk = seed(&c["ed25519"]);
+        assert_eq!(hex_encode(&ed25519_to_x25519_public(&pk).unwrap()), c["x25519"].as_str().unwrap());
+    }
+}
+
 // ---- edge framings (spec §11) ----
 
 #[test]
