@@ -207,6 +207,17 @@
           <h3>Top up</h3>
           <p class="muted">Prepaid balance, no subscription. A top-up fee covers card processing.</p>
           <div class="row"><input id="topupAmt" type="number" value="10" min="5" step="1"><button id="topupBtn">Pay with Stripe</button></div>
+          <p><label class="check"><input id="topupSaveCard" type="checkbox"> Save card for optional auto-recharge</label></p>
+          <hr>
+          <h4>Auto-recharge</h4>
+          <p id="arStatus" class="muted">Loading…</p>
+          <div id="arForm" hidden>
+            <div class="row">
+              <div><label for="arThreshold">When below (USD)</label><input id="arThreshold" type="number" min="0" step="1" value="2"></div>
+              <div><label for="arAmount">Top up (USD)</label><input id="arAmount" type="number" min="5" step="1" value="10"></div>
+            </div>
+            <p class="row"><button id="arSave" class="secondary">Save auto-recharge</button><button id="arOff" class="secondary" hidden>Turn off</button> <span id="arMsg" class="muted"></span></p>
+          </div>
         </div>
         <div class="card"><h3>Pricing</h3><div id="priceTable" class="muted">Loading…</div><p><a href="/tools/pricing.html">Pricing calculator →</a></p></div>
         <div class="card">

@@ -153,7 +153,7 @@ app.get("/v1/account", async (c) => {
   const acct = await getAccount(c.env, id);
   if (!acct) throw new ApiError("not_found");
   const bal = await accountStub(c.env, id).balance();
-  return c.json({ id: acct.id, handle: acct.handle, email: acct.email, tier: tierFor(PRICES, acct.topups_12mo_micros), balance_usd_micros: bal.available, reserved_usd_micros: bal.reserved, daily_cap_micros: acct.daily_cap_micros, oauth_daily_cap_micros: acct.oauth_daily_cap_micros ?? null, telephony_countries: JSON.parse(acct.telephony_countries ?? "[]") as string[], paused: !!acct.paused, created_at: acct.created_at });
+  return c.json({ id: acct.id, handle: acct.handle, email: acct.email, tier: tierFor(PRICES, acct.topups_12mo_micros), balance_usd_micros: bal.available, reserved_usd_micros: bal.reserved, daily_cap_micros: acct.daily_cap_micros, oauth_daily_cap_micros: acct.oauth_daily_cap_micros ?? null, telephony_countries: JSON.parse(acct.telephony_countries ?? "[]") as string[], has_saved_card: !!acct.stripe_customer_id, auto_recharge: acct.auto_recharge ? (JSON.parse(acct.auto_recharge) as { threshold_micros: number; amount_micros: number }) : null, paused: !!acct.paused, created_at: acct.created_at });
 });
 
 app.post("/v1/account", async (c) => {

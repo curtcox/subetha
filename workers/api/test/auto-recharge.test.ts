@@ -15,13 +15,17 @@ async function hook(evt: unknown) {
 describe("auto-recharge", () => {
   it("needs a saved card, charges off-session when low, and credits via webhook", async () => {
     const a = await bootstrap("recharger", 0);
+    const getAccount = async () => (await (await SELF.fetch(`${BASE}/v1/account`, { headers: auth(a.token) })).json()) as { has_saved_card: boolean; auto_recharge: { threshold_micros: number; amount_micros: number } | null };
     const patch = (body: unknown) => SELF.fetch(`${BASE}/v1/account`, { method: "PATCH", headers: auth(a.token), body: JSON.stringify(body) });
+    expect(await getAccount()).toMatchObject({ has_saved_card: false, auto_recharge: null });
     expect((await patch({ auto_recharge: { threshold_usd: 2, amount_usd: 10 } })).status).toBe(409);
 
     // First top-up through Checkout saves the customer.
     await hook({ id: "evt_ar1", type: "checkout.session.completed", data: { object: { id: "cs_ar1", payment_status: "paid", amount_total: 500, customer: "cus_123", metadata: { account_id: a.account_id } } } });
     expect(await balance(a.token)).toBe(5_000_000 - 575_000);
+    expect(await getAccount()).toMatchObject({ has_saved_card: true, auto_recharge: null });
     expect((await patch({ auto_recharge: { threshold_usd: 5, amount_usd: 10 } })).status).toBe(200);
+    expect(await getAccount()).toMatchObject({ has_saved_card: true, auto_recharge: { threshold_micros: 5_000_000, amount_micros: 10_000_000 } });
 
     const calls: string[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {

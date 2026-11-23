@@ -380,7 +380,7 @@ export class SubEtha {
   }
 
   // ---- control plane ----
-  account() { return this.request<{ id: string; handle: string | null; balance_usd_micros: number; tier: string }>("GET", "/v1/account"); }
+  account() { return this.request<{ id: string; handle: string | null; balance_usd_micros: number; reserved_usd_micros?: number; tier: string; has_saved_card?: boolean; auto_recharge?: { threshold_micros: number; amount_micros: number } | null }>("GET", "/v1/account"); }
   balance() { return this.request<{ available_usd_micros: number; reserved_usd_micros: number }>("GET", "/v1/balance"); }
   ledger(after = 0) { return this.request<{ entries: unknown[] }>("GET", `/v1/ledger?after=${after}`); }
   /**
@@ -458,5 +458,12 @@ export class SubEtha {
   topics() { return this.request<{ topics: { name: string; policy: Record<string, unknown> }[] }>("GET", "/v1/topics"); }
   configureTopic(topic: string, policy: Record<string, unknown>) { return this.request("PUT", `/v1/topics/${topic}`, { policy }); }
   trace(topic: string, id: string) { return this.request<Record<string, unknown>>("GET", `/v1/traces/${id}?topic=${encodeURIComponent(topic)}`); }
-  checkout(amountUsd: number) { return this.request<{ url: string }>("POST", "/v1/billing/checkout", { amount_usd: amountUsd }); }
+  checkout(amountUsd: number, o: { saveCard?: boolean; successUrl?: string; cancelUrl?: string } = {}) {
+    return this.request<{ url: string }>("POST", "/v1/billing/checkout", {
+      amount_usd: amountUsd,
+      ...(o.saveCard ? { save_card: true } : {}),
+      ...(o.successUrl ? { success_url: o.successUrl } : {}),
+      ...(o.cancelUrl ? { cancel_url: o.cancelUrl } : {}),
+    });
+  }
 }

@@ -330,7 +330,44 @@ $("telSave").onclick = async () => {
   } catch (e) { $("telMsg").textContent = `${e.code}: ${e.message}`; }
 };
 
+function renderAutoRecharge() {
+  const hasCard = !!me.has_saved_card;
+  const cfg = me.auto_recharge ?? null;
+  $("arForm").hidden = !hasCard;
+  $("arOff").hidden = !cfg;
+  if (!hasCard) {
+    $("arStatus").textContent = "Top up once with \"Save card\" checked to enable optional auto-recharge (not a subscription; stops if a card declines).";
+    return;
+  }
+  $("arStatus").textContent = cfg
+    ? `Active: tops up ${usd(cfg.amount_micros)} when available balance drops below ${usd(cfg.threshold_micros)}.`
+    : "Card saved on file. Auto-recharge is off.";
+  if (cfg) {
+    $("arThreshold").value = toUsdInput(cfg.threshold_micros);
+    $("arAmount").value = toUsdInput(cfg.amount_micros);
+  }
+}
+$("arSave").onclick = async () => {
+  try {
+    await client.request("PATCH", "/v1/account", { auto_recharge: { threshold_usd: Number($("arThreshold").value), amount_usd: Number($("arAmount").value) } });
+    me = await client.account();
+    renderAutoRecharge();
+    $("arMsg").textContent = "Saved.";
+  } catch (e) { $("arMsg").textContent = `${e.code ?? "error"}: ${e.message}`; }
+};
+$("arOff").onclick = async () => {
+  try {
+    await client.request("PATCH", "/v1/account", { auto_recharge: null });
+    me = await client.account();
+    renderAutoRecharge();
+    $("arMsg").textContent = "Turned off.";
+  } catch (e) { $("arMsg").textContent = `${e.code ?? "error"}: ${e.message}`; }
+};
+
 async function loadBilling() {
+  me = await client.account();
+  showBalance(me);
+  renderAutoRecharge();
   loadTelephonyCountries();
   client.request("GET", "/v1/usage?days=30").then((u) => renderUsageChart($("usageChart"), u)).catch((e) => { $("usageChart").textContent = `${e.code ?? "error"}: ${e.message}`; });
   $("capDaily").value = toUsdInput(me.daily_cap_micros);
@@ -360,7 +397,7 @@ async function loadPayments() {
   } catch (e) { $("paymentRows").innerHTML = `<tr><td colspan="6">${esc(e.code ?? "error")}: ${esc(e.message)}</td></tr>`; }
 }
 $("topupBtn").onclick = async () => {
-  try { location.href = (await client.checkout(Number($("topupAmt").value))).url; } catch (e) { alert(`${e.code}: ${e.message}`); }
+  try { location.href = (await client.checkout(Number($("topupAmt").value), { saveCard: $("topupSaveCard").checked })).url; } catch (e) { alert(`${e.code}: ${e.message}`); }
 };
 
 $("traceBtn").onclick = async () => {

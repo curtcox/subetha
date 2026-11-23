@@ -2018,6 +2018,15 @@ components:
         daily_cap_micros: { type: [integer, "null"], description: Account-wide daily spend cap. }
         oauth_daily_cap_micros: { type: [integer, "null"], description: "Daily cap per OAuth client; null = the $1 default, 0 = OAuth off." }
         telephony_countries: { type: array, items: { type: string }, description: "Opt-in countries outside the US for SMS/voice endpoints." }
+        has_saved_card: { type: boolean, description: "Whether a Stripe card is saved on file for auto-recharge." }
+        auto_recharge:
+          description: "Configured off-session top-up rule, or null when disabled."
+          oneOf:
+            - type: "null"
+            - type: object
+              properties:
+                threshold_micros: { type: integer }
+                amount_micros: { type: integer }
         paused: { type: boolean }
         created_at: { type: integer }
 

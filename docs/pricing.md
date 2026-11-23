@@ -48,8 +48,9 @@ generated from the price list at build time, so it always matches what the relay
 
 ### Auto-recharge
 
-Optional, and not a subscription: top up once with `"save_card": true` in the checkout request,
-then turn it on with `PATCH /v1/account`:
+Optional, and not a subscription: top up once with `"save_card": true` in the checkout request (or
+tick **Save card for optional auto-recharge** in the console's Billing tab), then turn it on in the
+console or with `PATCH /v1/account`:
 
 ```json
 { "auto_recharge": { "threshold_usd": 2, "amount_usd": 20 } }
