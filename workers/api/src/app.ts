@@ -4,7 +4,7 @@ import { Hono, type Context } from "hono";
 import { canonicalize, isTopic, validateEnvelope, ulid, type Envelope, type Json } from "@subetha/sdk/protocol";
 import { actionPriceMicros, topupSplit, tierFor, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
-import { accountTransportsOf, audit, autoCreateOwnerFor, createAccount, getAccount, invalidateAccount, recordTopic, syncAccountTopics, validateHandle, validatePolicy } from "./accounts.ts";
+import { accountTier, accountTransportsOf, audit, autoCreateOwnerFor, createAccount, getAccount, invalidateAccount, recomputeAccountTopups12mo, recordTopic, syncAccountTier, syncAccountTopics, validateHandle, validatePolicy } from "./accounts.ts";
 import { authenticate, callerOf, invalidateToken, newTokenSecret, requireAdmin, scopeAllows, validateScopes, validateTransports } from "./auth.ts";
 import { sha256Hex } from "./crypto.ts";
 import { parseCidr } from "./ip.ts";
@@ -306,11 +306,23 @@ app.post("/v1/hooks/stripe", async (c) => {
     const { creditMicros, feeMicros } = topupSplit(PRICES, amountMicros);
     await accountStub(c.env, accountId).topup(creditMicros, String(obj.id), `stripe amount=${amountMicros} fee=${feeMicros}`);
     emitMetric(c.env, { accountId, event: "topup", revenueMicros: feeMicros, detail: "checkout" });
-    if (typeof obj.payment_intent === "string") await c.env.DB.prepare("INSERT OR IGNORE INTO stripe_payments (payment_intent, account_id, amount_micros, fee_micros, kind, created_at) VALUES (?, ?, ?, ?, 'checkout', ?)").bind(obj.payment_intent, accountId, amountMicros, feeMicros, Date.now()).run();
-    await c.env.DB.batch([
-      c.env.DB.prepare("INSERT INTO stripe_events (id, type, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?, ?)").bind(evt.id, evt.type, accountId, amountMicros, Date.now()),
-      c.env.DB.prepare("UPDATE accounts SET topups_12mo_micros = topups_12mo_micros + ?, stripe_customer_id = COALESCE(?, stripe_customer_id) WHERE id = ?").bind(amountMicros, typeof obj.customer === "string" ? obj.customer : null, accountId),
-    ]);
+    if (typeof obj.payment_intent === "string") {
+      await c.env.DB.prepare("INSERT OR IGNORE INTO stripe_payments (payment_intent, account_id, amount_micros, fee_micros, kind, created_at) VALUES (?, ?, ?, ?, 'checkout', ?)").bind(obj.payment_intent, accountId, amountMicros, feeMicros, Date.now()).run();
+      await c.env.DB.batch([
+        c.env.DB.prepare("INSERT INTO stripe_events (id, type, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?, ?)").bind(evt.id, evt.type, accountId, amountMicros, Date.now()),
+        c.env.DB.prepare("UPDATE accounts SET stripe_customer_id = COALESCE(?, stripe_customer_id) WHERE id = ?").bind(typeof obj.customer === "string" ? obj.customer : null, accountId),
+      ]);
+      await recomputeAccountTopups12mo(c.env, accountId);
+    } else {
+      const prev = await getAccount(c.env, accountId);
+      const prevTier = tierFor(PRICES, prev?.topups_12mo_micros ?? 0);
+      await c.env.DB.batch([
+        c.env.DB.prepare("INSERT INTO stripe_events (id, type, account_id, amount_micros, created_at) VALUES (?, ?, ?, ?, ?)").bind(evt.id, evt.type, accountId, amountMicros, Date.now()),
+        c.env.DB.prepare("UPDATE accounts SET topups_12mo_micros = topups_12mo_micros + ?, stripe_customer_id = COALESCE(?, stripe_customer_id) WHERE id = ?").bind(amountMicros, typeof obj.customer === "string" ? obj.customer : null, accountId),
+      ]);
+      const nextTier = tierFor(PRICES, (prev?.topups_12mo_micros ?? 0) + amountMicros);
+      if (nextTier !== prevTier) await syncAccountTier(c.env, accountId, nextTier);
+    }
     await invalidateAccount(c.env, accountId);
   } else if ((evt.type === "payment_intent.succeeded" || evt.type === "payment_intent.payment_failed") && (obj.metadata as Record<string, string> | undefined)?.auto_recharge === "1") {
     const accountId = (obj.metadata as Record<string, string>).account_id!;
@@ -320,7 +332,7 @@ app.post("/v1/hooks/stripe", async (c) => {
       await accountStub(c.env, accountId).topup(creditMicros, String(obj.id), `auto-recharge amount=${amountMicros} fee=${feeMicros}`);
       emitMetric(c.env, { accountId, event: "topup", revenueMicros: feeMicros, detail: "auto_recharge" });
       await c.env.DB.prepare("INSERT OR IGNORE INTO stripe_payments (payment_intent, account_id, amount_micros, fee_micros, kind, created_at) VALUES (?, ?, ?, ?, 'auto_recharge', ?)").bind(String(obj.id), accountId, amountMicros, feeMicros, Date.now()).run();
-      await c.env.DB.prepare("UPDATE accounts SET topups_12mo_micros = topups_12mo_micros + ? WHERE id = ?").bind(amountMicros, accountId).run();
+      await recomputeAccountTopups12mo(c.env, accountId);
     } else {
       await accountStub(c.env, accountId).autoRechargeFailed("card declined");
       await c.env.DB.prepare("UPDATE accounts SET auto_recharge = NULL WHERE id = ?").bind(accountId).run();
@@ -341,12 +353,14 @@ app.post("/v1/hooks/stripe", async (c) => {
         if (r.unrecovered) await audit(c.env, pay.account_id, "stripe", "chargeback.unrecovered", { micros: r.unrecovered });
         await tripAccountTelephonyCircuit(c.env, pay.account_id, "chargeback dispute");
         emitMetric(c.env, { accountId: pay.account_id, event: "dispute", outcome: "disputed", providerCostMicros: deducted });
+        await recomputeAccountTopups12mo(c.env, pay.account_id);
       } else if (evt.type === "charge.refunded") {
         const total = Number(obj.amount_refunded ?? 0) * 10_000;
         deducted = Math.max(0, total - pay.refunded_micros); // only the newly refunded part
         if (deducted) {
           await c.env.DB.prepare("UPDATE stripe_payments SET refunded_micros = ? WHERE payment_intent = ?").bind(total, pi).run();
           await accountStub(c.env, pay.account_id).adjust(-deducted, `refund:${pi}:${total}`, "refund: stripe");
+          await recomputeAccountTopups12mo(c.env, pay.account_id);
         }
       }
     }
@@ -573,12 +587,15 @@ async function doPublish(c: C, parsed: ParsedPublish): Promise<Response> {
   let result;
   try {
     const autoOwner = await autoCreateOwnerFor(c.env, caller.accountId, env.topic);
-    const autoAccountTransports = autoOwner ? accountTransportsOf(await getAccount(c.env, autoOwner)) : undefined;
+    const autoOwnerAcct = autoOwner ? await getAccount(c.env, autoOwner) : null;
+    const autoAccountTransports = autoOwner ? accountTransportsOf(autoOwnerAcct) : undefined;
+    const autoCreateTier = autoOwner ? tierFor(PRICES, autoOwnerAcct?.topups_12mo_micros ?? 0) : undefined;
     result = unwrap(await topicStub(c.env, env.topic).publish({
       envelope: env,
       caller,
       autoCreateOwner: autoOwner,
       autoCreateAccountTransports: autoAccountTransports,
+      autoCreateTier,
       idempotencyKey: parsed.idempotencyKey,
       bodyHash,
       dryRun: parsed.dryRun,
@@ -600,7 +617,8 @@ app.get("/file/:id/:name?", async (c) => {
   const row = await c.env.DB.prepare("SELECT * FROM files WHERE id = ?").bind(c.req.param("id")).first<{ id: string; owner_account_id: string; name: string; type: string; expires: number }>();
   if (!row || !c.env.FILES || row.expires < Math.floor(Date.now() / 1000)) throw new ApiError("not_found", "attachment expired or not found");
   // Downloads are metered like any other request, paid by the topic owner.
-  const charge = await accountStub(c.env, row.owner_account_id).charge(actionPriceMicros(PRICES, "api_request"), `dl:${row.id}:${ulid()}`, null, {});
+  const dlTier = await accountTier(c.env, row.owner_account_id);
+  const charge = await accountStub(c.env, row.owner_account_id).charge(actionPriceMicros(PRICES, "api_request", dlTier), `dl:${row.id}:${ulid()}`, null, {});
   if (!charge.ok) throw new ApiError("insufficient_balance", "the topic owner's balance can't cover this download");
   const obj = await c.env.FILES.get(`att/${row.id}`);
   if (!obj) throw new ApiError("not_found");

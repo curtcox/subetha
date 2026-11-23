@@ -137,6 +137,12 @@ export class TopicDO extends DurableObject<Env> {
     this.kvPut("account_transports", this.accountTransports);
   }
 
+  async setTier(tier: string): Promise<void> {
+    if (!this.meta) return;
+    this.meta = { ...this.meta, tier };
+    this.kvPut("meta", this.meta);
+  }
+
   async getMeta(): Promise<TopicMeta | null> {
     return this.meta;
   }
@@ -324,7 +330,7 @@ export class TopicDO extends DurableObject<Env> {
     let created = false;
     if (!this.meta) {
       if (!input.autoCreateOwner) throw rpcError("no_funded_owner", "topic has no owner; create it first");
-      await this.configure({ name: input.envelope.topic, owner: input.autoCreateOwner, policy: {}, created_at: Date.now() }, input.autoCreateAccountTransports);
+      await this.configure({ name: input.envelope.topic, owner: input.autoCreateOwner, policy: {}, created_at: Date.now(), tier: input.autoCreateTier ?? "standard" }, input.autoCreateAccountTransports);
       created = true;
     }
     const meta = this.meta!;
@@ -797,7 +803,7 @@ export class TopicDO extends DurableObject<Env> {
 }
 
 /** Typed RPC surface (Envelope's index signature defeats the generated Rpc types). */
-export type TopicRpc = Pick<TopicDO, "configure" | "destroy" | "setAccountTransports" | "getMeta" | "subscriberCounts" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases">;
+export type TopicRpc = Pick<TopicDO, "configure" | "destroy" | "setAccountTransports" | "setTier" | "getMeta" | "subscriberCounts" | "setSubscriptions" | "publish" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases">;
 
 export function topicStub(env: Env, topic: string): TopicRpc {
   return env.TOPIC.get(env.TOPIC.idFromName(topic)) as unknown as TopicRpc;

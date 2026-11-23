@@ -1,8 +1,8 @@
 // Scheduled jobs (PLAN §7, §8, §14): rent metering, freeze/cleanup, reconciliation, Twilio
 // repricing, and the nightly D1 backup.
-import { livePriceMicros, rentNanos, type PriceTable, type SkuPrice } from "@subetha/pricing";
+import { livePriceMicros, rentNanos, tierFor, type PriceTable, type SkuPrice } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
-import { audit, invalidateAccount } from "./accounts.ts";
+import { audit, invalidateAccount, recomputeAccountTopups12mo } from "./accounts.ts";
 import { backupDatabase } from "./backup.ts";
 import { syncAccountEndpoints } from "./control.ts";
 import { accountStub } from "./durable/account.ts";
@@ -35,6 +35,7 @@ export async function tripAccountTelephonyCircuit(env: Env, accountId: string, r
 
 export async function runCron(cron: string, env: Env, now: number) {
   if (cron === "17 3 * * *") {
+    await refreshVolumeTiers(env, now);
     await meterRent(env, now);
     await reconcile(env, now);
     await checkTwilioPrices(env);
@@ -48,17 +49,24 @@ export async function runCron(cron: string, env: Env, now: number) {
   }
 }
 
+/** Recalculates rolling 12-month top-ups from stripe_payments so expired top-ups drop off volume tiers. */
+export async function refreshVolumeTiers(env: Env, now: number) {
+  const { results } = await env.DB.prepare("SELECT DISTINCT account_id FROM stripe_payments").all<{ account_id: string }>();
+  for (const r of results) await recomputeAccountTopups12mo(env, r.account_id, now);
+}
+
 /** Daily rent for enrolled devices and verified endpoints, charged in arrears for one day. */
 export async function meterRent(env: Env, now: number) {
   const day = new Date(now).toISOString().slice(0, 10);
   const { results } = await env.DB.prepare(
-    `SELECT a.id, a.email, a.frozen_since,
+    `SELECT a.id, a.email, a.frozen_since, a.topups_12mo_micros,
       (SELECT COUNT(*) FROM devices d WHERE d.account_id = a.id AND d.revoked_at IS NULL) AS devices,
       (SELECT COUNT(*) FROM endpoints e WHERE e.account_id = a.id AND e.verified_at IS NOT NULL) AS endpoints
-     FROM accounts a`).all<{ id: string; email: string | null; frozen_since: number | null; devices: number; endpoints: number }>();
+     FROM accounts a`).all<{ id: string; email: string | null; frozen_since: number | null; topups_12mo_micros: number; devices: number; endpoints: number }>();
   for (const a of results) {
     if (!a.devices && !a.endpoints) continue;
-    const nanos = rentNanos(PRICES, "device_day", a.devices) + rentNanos(PRICES, "endpoint_day", a.endpoints);
+    const tier = tierFor(PRICES, a.topups_12mo_micros ?? 0);
+    const nanos = rentNanos(PRICES, "device_day", a.devices, tier) + rentNanos(PRICES, "endpoint_day", a.endpoints, tier);
     const micros = Math.ceil(nanos / 1000);
     const r = await accountStub(env, a.id).charge(micros, `rent:${day}`, null, {}, true);
     if (r.ok) {

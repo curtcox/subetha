@@ -4,6 +4,7 @@
 import { isTopic, utf8 } from "@subetha/sdk/protocol";
 import { actionPriceMicros, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
+import { accountTier } from "./accounts.ts";
 import { accountStub } from "./durable/account.ts";
 import { topicStub } from "./durable/topic.ts";
 import type { Env } from "./types.ts";
@@ -107,7 +108,7 @@ export async function handleInboundEmail(message: ForwardableEmailMessage, env: 
   const parsed = parseEmail(raw);
   // Message-ID is sender-controlled, so scope it to the sender and topic.
   const msgId = await sha256Hex(`${topic}\n${from}\n${message.headers.get("message-id") ?? `${Date.now()}`}`);
-  const inPrice = actionPriceMicros(PRICES, "inbound_email");
+  const inPrice = actionPriceMicros(PRICES, "inbound_email", await accountTier(env, meta.owner));
   const charge = await accountStub(env, meta.owner).charge(inPrice, `inmail:${msgId}`, null, {}, true);
   if (!charge.ok) return message.setReject("topic owner's balance is empty");
   emitMetric(env, { accountId: meta.owner, event: "inbound_email", transport: "email", sku: "inbound_email", revenueMicros: inPrice, providerCostMicros: estimatedCostMicros("inbound_email"), detail: topic });

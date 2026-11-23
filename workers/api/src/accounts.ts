@@ -1,8 +1,13 @@
 // Account directory (D1) helpers.
 import { HANDLE_RE, ulid, type Transport } from "@subetha/sdk/protocol";
+import { tierFor, type PriceTable } from "@subetha/pricing";
+import prices from "@subetha/pricing/prices.json";
 import { topicStub } from "./durable/topic.ts";
 import { ApiError } from "./errors.ts";
 import type { Env, TopicMeta, TopicPolicy } from "./types.ts";
+
+const PRICES = prices as unknown as PriceTable;
+const YEAR_MS = 365 * 86_400_000;
 
 export interface AccountRow { id: string; handle: string | null; clerk_id: string | null; email: string | null; topups_12mo_micros: number; daily_cap_micros: number | null; monthly_cap_micros?: number | null; allow_transports?: string | null; deny_transports?: string | null; oauth_daily_cap_micros?: number | null; telephony_countries?: string | null; stripe_customer_id?: string | null; auto_recharge?: string | null; paused: number; created_at: number }
 
@@ -17,6 +22,50 @@ export function accountTransportsOf(acct: AccountRow | null): { allow: Transport
 export async function syncAccountTopics(env: Env, accountId: string, allow: Transport[] | null, deny: Transport[] | null) {
   const { results } = await env.DB.prepare("SELECT name FROM topics WHERE owner_account_id = ?").bind(accountId).all<{ name: string }>();
   for (const r of results) await topicStub(env, r.name).setAccountTransports(allow, deny);
+}
+
+/** Propagates the account's pricing tier to all of its topics' Durable Objects (PLAN §8, rule 7). */
+export async function syncAccountTier(env: Env, accountId: string, tier: string) {
+  const { results } = await env.DB.prepare("SELECT name FROM topics WHERE owner_account_id = ?").bind(accountId).all<{ name: string }>();
+  for (const r of results) await topicStub(env, r.name).setTier(tier);
+}
+
+/** Current volume-discount tier for an account (from cached account row). */
+export async function accountTier(env: Env, accountId: string): Promise<string> {
+  const acct = await getAccount(env, accountId);
+  return tierFor(PRICES, acct?.topups_12mo_micros ?? 0);
+}
+
+/**
+ * Recomputes rolling 12-month net top-ups from stripe_payments (excluding disputed payments and
+ * subtracting refunds), updates accounts.topups_12mo_micros, and propagates any tier change to
+ * every topic owned by the account.
+ */
+export async function recomputeAccountTopups12mo(
+  env: Env,
+  accountId: string,
+  now = Date.now(),
+): Promise<{ topups12mo: number; tier: string; tierChanged: boolean }> {
+  const prevRow = await env.DB.prepare("SELECT topups_12mo_micros FROM accounts WHERE id = ?").bind(accountId).first<{ topups_12mo_micros: number }>();
+  const prev = Number(prevRow?.topups_12mo_micros ?? 0);
+  const sumRow = await env.DB.prepare(
+    `SELECT COALESCE(SUM(MAX(0, amount_micros - refunded_micros)), 0) AS total
+       FROM stripe_payments
+      WHERE account_id = ? AND disputed = 0 AND created_at >= ?`,
+  ).bind(accountId, now - YEAR_MS).first<{ total: number }>();
+  const next = Math.max(0, Number(sumRow?.total ?? 0));
+  const prevTier = tierFor(PRICES, prev);
+  const nextTier = tierFor(PRICES, next);
+  if (next !== prev) {
+    await env.DB.prepare("UPDATE accounts SET topups_12mo_micros = ? WHERE id = ?").bind(next, accountId).run();
+    await invalidateAccount(env, accountId);
+  }
+  const tierChanged = nextTier !== prevTier;
+  if (tierChanged) {
+    await syncAccountTier(env, accountId, nextTier);
+    await audit(env, accountId, "system", "account.tier_changed", { from: prevTier, to: nextTier, topups_12mo_micros: next });
+  }
+  return { topups12mo: next, tier: nextTier, tierChanged };
 }
 
 const RESERVED_HANDLES = new Set(["admin", "api", "subetha", "root", "system", "support", "help", "www", "mail", "docs", "console", "status", "billing", "security", "abuse", "ntfy", "mcp", "v1"]);

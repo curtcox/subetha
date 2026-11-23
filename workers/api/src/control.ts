@@ -4,7 +4,7 @@ import type { Context, Hono } from "hono";
 import { isTopic, ulid, type Transport } from "@subetha/sdk/protocol";
 import { actionPriceMicros, skuForTransport, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
-import { audit } from "./accounts.ts";
+import { accountTier, audit } from "./accounts.ts";
 import { discardAttachment, recordAttachment, storeAttachment } from "./attachments.ts";
 import { requireAdmin } from "./auth.ts";
 import { randomBase32, randomDigits, sha256Hex, timingSafeEqual } from "./crypto.ts";
@@ -87,12 +87,13 @@ export const optedCountries = (json: string | null | undefined): string[] => (js
 export async function telephonyUnitPrice(env: Env, accountId: string, kind: "sms" | "voice", address: string): Promise<number> {
   const country = phoneCountry(address);
   if (!country) throw new ApiError("bad_request", "unsupported phone number");
-  if (country === "US") return actionPriceMicros(PRICES, skuForTransport(PRICES, kind)!);
+  const tier = await accountTier(env, accountId);
+  if (country === "US") return actionPriceMicros(PRICES, skuForTransport(PRICES, kind)!, tier);
   const row = await env.DB.prepare("SELECT telephony_countries FROM accounts WHERE id = ?").bind(accountId).first<{ telephony_countries: string | null }>();
   if (!optedCountries(row?.telephony_countries).includes(country)) {
     throw new ApiError("forbidden", `${INTL_COUNTRIES[country]!.name} (${country}) isn't enabled for this account; add it to telephony_countries with PATCH /v1/account`);
   }
-  const p = destUnitPrice(await loadDestPrices(env), kind, country, "standard");
+  const p = destUnitPrice(await loadDestPrices(env), kind, country, tier);
   if (p === null) throw new ApiError("provider_unavailable", `no current ${kind} price for ${country}; try again later`);
   return p;
 }
@@ -130,7 +131,7 @@ async function sendCode(env: Env, e: EndpointRecord, code: string) {
   // calls count toward the new-funds telephony hold.
   const price = e.kind === "sms" || e.kind === "voice"
     ? await telephonyUnitPrice(env, e.account_id, e.kind, e.address)
-    : actionPriceMicros(PRICES, skuForTransport(PRICES, e.kind)!);
+    : actionPriceMicros(PRICES, skuForTransport(PRICES, e.kind)!, await accountTier(env, e.account_id));
   const ref = `verify:${e.id}:${ulid()}`;
   const account = accountStub(env, e.account_id);
   const r = await account.reserve(price, ref, null, {}, telephony ? "telephony" : null);
@@ -451,7 +452,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     // the attachment's upload and storage like any publish); other media types are dropped.
     const media = Number(params.NumMedia ?? 0) > 0 && c.env.FILES ? await fetchInboundMedia(c.env, params.MediaUrl0 ?? "").catch(() => null) : null;
     const sku = media ? "inbound_mms_us" : "inbound_sms_us";
-    const price = actionPriceMicros(PRICES, sku);
+    const price = actionPriceMicros(PRICES, sku, await accountTier(c.env, ep.account_id));
     const charge = await accountStub(c.env, ep.account_id).charge(price, `insms:${params.MessageSid}`, null, {}, true);
     if (!charge.ok) return twiml(c);
     emitMetric(c.env, { accountId: ep.account_id, event: "inbound_sms", transport: "sms", sku, revenueMicros: price, providerCostMicros: estimatedCostMicros(sku) });

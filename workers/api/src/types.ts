@@ -75,6 +75,7 @@ export interface TopicMeta {
   owner: string; // account id
   policy: TopicPolicy;
   created_at: number;
+  tier?: string;
 }
 
 export type Principal =
@@ -100,6 +101,8 @@ export interface PublishInput {
   autoCreateOwner: string | null;
   /** Account-level transport policy to apply if the topic is auto-created. */
   autoCreateAccountTransports?: { allow: Transport[] | null; deny: Transport[] | null };
+  /** Account pricing tier to apply if the topic is auto-created. */
+  autoCreateTier?: string;
   idempotencyKey: string | null;
   bodyHash: string;
   dryRun: boolean;
