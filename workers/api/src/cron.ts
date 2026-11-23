@@ -6,6 +6,7 @@ import { audit, invalidateAccount } from "./accounts.ts";
 import { backupDatabase } from "./backup.ts";
 import { syncAccountEndpoints } from "./control.ts";
 import { accountStub } from "./durable/account.ts";
+import { sendAccountNotice, WARNING_DAYS_BEFORE } from "./notices.ts";
 import { DEST_PRICES_KEY, INTL_COUNTRIES, type DestinationPrices } from "./delivery/destinations.ts";
 import type { Env } from "./types.ts";
 
@@ -31,10 +32,10 @@ export async function runCron(cron: string, env: Env, now: number) {
 export async function meterRent(env: Env, now: number) {
   const day = new Date(now).toISOString().slice(0, 10);
   const { results } = await env.DB.prepare(
-    `SELECT a.id, a.frozen_since,
+    `SELECT a.id, a.email, a.frozen_since,
       (SELECT COUNT(*) FROM devices d WHERE d.account_id = a.id AND d.revoked_at IS NULL) AS devices,
       (SELECT COUNT(*) FROM endpoints e WHERE e.account_id = a.id AND e.verified_at IS NOT NULL) AS endpoints
-     FROM accounts a`).all<{ id: string; frozen_since: number | null; devices: number; endpoints: number }>();
+     FROM accounts a`).all<{ id: string; email: string | null; frozen_since: number | null; devices: number; endpoints: number }>();
   for (const a of results) {
     if (!a.devices && !a.endpoints) continue;
     const nanos = rentNanos(PRICES, "device_day", a.devices) + rentNanos(PRICES, "endpoint_day", a.endpoints);
@@ -55,6 +56,7 @@ export async function meterRent(env: Env, now: number) {
       await audit(env, a.id, "cron", "account.frozen", { micros });
       await invalidateAccount(env, a.id);
       await syncAccountEndpoints(env, a.id);
+      await sendAccountNotice(env, a, "frozen", now, GRACE_DAYS);
     } else if (now - a.frozen_since > GRACE_DAYS * 86_400_000) {
       await env.DB.batch([
         env.DB.prepare("DELETE FROM subscriptions WHERE endpoint_id IN (SELECT id FROM endpoints WHERE account_id = ?)").bind(a.id),
@@ -62,6 +64,13 @@ export async function meterRent(env: Env, now: number) {
         env.DB.prepare("UPDATE devices SET revoked_at = ? WHERE account_id = ? AND revoked_at IS NULL").bind(now, a.id),
       ]);
       await audit(env, a.id, "cron", "account.resources_deleted", { after_days: GRACE_DAYS });
+      await sendAccountNotice(env, a, "deleted", a.frozen_since, GRACE_DAYS);
+    } else {
+      // Still in the grace period: retry a freeze notice that failed, then warn a week ahead.
+      await sendAccountNotice(env, a, "frozen", a.frozen_since, GRACE_DAYS);
+      if (now - a.frozen_since >= (GRACE_DAYS - WARNING_DAYS_BEFORE) * 86_400_000) {
+        await sendAccountNotice(env, a, "deletion_warning", a.frozen_since, GRACE_DAYS);
+      }
     }
   }
 }
