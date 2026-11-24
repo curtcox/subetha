@@ -48,8 +48,13 @@ export function operations(spec) {
         if (i >= 0) params[i] = p; else params.push(p);
       }
       const content = op.requestBody ? resolve(spec, op.requestBody).content ?? {} : null;
-      const type = content ? Object.keys(content)[0] : null;
-      const media = type ? content[type] : null;
+      const types = content
+        ? Object.entries(content).map(([t, m]) => {
+            const s = resolve(spec, m?.schema);
+            return { type: t, example: bodyExample(spec, m), binary: s?.format === "binary" || t === "application/octet-stream" };
+          })
+        : [];
+      const first = types[0] ?? null;
       ops.push({
         id: op.operationId ?? `${method} ${path}`,
         method: method.toUpperCase(),
@@ -58,7 +63,7 @@ export function operations(spec) {
         description: op.description ?? "",
         tag: op.tags?.[0] ?? "other",
         params: params.filter((p) => ["path", "query", "header"].includes(p.in)),
-        body: type ? { type, example: bodyExample(spec, media) } : null,
+        body: first ? { type: first.type, example: first.example, binary: first.binary, types } : null,
         unsupported: unsupported(path),
         stream: isStream(path),
         auth: !(Array.isArray(op.security) && op.security.length === 0),
@@ -124,9 +129,13 @@ export function buildRequest(baseUrl, op, values = {}) {
     if (v !== undefined && v !== "") headers[p.name] = String(v);
   }
   let body;
-  if (op.body && values.body !== undefined && values.body !== "") {
-    headers["Content-Type"] = op.body.type;
-    if (op.body.type === "application/json") JSON.parse(values.body); // fail early on bad JSON
+  const bodyType = values.contentType || op.body?.type;
+  if (op.body && values.file !== undefined && values.file !== null) {
+    headers["Content-Type"] = values.file.type || bodyType || "application/octet-stream";
+    body = values.file;
+  } else if (op.body && values.body !== undefined && values.body !== "") {
+    headers["Content-Type"] = bodyType;
+    if (bodyType === "application/json") JSON.parse(values.body); // fail early on bad JSON
     body = values.body;
   }
   const query = qs.toString();

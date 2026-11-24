@@ -42,5 +42,9 @@ describe("API explorer", () => {
     expect(sub.url).toBe("http://x/@a/b,t_x/json?poll=1");
     expect(() => buildRequest("http://x", op("publish"), {})).toThrow(/topic is required/);
     expect(() => buildRequest("http://x", op("publishJson"), { body: "{nope" })).toThrow();
+    expect(op("publish").body.types.length).toBeGreaterThanOrEqual(1);
+    const binReq = buildRequest("http://x", op("publish"), { path: { topic: "@a/b" }, contentType: "application/octet-stream", file: new Uint8Array([1, 2, 3]) });
+    expect(binReq.headers["Content-Type"]).toBe("application/octet-stream");
+    expect(binReq.body).toEqual(new Uint8Array([1, 2, 3]));
   });
 });

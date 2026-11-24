@@ -53,7 +53,14 @@ describe("copy as …", () => {
     expect(snippet("js", tricky)).toContain(`contentType: "text/markdown"`);
     expect(snippet("python", tricky)).toContain(`"allow": ["ws","webpush"]`);
     expect(snippet("python", tricky)).toContain(`content_type="text/markdown"`);
+    expect(snippet("python", tricky)).toContain(`from subetha import Client`);
     expect(snippet("js", tricky)).toContain(`baseUrl: "http://localhost:8787"`);
+    const withFile = { ...plain, file: { name: "snap.jpg", type: "image/jpeg" }, actions: [{ action: "view", label: "Open", url: "https://example.com" }], sign: true };
+    expect(snippet("curl", withFile)).toContain(`-T 'snap.jpg'`);
+    expect(snippet("curl", withFile)).toContain(`X-Actions:`);
+    expect(snippet("js", withFile)).toContain(`publishFile`);
+    expect(snippet("js", withFile)).toContain(`sign: true`);
+    expect(snippet("python", withFile)).toContain(`publish_file`);
   });
 
   it("produces valid JavaScript", () => {

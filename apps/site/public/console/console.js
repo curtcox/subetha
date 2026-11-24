@@ -61,7 +61,8 @@ async function makeClient() {
   const token = await getToken();
   await loadBrowserDeviceKey();
   syncBrowserDeviceControls();
-  return token ? new SubEtha({ baseUrl: location.origin, token, deviceKey: browserDeviceKey ?? undefined, topicKeys: topicKeysFor() }) : null;
+  // Pass getToken as a dynamic provider so short-lived Clerk session JWTs refresh on every request & WS reconnect.
+  return token ? new SubEtha({ baseUrl: location.origin, token: getToken, deviceKey: browserDeviceKey ?? undefined, topicKeys: topicKeysFor() }) : null;
 }
 
 async function init() {
@@ -222,6 +223,7 @@ $("pubBtn").onclick = async () => {
       : await client.publish(topic, $("pubMsg").value || "triggered", o);
     if (file) { $("pubFile").value = ""; $("pubFileClear").hidden = true; }
     out.textContent = JSON.stringify(m, null, 2);
+    rememberRecentMessage(m);
     $("traceTopic").value = m.topic; $("traceId").value = m.id;
     me = await client.account(); showBalance(me);
   } catch (e) { out.textContent = `${e.code ?? "error"}: ${e.message}`; }
@@ -246,10 +248,12 @@ $("copyLang").onchange = () => store("subetha.copyLang", $("copyLang").value);
 $("curlBtn").onclick = async () => {
   try {
     const o = pubOpts();
+    const file = $("pubFile").files?.[0];
     const text = snippet($("copyLang").value, {
       baseUrl: location.origin, topic: $("pubTopic").value.trim(), message: $("pubMsg").value || "triggered",
       title: o.title, priority: o.priority, tags: o.tags, click: o.click, icon: o.icon,
-      markdown: o.contentType === "text/markdown", idempotencyKey: o.idempotencyKey,
+      actions: o.actions, file: file ? { name: file.name, type: file.type || "application/octet-stream" } : undefined,
+      sign: o.sign, markdown: o.contentType === "text/markdown", idempotencyKey: o.idempotencyKey,
       mode: o.route.mode, maxCostUsd: o.route.maxCostUsd, deadlineS: o.route.deadlineS, deny: o.route.deny, allow: o.route.allow,
     });
     $("pubOut").hidden = false; $("pubOut").textContent = text;
@@ -257,12 +261,36 @@ $("curlBtn").onclick = async () => {
   } catch (e) { $("pubOut").hidden = false; $("pubOut").textContent = `${e.code ?? "error"}: ${e.message}`; }
 };
 
+function renderMarkdown(raw) {
+  let s = esc(raw ?? "");
+  s = s.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, label, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`);
+  return s.replace(/\n/g, "<br>");
+}
+
+const recentMessages = [];
+function rememberRecentMessage(m) {
+  if (!m?.id || !m?.topic) return;
+  const idx = recentMessages.findIndex((x) => x.id === m.id);
+  if (idx >= 0) recentMessages.splice(idx, 1);
+  recentMessages.unshift({ id: m.id, topic: m.topic, label: `${m.topic} · ${m.title || (m.message || "").slice(0, 40) || m.id}` });
+  if (recentMessages.length > 20) recentMessages.length = 20;
+  const sel = $("traceRecent");
+  if (!sel) return;
+  sel.hidden = !recentMessages.length;
+  sel.innerHTML = `<option value="">Pick a recent message…</option>` + recentMessages.map((x) => `<option value="${esc(x.topic)}|${esc(x.id)}">${esc(x.label)}</option>`).join("");
+}
+
 function renderInboxItem(m) {
+  rememberRecentMessage(m);
   const li = document.createElement("li");
   const tags = m.tags?.length ? ` · ${m.tags.map((t) => `<code>${esc(t)}</code>`).join(" ")}` : "";
   const sender = m.sender ? ` · <code title="${esc(m.sender)}">${esc(m.sender.slice(0, 12))}…</code>` : "";
   const traceBtn = m.id ? ` <button type="button" class="secondary" style="padding:1px 6px;font-size:12px" data-trace-topic="${esc(m.topic)}" data-trace-id="${esc(m.id)}">Trace</button>` : "";
-  const body = m.enc ? `<span class="muted">🔒 Encrypted with key <code>${esc(m.enc.kid)}</code>, which isn't in this browser (Topics → End-to-end encryption keys).</span>` : `${m.title ? `<b>${esc(m.title)}</b> ` : ""}${esc(m.message)}`;
+  const msgHtml = m.content_type === "text/markdown" ? renderMarkdown(m.message) : esc(m.message);
+  const body = m.enc ? `<span class="muted">🔒 Encrypted with key <code>${esc(m.enc.kid)}</code>, which isn't in this browser (Topics → End-to-end encryption keys).</span>` : `${m.title ? `<b>${esc(m.title)}</b> ` : ""}${msgHtml}`;
   const extras = [];
   const clickUrl = !m.enc && safeHref(m.click);
   if (clickUrl) extras.push(`<a href="${esc(clickUrl)}" target="_blank" rel="noopener noreferrer">${esc(clickUrl)}</a>`);
@@ -290,17 +318,24 @@ function renderInboxItem(m) {
   return li;
 }
 
+const MAX_INBOX_ITEMS = 200;
 function subscribe() {
   sub?.close();
   $("inbox").replaceChildren();
   const topics = $("subTopic").value.split(",").map((s) => s.trim()).filter(Boolean);
   const priority = $("inboxPrio").value.split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n >= 1 && n <= 5);
   const tags = $("inboxTags").value.split(",").map((s) => s.trim()).filter(Boolean);
+  const sinceVal = $("inboxSince")?.value;
+  $("subStop").hidden = false;
   sub = client.subscribe(topics, (m) => {
-    $("inbox").prepend(renderInboxItem(m));
-  }, { since: "1h", ...(priority.length ? { priority } : {}), ...(tags.length ? { tags } : {}), onError: (e) => console.warn(e) });
+    const list = $("inbox");
+    list.prepend(renderInboxItem(m));
+    while (list.children.length > MAX_INBOX_ITEMS) list.lastElementChild?.remove();
+  }, { ...(sinceVal ? { since: sinceVal } : {}), ...(priority.length ? { priority } : {}), ...(tags.length ? { tags } : {}), onError: (e) => console.warn(e) });
 }
 $("subBtn").onclick = subscribe;
+$("subStop").onclick = () => { sub?.close(); sub = null; $("subStop").hidden = true; };
+$("inboxClear").onclick = () => { $("inbox").replaceChildren(); };
 
 $("pushBtn").onclick = async () => {
   const say = (t) => { $("pushMsg").textContent = t; };
@@ -582,7 +617,7 @@ const fromUsdInput = (v) => (v.trim() === "" ? null : Math.round(Number(v) * 1e6
 const listOrNull = (v) => { const xs = v.split(",").map((s) => s.trim()).filter(Boolean); return xs.length ? xs : null; };
 $("capSave").onclick = async () => {
   try {
-    await client.request("PATCH", "/v1/account", {
+    await client.updateAccount({
       daily_cap_micros: fromUsdInput($("capDaily").value),
       monthly_cap_micros: fromUsdInput($("capMonthly").value),
       allow_transports: listOrNull($("capAllow").value),
@@ -599,7 +634,7 @@ const perUnit = (p, tier) => (p ? `$${((p[tier] ?? p.standard) / 1e6).toFixed(4)
 async function loadTelephonyCountries() {
   const box = $("telCountries");
   try {
-    const { countries, updated_at } = await client.request("GET", "/v1/prices/destinations");
+    const { countries, updated_at } = await client.destinationPrices();
     const on = new Set(me.telephony_countries ?? []);
     box.innerHTML = `<table><thead><tr><th></th><th>Country</th><th>SMS / segment</th><th>Voice / min</th></tr></thead><tbody>${Object.entries(countries).map(([iso, c]) =>
       `<tr><td><input type="checkbox" data-country="${esc(iso)}" style="width:auto" ${on.has(iso) ? "checked" : ""} aria-label="${esc(c.name)}"></td><td>${esc(c.name)} <small class="muted">${esc(c.calling_code)}</small></td><td>${perUnit(c.sms_usd_micros, me.tier)}</td><td>${perUnit(c.voice_usd_micros_per_minute, me.tier)}</td></tr>`).join("")}</tbody></table>` +
@@ -609,7 +644,7 @@ async function loadTelephonyCountries() {
 $("telSave").onclick = async () => {
   try {
     const list = [...document.querySelectorAll("[data-country]")].filter((x) => x.checked).map((x) => x.dataset.country);
-    await client.request("PATCH", "/v1/account", { telephony_countries: list });
+    await client.updateAccount({ telephony_countries: list });
     me = await client.account();
     $("telMsg").textContent = "Saved.";
   } catch (e) { $("telMsg").textContent = `${e.code}: ${e.message}`; }
@@ -624,9 +659,10 @@ function renderAutoRecharge() {
     $("arStatus").textContent = "Top up once with \"Save card\" checked to enable optional auto-recharge (not a subscription; stops if a card declines).";
     return;
   }
+  const errNote = me.auto_recharge_last_error ? ` Last attempt failed: ${me.auto_recharge_last_error}.` : "";
   $("arStatus").textContent = cfg
     ? `Active: tops up ${usd(cfg.amount_micros)} when available balance drops below ${usd(cfg.threshold_micros)}.`
-    : "Card saved on file. Auto-recharge is off.";
+    : `Card saved on file. Auto-recharge is off.${errNote}`;
   if (cfg) {
     $("arThreshold").value = toUsdInput(cfg.threshold_micros);
     $("arAmount").value = toUsdInput(cfg.amount_micros);
@@ -634,7 +670,7 @@ function renderAutoRecharge() {
 }
 $("arSave").onclick = async () => {
   try {
-    await client.request("PATCH", "/v1/account", { auto_recharge: { threshold_usd: Number($("arThreshold").value), amount_usd: Number($("arAmount").value) } });
+    await client.updateAccount({ auto_recharge: { threshold_usd: Number($("arThreshold").value), amount_usd: Number($("arAmount").value) } });
     me = await client.account();
     renderAutoRecharge();
     $("arMsg").textContent = "Saved.";
@@ -642,7 +678,7 @@ $("arSave").onclick = async () => {
 };
 $("arOff").onclick = async () => {
   try {
-    await client.request("PATCH", "/v1/account", { auto_recharge: null });
+    await client.updateAccount({ auto_recharge: null });
     me = await client.account();
     renderAutoRecharge();
     $("arMsg").textContent = "Turned off.";
@@ -663,6 +699,23 @@ function renderLimits(a) {
   $("capPaused").checked = !!a.paused;
 }
 
+let ledgerNextAfter = 0;
+function loadUsage() {
+  const days = Number($("usageDays")?.value || 30);
+  client.usage(days).then((u) => renderUsageChart($("usageChart"), u)).catch((e) => { $("usageChart").textContent = `${e.code ?? "error"}: ${e.message}`; });
+}
+$("usageDays").onchange = loadUsage;
+async function loadLedgerPage(reset) {
+  if (reset) { ledgerNextAfter = 0; $("ledgerRows").innerHTML = ""; }
+  const { entries } = await client.ledger(ledgerNextAfter, 100);
+  const rowsHtml = entries.slice().reverse().map((e) => `<tr><td>${e.seq}</td><td>${e.kind}</td><td>${usd(e.amount)}</td><td>${usd(e.available_after)}</td><td><code>${esc(e.ref)}</code></td><td>${new Date(e.time).toLocaleString()}</td></tr>`).join("");
+  if (reset) $("ledgerRows").innerHTML = rowsHtml;
+  else $("ledgerRows").insertAdjacentHTML("afterbegin", rowsHtml);
+  ledgerNextAfter = entries.length ? entries[entries.length - 1].seq : ledgerNextAfter;
+  $("ledgerMore").hidden = entries.length < 100;
+}
+$("ledgerMore").onclick = () => loadLedgerPage(false);
+
 async function loadBilling() {
   limitsDirty = false;
   if (me) renderLimits(me);
@@ -670,11 +723,10 @@ async function loadBilling() {
   showBalance(me);
   renderAutoRecharge();
   loadTelephonyCountries();
-  client.request("GET", "/v1/usage?days=30").then((u) => renderUsageChart($("usageChart"), u)).catch((e) => { $("usageChart").textContent = `${e.code ?? "error"}: ${e.message}`; });
+  loadUsage();
   if (!limitsDirty) renderLimits(me);
   loadPayments();
-  const [{ entries }, prices] = await Promise.all([client.ledger(), client.prices()]);
-  $("ledgerRows").innerHTML = entries.slice().reverse().map((e) => `<tr><td>${e.seq}</td><td>${e.kind}</td><td>${usd(e.amount)}</td><td>${usd(e.available_after)}</td><td><code>${esc(e.ref)}</code></td><td>${new Date(e.time).toLocaleString()}</td></tr>`).join("");
+  const [, prices] = await Promise.all([loadLedgerPage(true), client.prices()]);
   const tier = me.tier || "standard";
   $("priceTable").innerHTML = `<p class="muted" style="margin-top:0">Current volume tier: <strong>${esc(tier)}</strong></p><table>${Object.entries(prices.skus).map(([id, s]) => `<tr><td>${esc(s.description)}</td><td>$${((s.price_nanos[tier] ?? s.price_nanos.standard) / 1e9).toPrecision(3)} / ${esc(s.unit)}</td></tr>`).join("")}</table>`;
 }
@@ -700,6 +752,14 @@ $("topupBtn").onclick = async () => {
   try { location.href = (await client.checkout(Number($("topupAmt").value), { saveCard: $("topupSaveCard").checked })).url; } catch (e) { alert(`${e.code}: ${e.message}`); }
 };
 
+$("traceRecent").onchange = () => {
+  const v = $("traceRecent").value;
+  if (!v) return;
+  const i = v.lastIndexOf("|");
+  $("traceTopic").value = v.slice(0, i);
+  $("traceId").value = v.slice(i + 1);
+  $("traceBtn").click();
+};
 $("traceBtn").onclick = async () => {
   const out = $("traceOut"); out.hidden = false;
   try { out.innerHTML = renderTrace(await client.trace($("traceTopic").value.trim(), $("traceId").value.trim())); }
@@ -713,17 +773,17 @@ $("epKind").onchange = () => { $("epAddr").placeholder = PLACEHOLDER[$("epKind")
 let endpoints = [];
 async function loadEndpoints() {
   const [eps, subs, teams, bindings, pcreds] = await Promise.all([
-    client.request("GET", "/v1/endpoints"),
-    client.request("GET", "/v1/subscriptions"),
-    client.request("GET", "/v1/slack/teams").catch(() => ({ teams: [] })),
-    client.request("GET", "/v1/slack/bindings").catch(() => ({ bindings: [] })),
+    client.listEndpoints(),
+    client.listSubscriptions(),
+    client.listSlackTeams().catch(() => ({ teams: [] })),
+    client.listSlackBindings().catch(() => ({ bindings: [] })),
     client.listPushCredentials().catch(() => ({ credentials: [] })),
   ]);
   endpoints = eps.endpoints;
-  $("epRows").innerHTML = endpoints.map((e) => `<tr><td>${esc(e.kind)}</td><td><code>${esc(e.address)}</code>${e.name ? ` <span class="muted">${esc(e.name)}</span>` : ""}${e.inbound_topic ? `<br><span class="muted">texts in → <code>${esc(e.inbound_topic)}</code></span>` : ""}</td><td>${e.verified ? '<span class="ok">verified</span>' : `<span class="row"><input data-code="${esc(e.id)}" placeholder="6-digit code" inputmode="numeric" maxlength="6" aria-label="Verification code"><button class="secondary" data-verify="${esc(e.id)}">Verify</button></span>`}</td><td>${e.verified && e.kind !== "webpush" ? `<button class="secondary" data-eptest="${esc(e.id)}">Test</button> ` : ""}${e.verified && (e.kind === "sms" || e.kind === "whatsapp") ? `<button class="secondary" data-epinbound="${esc(e.id)}">Texts in…</button> ` : ""}<button class="secondary" data-epdel="${esc(e.id)}">Delete</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">No endpoints yet. "Notify this browser" on Send / receive adds a Web Push one.</td></tr>`;
+  $("epRows").innerHTML = endpoints.map((e) => `<tr><td>${esc(e.kind)}</td><td><code>${esc(e.address)}</code>${e.name ? ` <span class="muted">${esc(e.name)}</span>` : ""}${e.inbound_topic ? `<br><span class="muted">texts in → <code>${esc(e.inbound_topic)}</code></span>` : ""}</td><td>${e.verified ? '<span class="ok">verified</span>' : `<span class="row"><input data-code="${esc(e.id)}" placeholder="6-digit code" inputmode="numeric" maxlength="6" aria-label="Verification code"><button class="secondary" data-verify="${esc(e.id)}">Verify</button></span>`}</td><td>${e.verified ? `<button class="secondary" data-eptest="${esc(e.id)}">Test</button> ` : ""}${e.verified && (e.kind === "sms" || e.kind === "whatsapp") ? `<button class="secondary" data-epinbound="${esc(e.id)}">Texts in…</button> ` : ""}<button class="secondary" data-epdel="${esc(e.id)}">Delete</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">No endpoints yet. "Notify this browser" on Send / receive adds a Web Push one.</td></tr>`;
   const label = (id) => { const e = endpoints.find((x) => x.id === id); return e ? `${e.kind} ${e.address}` : id; };
   $("subEp").innerHTML = endpoints.filter((e) => e.verified).map((e) => `<option value="${esc(e.id)}">${esc(label(e.id))}</option>`).join("") || `<option value="">No verified endpoints</option>`;
-  $("subRows").innerHTML = subs.subscriptions.map((s) => `<tr><td><code>${esc(s.topic)}</code>${s.paused ? ' <span class="bad">paused</span>' : ""}</td><td>${esc(label(s.endpoint_id))}</td><td>${s.after_s ? `${s.after_s}s` : "now"}</td><td>${s.min_priority ?? ""}</td><td><code>${esc([s.filter?.tags?.length ? `tags ${s.filter.tags.join(",")}` : "", s.filter?.priority?.length ? `priority ${s.filter.priority.join(",")}` : ""].filter(Boolean).join("; "))}</code></td><td><button class="secondary" data-subtoggle="${esc(s.id)}" data-subpaused="${s.paused ? "1" : ""}">${s.paused ? "Resume" : "Pause"}</button> <button class="secondary" data-subdel="${esc(s.id)}">Remove</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">No endpoint subscriptions.</td></tr>`;
+  $("subRows").innerHTML = subs.subscriptions.map((s) => `<tr><td><code>${esc(s.topic)}</code>${s.paused ? ' <span class="bad">paused</span>' : ""}</td><td>${esc(label(s.endpoint_id))}</td><td>${s.after_s ? `${s.after_s}s` : "now"}</td><td>${s.min_priority ?? ""}</td><td><code>${esc([s.filter?.tags?.length ? `tags ${s.filter.tags.join(",")}` : "", s.filter?.priority?.length ? `priority ${s.filter.priority.join(",")}` : ""].filter(Boolean).join("; "))}</code></td><td><button class="secondary" data-subedit="${esc(s.id)}">Edit…</button> <button class="secondary" data-subtoggle="${esc(s.id)}" data-subpaused="${s.paused ? "1" : ""}">${s.paused ? "Resume" : "Pause"}</button> <button class="secondary" data-subdel="${esc(s.id)}">Remove</button></td></tr>`).join("") || `<tr><td colspan="6" class="muted">No endpoint subscriptions.</td></tr>`;
   $("pushCredRows").innerHTML = (pcreds.credentials ?? []).map((c) => {
     const info = c.kind === "apns" ? `${c.topic}${c.sandbox ? " (sandbox)" : ""} · ${c.team_id}/${c.key_id}` : `${c.project_id} · ${c.client_email}`;
     return `<tr><td>${esc(c.kind)}</td><td>${esc(c.name || "—")}</td><td><code>${esc(info)}</code></td><td>${c.is_default ? '<span class="ok">default</span>' : ""}</td><td><button class="secondary" data-pcdel="${esc(c.id)}">Delete</button></td></tr>`;
@@ -738,8 +798,7 @@ async function loadEndpoints() {
   $("slackBindingRows").innerHTML = (bindings.bindings ?? []).map((b) => `<tr><td>${esc(b.team_name || b.team_id)}</td><td><code>${esc(b.channel)}</code></td><td><code>${esc(b.topic)}</code></td><td><button class="secondary" data-slackunbind-team="${esc(b.team_id)}" data-slackunbind-ch="${esc(b.channel)}">Unbind</button></td></tr>`).join("") || `<tr><td colspan="4" class="muted">No bound channels.</td></tr>`;
   document.querySelectorAll("[data-slackunbind-ch]").forEach((b) => b.onclick = async () => {
     if (!confirm("Unbind this Slack channel?")) return;
-    const q = new URLSearchParams({ team_id: b.dataset.slackunbindTeam, channel: b.dataset.slackunbindCh });
-    await client.request("DELETE", `/v1/slack/bindings?${q}`).catch((e) => alert(e.message));
+    await client.deleteSlackBinding(b.dataset.slackunbindTeam, b.dataset.slackunbindCh).catch((e) => alert(e.message));
     loadEndpoints();
   });
   const h = me?.handle ? `@${me.handle}/` : "";
@@ -748,19 +807,19 @@ async function loadEndpoints() {
   document.querySelectorAll("[data-verify]").forEach((b) => b.onclick = async () => {
     const id = b.dataset.verify;
     const code = document.querySelector(`[data-code="${CSS.escape(id)}"]`).value.trim();
-    try { await client.request("POST", `/v1/endpoints/${encodeURIComponent(id)}/verify`, { code }); loadEndpoints(); }
+    try { await client.verifyEndpoint(id, code); loadEndpoints(); }
     catch (e) { alert(`${e.code}: ${e.message}`); }
   });
   document.querySelectorAll("[data-epinbound]").forEach((b) => b.onclick = async () => {
     const e = endpoints.find((x) => x.id === b.dataset.epinbound);
     const topic = prompt("Topic that texts from this number publish to (one you own). Leave empty to turn texting in off.", e?.inbound_topic ?? $("subTopicNew").value);
     if (topic === null) return;
-    try { await client.request("PATCH", `/v1/endpoints/${encodeURIComponent(b.dataset.epinbound)}`, { inbound_topic: topic.trim() || null }); loadEndpoints(); }
+    try { await client.updateEndpoint(b.dataset.epinbound, { inbound_topic: topic.trim() || null }); loadEndpoints(); }
     catch (err) { alert(`${err.code}: ${err.message}`); }
   });
   document.querySelectorAll("[data-epdel]").forEach((b) => b.onclick = async () => {
     if (!confirm("Delete this endpoint and its subscriptions?")) return;
-    await client.request("DELETE", `/v1/endpoints/${encodeURIComponent(b.dataset.epdel)}`).catch((e) => alert(e.message));
+    await client.deleteEndpoint(b.dataset.epdel).catch((e) => alert(e.message));
     loadEndpoints();
   });
   document.querySelectorAll("[data-eptest]").forEach((b) => b.onclick = async () => {
@@ -768,19 +827,39 @@ async function loadEndpoints() {
     b.disabled = true;
     out.innerHTML = '<p class="muted">Sending…</p>';
     try {
-      const r = await client.request("POST", `/v1/endpoints/${encodeURIComponent(b.dataset.eptest)}/test`, { title: $("insTitle").value, message: $("insMessage").value, priority: Number($("insPriority").value) });
+      const r = await client.testEndpoint(b.dataset.eptest, { title: $("insTitle").value, message: $("insMessage").value, priority: Number($("insPriority").value) });
       out.innerHTML = renderInspection(r);
       if (r.request) { $("sigHeader").value = r.request.headers["x-subetha-signature"] ?? ""; $("sigBody").value = r.request.body; }
       client.account().then((a) => { me = a; showBalance(a); }).catch(() => {});
     } catch (e) { out.innerHTML = `<p class="bad">${esc(e.code)}: ${esc(e.message)}</p>`; }
     finally { b.disabled = false; $("inspector").scrollIntoView({ block: "nearest" }); }
   });
+  document.querySelectorAll("[data-subedit]").forEach((b) => b.onclick = async () => {
+    const s = subs.subscriptions.find((x) => x.id === b.dataset.subedit);
+    if (!s) return;
+    const afterRaw = prompt("Escalate after seconds (0..3600):", String(s.after_s ?? 0));
+    if (afterRaw === null) return;
+    const prioRaw = prompt("Minimum priority (1..5, blank = none):", s.min_priority == null ? "" : String(s.min_priority));
+    if (prioRaw === null) return;
+    const tagsRaw = prompt("Required tags (comma-separated, blank = any):", (s.filter?.tags ?? []).join(","));
+    if (tagsRaw === null) return;
+    const tags = tagsRaw.split(",").map((x) => x.trim()).filter(Boolean);
+    const filter = { ...(s.filter?.priority?.length ? { priority: s.filter.priority } : {}), ...(tags.length ? { tags } : {}) };
+    try {
+      await client.updateSubscription(s.id, {
+        after_s: Number(afterRaw) || 0,
+        min_priority: prioRaw.trim() === "" ? null : Number(prioRaw),
+        filter,
+      });
+      loadEndpoints();
+    } catch (e) { alert(`${e.code ?? "error"}: ${e.message}`); }
+  });
   document.querySelectorAll("[data-subtoggle]").forEach((b) => b.onclick = async () => {
     try { await client.updateSubscription(b.dataset.subtoggle, { paused: !b.dataset.subpaused }); loadEndpoints(); }
     catch (e) { alert(`${e.code ?? "error"}: ${e.message}`); }
   });
   document.querySelectorAll("[data-subdel]").forEach((b) => b.onclick = async () => {
-    await client.request("DELETE", `/v1/subscriptions/${encodeURIComponent(b.dataset.subdel)}`).catch((e) => alert(e.message));
+    await client.deleteSubscription(b.dataset.subdel).catch((e) => alert(e.message));
     loadEndpoints();
   });
 }
@@ -895,7 +974,7 @@ $("thisDevRevoke").onclick = async () => {
 };
 
 async function loadDevices() {
-  const { devices } = await client.request("GET", "/v1/devices");
+  const { devices } = await client.listDevices();
   renderThisBrowser(devices);
   const devPolicy = (d) => [
     d.allow_transports?.length ? `allow: ${d.allow_transports.join(",")}` : "",
@@ -904,12 +983,22 @@ async function loadDevices() {
   const devStatus = (d) => d.revoked_at ? '<span class="bad">revoked</span>' : d.paused ? '<span class="bad">paused</span>' : '<span class="ok">active</span>';
   $("devRows").innerHTML = devices.map((d) => {
     const pol = devPolicy(d);
-    const actions = d.revoked_at ? "" : `<button class="secondary" data-devpause="${esc(d.id)}" data-paused="${d.paused ? "1" : "0"}">${d.paused ? "Resume" : "Pause"}</button> <button class="secondary" data-devtr="${esc(d.id)}">Transports…</button> <button class="secondary" data-devrevoke="${esc(d.id)}">Revoke</button>`;
+    const actions = d.revoked_at ? "" : `<button class="secondary" data-devedit="${esc(d.id)}">Edit…</button> <button class="secondary" data-devpause="${esc(d.id)}" data-paused="${d.paused ? "1" : "0"}">${d.paused ? "Resume" : "Pause"}</button> <button class="secondary" data-devtr="${esc(d.id)}">Transports…</button> <button class="secondary" data-devrevoke="${esc(d.id)}">Revoke</button>`;
     return `<tr><td>${esc(d.name || "")}${browserDeviceKey?.deviceId === d.id && !d.revoked_at ? ' <span class="muted">(this browser)</span>' : ""}${pol ? `<br><small class="muted">${esc(pol)}</small>` : ""}</td><td><code title="${esc(d.id)}">${esc(d.id.slice(0, 14))}…</code></td><td>${esc((d.capabilities ?? []).join(", "))}</td><td>${esc(when(d.last_seen_at))}</td><td>${devStatus(d)}</td><td>${actions}</td></tr>`;
   }).join("") || `<tr><td colspan="6" class="muted">No devices yet.</td></tr>`;
+  document.querySelectorAll("[data-devedit]").forEach((b) => b.onclick = async () => {
+    const d = devices.find((x) => x.id === b.dataset.devedit);
+    if (!d) return;
+    const name = prompt("Device name:", d.name || "");
+    if (name === null) return;
+    const caps = prompt("Device capabilities (comma-separated, e.g. ws,webpush,ble,audio,qr,lan):", (d.capabilities ?? []).join(","));
+    if (caps === null) return;
+    await client.updateDevice(d.id, { name: name.trim(), capabilities: caps.split(",").map((s) => s.trim()).filter(Boolean) }).catch((e) => alert(`${e.code}: ${e.message}`));
+    loadDevices();
+  });
   document.querySelectorAll("[data-devpause]").forEach((b) => b.onclick = async () => {
     const paused = b.dataset.paused !== "1";
-    await client.request("PATCH", `/v1/devices/${encodeURIComponent(b.dataset.devpause)}`, { paused }).catch((e) => alert(`${e.code}: ${e.message}`));
+    await client.updateDevice(b.dataset.devpause, { paused }).catch((e) => alert(`${e.code}: ${e.message}`));
     loadDevices();
   });
   document.querySelectorAll("[data-devtr]").forEach((b) => b.onclick = async () => {
@@ -918,12 +1007,12 @@ async function loadDevices() {
     if (deny === null) return;
     const allow = prompt("Allow transports for this device (comma-separated, blank = all):", (d?.allow_transports ?? []).join(","));
     if (allow === null) return;
-    await client.request("PATCH", `/v1/devices/${encodeURIComponent(b.dataset.devtr)}`, { deny_transports: listOrNull(deny), allow_transports: listOrNull(allow) }).catch((e) => alert(`${e.code}: ${e.message}`));
+    await client.updateDevice(b.dataset.devtr, { deny_transports: listOrNull(deny), allow_transports: listOrNull(allow) }).catch((e) => alert(`${e.code}: ${e.message}`));
     loadDevices();
   });
   document.querySelectorAll("[data-devrevoke]").forEach((b) => b.onclick = async () => {
     if (!confirm("Revoke this device? It can no longer sign requests.")) return;
-    await client.request("DELETE", `/v1/devices/${encodeURIComponent(b.dataset.devrevoke)}`).catch((e) => alert(e.message));
+    await client.revokeDevice(b.dataset.devrevoke).catch((e) => alert(e.message));
     loadDevices();
   });
 }
@@ -998,14 +1087,29 @@ function drawOp() {
   $("exParams").innerHTML = op.params.map((p, i) => `<div><label for="exP${i}">${esc(p.name)} <span class="muted">${p.in}${p.required ? ", required" : ""}</span></label><input id="exP${i}" data-in="${p.in}" data-name="${esc(p.name)}" value="${esc(p.in === "path" ? guess(p) : "")}" placeholder="${esc(p.schema?.enum?.join(" | ") ?? p.schema?.type ?? "")}" title="${esc(p.description ?? "")}"></div>`).join("");
   $("exBodyWrap").hidden = !op.body;
   if (op.body) {
-    $("exBodyType").textContent = op.body.type;
-    const text = typeof op.body.example === "string" ? op.body.example : op.body.example == null ? "" : JSON.stringify(op.body.example, null, 2);
-    $("exBody").value = me?.handle ? text.replaceAll("@alice/", `@${me.handle}/`) : text;
+    const types = op.body.types ?? [{ type: op.body.type, example: op.body.example, binary: !!op.body.binary }];
+    const sel = $("exBodyTypes");
+    sel.hidden = types.length <= 1;
+    sel.innerHTML = types.map((t) => `<option value="${esc(t.type)}">${esc(t.type)}</option>`).join("");
+    sel.value = types[0].type;
+    const applyMedia = () => {
+      const m = types.find((t) => t.type === sel.value) ?? types[0];
+      $("exBodyType").textContent = types.length <= 1 ? m.type : "";
+      $("exFileWrap").hidden = !m.binary;
+      $("exFile").value = "";
+      $("exBody").hidden = !!m.binary;
+      const text = typeof m.example === "string" ? m.example : m.example == null ? "" : JSON.stringify(m.example, null, 2);
+      $("exBody").value = me?.handle ? text.replaceAll("@alice/", `@${me.handle}/`) : text;
+    };
+    sel.onchange = applyMedia;
+    applyMedia();
   }
 }
 function exRequest() {
   const op = currentOp();
-  const values = { path: {}, query: {}, header: {}, body: op.body ? $("exBody").value : undefined };
+  const contentType = op.body ? ($("exBodyTypes").value || op.body.type) : undefined;
+  const file = op.body && !$("exFileWrap").hidden ? $("exFile").files?.[0] ?? null : null;
+  const values = { path: {}, query: {}, header: {}, contentType, file, body: op.body && !file ? $("exBody").value : undefined };
   document.querySelectorAll("#exParams input").forEach((el) => { values[el.dataset.in][el.dataset.name] = el.value.trim(); });
   return { op, req: buildRequest(location.origin, op, values) };
 }

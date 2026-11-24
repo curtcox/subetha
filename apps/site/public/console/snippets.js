@@ -1,7 +1,7 @@
 // "Copy as …" for the message composer (PLAN §10): the same publish in curl and every SDK.
 // Pure: takes the composer's fields, returns source text. Tested in apps/site/test/snippets.test.ts.
 
-/** @typedef {{ baseUrl: string, topic: string, message: string, title?: string, priority?: number, tags?: string[], click?: string, icon?: string, markdown?: boolean, idempotencyKey?: string, mode?: string, maxCostUsd?: number, deadlineS?: number, deny?: string[], allow?: string[] }} Pub */
+/** @typedef {{ baseUrl: string, topic: string, message: string, title?: string, priority?: number, tags?: string[], click?: string, icon?: string, actions?: { action: string, label: string, url?: string, clear?: boolean }[], file?: { name: string, type?: string }, sign?: boolean, markdown?: boolean, idempotencyKey?: string, mode?: string, maxCostUsd?: number, deadlineS?: number, deny?: string[], allow?: string[] }} Pub */
 
 export const LANGUAGES = ["curl", "js", "python", "swift", "kotlin", "dart"];
 export const LANGUAGE_NAMES = { curl: "curl", js: "JavaScript", python: "Python", swift: "Swift", kotlin: "Kotlin", dart: "Dart" };
@@ -23,6 +23,9 @@ function norm(p) {
     tags: (p.tags ?? []).filter(Boolean),
     click: p.click || undefined,
     icon: p.icon || undefined,
+    actions: Array.isArray(p.actions) && p.actions.length ? p.actions : undefined,
+    file: p.file?.name ? { name: p.file.name, type: p.file.type || "application/octet-stream" } : undefined,
+    sign: !!p.sign,
     markdown: !!p.markdown,
     idempotencyKey: p.idempotencyKey || undefined,
     mode: p.mode && p.mode !== "any" ? p.mode : undefined,
@@ -46,6 +49,7 @@ export function snippet(lang, pub) {
       if (p.tags.length) parts.push(`-H ${sq(`X-Tags: ${p.tags.join(",")}`)}`);
       if (p.click) parts.push(`-H ${sq(`X-Click: ${p.click}`)}`);
       if (p.icon) parts.push(`-H ${sq(`X-Icon: ${p.icon}`)}`);
+      if (p.actions) parts.push(`-H ${sq(`X-Actions: ${JSON.stringify(p.actions)}`)}`);
       if (p.markdown) parts.push(`-H "X-Markdown: 1"`);
       if (p.idempotencyKey) parts.push(`-H ${sq(`Idempotency-Key: ${p.idempotencyKey}`)}`);
       if (p.mode) parts.push(`-H "X-Route-Mode: ${p.mode}"`);
@@ -53,7 +57,13 @@ export function snippet(lang, pub) {
       if (p.deadlineS !== undefined) parts.push(`-H "X-Deadline: ${p.deadlineS}"`);
       if (p.deny.length) parts.push(`-H "X-Deny: ${p.deny.join(",")}"`);
       if (p.allow.length) parts.push(`-H "X-Allow: ${p.allow.join(",")}"`);
-      parts.push(`-d ${sq(p.message)}`, sq(`${p.baseUrl}/${p.topic}`));
+      if (p.file) {
+        parts.push(`-H ${sq(`X-Filename: ${p.file.name}`)}`, `-H ${sq(`Content-Type: ${p.file.type}`)}`);
+        if (p.message) parts.push(`-H ${sq(`X-Message: ${p.message}`)}`);
+        parts.push(`-T ${sq(p.file.name)}`, sq(`${p.baseUrl}/${p.topic}`));
+      } else {
+        parts.push(`-d ${sq(p.message)}`, sq(`${p.baseUrl}/${p.topic}`));
+      }
       return parts.join(" \\\n  ");
     }
     case "js": {
@@ -63,8 +73,10 @@ export function snippet(lang, pub) {
       if (p.tags.length) o.push(`tags: ${JSON.stringify(p.tags)}`);
       if (p.click) o.push(`click: ${dq(p.click)}`);
       if (p.icon) o.push(`icon: ${dq(p.icon)}`);
+      if (p.actions) o.push(`actions: ${JSON.stringify(p.actions)}`);
       if (p.markdown) o.push(`contentType: "text/markdown"`);
       if (p.idempotencyKey) o.push(`idempotencyKey: ${dq(p.idempotencyKey)}`);
+      if (p.sign) o.push(`sign: true`);
       if (hasRoute) {
         const r = [];
         if (p.mode) r.push(`mode: ${dq(p.mode)}`);
@@ -74,19 +86,29 @@ export function snippet(lang, pub) {
         if (p.allow.length) r.push(`allow: ${JSON.stringify(p.allow)}`);
         o.push(`route: { ${r.join(", ")} }`);
       }
+      if (p.file) {
+        if (p.message) o.unshift(`message: ${dq(p.message)}`);
+        return `import { readFileSync } from "node:fs";
+import { SubEtha } from "@subetha/sdk";
+
+const se = new SubEtha({ ${custom ? `baseUrl: ${dq(p.baseUrl)}, ` : ""}token: process.env.SUBETHA_TOKEN });
+await se.publishFile(${dq(p.topic)}, { name: ${dq(p.file.name)}, bytes: readFileSync(${dq(p.file.name)}), type: ${dq(p.file.type)} }${o.length ? `, { ${o.join(", ")} }` : ""});`;
+      }
       return `import { SubEtha } from "@subetha/sdk";
 
 const se = new SubEtha({ ${custom ? `baseUrl: ${dq(p.baseUrl)}, ` : ""}token: process.env.SUBETHA_TOKEN });
 await se.publish(${dq(p.topic)}, ${dq(p.message)}${o.length ? `, { ${o.join(", ")} }` : ""});`;
     }
     case "python": {
-      const a = [py(p.topic), py(p.message)];
+      const a = p.file ? [py(p.topic), py(p.file.name), `open(${py(p.file.name)}, "rb").read()`, `content_type=${py(p.file.type)}`] : [py(p.topic), py(p.message)];
+      if (p.file && p.message) a.push(`message=${py(p.message)}`);
       if (p.title) a.push(`title=${py(p.title)}`);
       if (p.priority) a.push(`priority=${p.priority}`);
       if (p.tags.length) a.push(`tags=${JSON.stringify(p.tags)}`);
       if (p.click) a.push(`click=${py(p.click)}`);
       if (p.icon) a.push(`icon=${py(p.icon)}`);
-      if (p.markdown) a.push(`content_type="text/markdown"`);
+      if (p.actions) a.push(`actions=${JSON.stringify(p.actions)}`);
+      if (p.markdown) a.push(p.file ? `markdown=True` : `content_type="text/markdown"`);
       if (p.idempotencyKey) a.push(`idempotency_key=${py(p.idempotencyKey)}`);
       if (hasRoute) {
         const r = [];
@@ -98,10 +120,10 @@ await se.publish(${dq(p.topic)}, ${dq(p.message)}${o.length ? `, { ${o.join(", "
         a.push(`route={${r.join(", ")}}`);
       }
       return `import os
-from subetha import SubEtha
+from subetha import Client
 
-c = SubEtha(${custom ? `${py(p.baseUrl)}, ` : ""}token=os.environ["SUBETHA_TOKEN"])
-c.publish(${a.join(", ")})`;
+c = Client(${custom ? `${py(p.baseUrl)}, ` : ""}token=os.environ["SUBETHA_TOKEN"])
+c.${p.file ? "publish_file" : "publish"}(${a.join(", ")})`;
     }
     case "swift": {
       const o = [];

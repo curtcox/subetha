@@ -34,11 +34,11 @@ plus `request()` for any other route. Useful options:
 
 | Option | Effect |
 |---|---|
-| `token` | Bearer token. |
+| `token` | Bearer token (or a `() => Promise<string \| null>` provider for rotating JWTs). |
 | `deviceKey` | Sign every publish ([signed messages](publishing.md#signed-messages)). |
 | `signer`, `verifyEnvelope` | Sign and check signatures with something other than WebCrypto Ed25519, e.g. the Rust core in React Native (`createClient({ core, deviceSeed })` in `@subetha/react-native`). |
 | `signRequests: true` | Authenticate with device signatures instead of a token ([Devices](devices.md)). |
-| `topicKeys` | Per-topic E2EE keys: messages to those topics are encrypted, received ones decrypted. | `loadTopicKeys()` adds the ones [shared with this device](publishing.md#sharing-keys-with-devices) (in React Native, pass `unwrapper: coreKeyUnwrapper(core, seed)`; in Swift and Kotlin, `CoreDeviceSigner.unwrapTopicKey` and `CoreKeyWrap.wrap`). |
+| `topicKeys` | Per-topic E2EE keys: messages to those topics are encrypted, received ones decrypted. `loadTopicKeys()` adds the ones [shared with this device](publishing.md#sharing-keys-with-devices) (in React Native, pass `unwrapper: coreKeyUnwrapper(core, seed)` and `wrapper: coreKeyWrapper(core)`; in Swift and Kotlin, `CoreDeviceSigner.unwrapTopicKey` and `CoreKeyWrap.wrap`). |
 | `fetch`, `WebSocket` | Bring your own (tests, older runtimes). |
 
 `subscribe()` picks a WebSocket when it can and falls back to an NDJSON stream; pass
@@ -90,3 +90,12 @@ speakers, and cameras. Bindings for Swift and Kotlin (UniFFI), Flutter, and Reac
 generated from it; see [`BINDINGS.md`](https://github.com/curtcox/subetha/blob/main/sdk/core/BINDINGS.md).
 
 <!-- include: samples/rust/sign_and_encrypt.rs -->
+
+## Mobile SDKs (Swift, Kotlin, Flutter, React Native)
+
+All four mobile SDKs share the same API shape (`publish`, `publishFile`, `estimate`, `poll`, `subscribe`, `ack`, `setTopicKey`, wrapped topic keys, and control-plane helpers) and optionally link `subetha-core` for Ed25519 signing, E2EE, store-and-forward outbox, and edge transports (BLE, audio, animated QR, LAN):
+
+- **Swift (`sdk/swift`)**: `SubEtha(token: ...)` + `SubEthaCore` (UniFFI). See [`sdk/swift/README.md`](https://github.com/curtcox/subetha/blob/main/sdk/swift/README.md) and [`samples/ios`](https://github.com/curtcox/subetha/tree/main/samples/ios).
+- **Kotlin / Android (`sdk/kotlin`)**: `SubEtha(token = ...)` + `subetha-core` (UniFFI). See [`sdk/kotlin/README.md`](https://github.com/curtcox/subetha/blob/main/sdk/kotlin/README.md) and [`samples/android`](https://github.com/curtcox/subetha/tree/main/samples/android).
+- **Dart / Flutter (`sdk/flutter`, `sdk/flutter_core`)**: `SubEtha(token: ...)` + `subetha_core` (`flutter_rust_bridge`). See [`sdk/flutter/README.md`](https://github.com/curtcox/subetha/blob/main/sdk/flutter/README.md) and [`samples/flutter`](https://github.com/curtcox/subetha/tree/main/samples/flutter).
+- **React Native / Expo (`sdk/react-native`, `sdk/react-native-core`)**: `createClient({ core, deviceSeed, token })` (`uniffi-bindgen-react-native` Turbo Module) with `coreSigner`, `coreVerifier`, `coreKeyWrapper`, and `coreKeyUnwrapper`. See [`sdk/react-native/README.md`](https://github.com/curtcox/subetha/blob/main/sdk/react-native/README.md) and [`samples/react-native`](https://github.com/curtcox/subetha/tree/main/samples/react-native).
