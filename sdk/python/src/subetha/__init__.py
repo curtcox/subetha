@@ -4,6 +4,8 @@ __version__ = "0.1.0"
 
 from .client import DEFAULT_BASE_URL, Client, DeviceAuth  # noqa: E402
 from .errors import SubEthaError  # noqa: E402
+
+SubEtha = Client
 from .protocol import (  # noqa: E402
     Deduper,
     DeviceKey,
@@ -23,6 +25,7 @@ from .protocol import (  # noqa: E402
 __all__ = [
     "DEFAULT_BASE_URL",
     "Client",
+    "SubEtha",
     "Deduper",
     "DeviceAuth",
     "DeviceKey",

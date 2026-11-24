@@ -32,7 +32,7 @@ export interface SubEthaCore {
   unwrapTopicKeyJson(wrappedJson: string, seed: ArrayBuffer): ArrayBuffer | undefined;
 }
 
-import type { DeviceSigner, Envelope, KeyUnwrapper } from "@subetha/sdk";
+import type { DeviceSigner, Envelope, KeyUnwrapper, KeyWrapper, WrappedKey } from "@subetha/sdk";
 
 /** The name the ubrn-generated package is published under. */
 export const CORE_PACKAGE = "@subetha/react-native-core";
@@ -125,5 +125,15 @@ export function coreKeyUnwrapper(core: SubEthaCore, seed: Uint8Array | ArrayBuff
         return null;
       }
     },
+  };
+}
+
+/**
+ * Wraps topic keys for recipient devices with the Rust core, for `client.shareTopicKey(..., { wrapper })`
+ * (Hermes has no WebCrypto X25519).
+ */
+export function coreKeyWrapper(core: SubEthaCore): KeyWrapper {
+  return {
+    wrap: (key, meta) => JSON.parse(core.wrapTopicKeyJson(toArrayBuffer(key), meta.topic, meta.kid, meta.to)) as WrappedKey,
   };
 }

@@ -89,6 +89,7 @@ export function Edge({ fg, client }: { fg: string; client: SubEtha | null }) {
   // and this tab signs what it sends with a per-session device key.
   const core = useCore();
   const seed = useMemo(() => (core ? core.newDeviceKey() : null), [core]);
+  const nodeCoreRef = useRef<typeof core>(null);
   useEffect(() => () => {
     qrAnim.current?.stop();
     mic.current?.stop();
@@ -99,9 +100,18 @@ export function Edge({ fg, client }: { fg: string; client: SubEtha | null }) {
   }, []);
 
   const node = (): GossipNode => {
-    const n = (nodeRef.current ??= createEdgeNode({ core }));
-    n.subscribe(topic.trim());
-    return n;
+    if (!nodeRef.current || (core && nodeCoreRef.current !== core)) {
+      const prev = nodeRef.current;
+      const next = createEdgeNode({ core });
+      if (prev) {
+        for (const t of prev.subscribedTopics()) next.subscribe(t);
+        for (const e of prev.storedEnvelopes()) next.publish(e);
+      }
+      nodeRef.current = next;
+      nodeCoreRef.current = core;
+    }
+    nodeRef.current.subscribe(topic.trim());
+    return nodeRef.current;
   };
   const say = (s: string) => setStatus(s);
   const fail = (e: unknown) => say(String((e as Error)?.message ?? e));

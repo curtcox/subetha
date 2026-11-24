@@ -17,8 +17,25 @@ const scriptOrigin = (() => {
   }
 })();
 
+function parseKeyAttr(raw: string | null): Uint8Array | null {
+  if (!raw) return null;
+  const s = raw.trim();
+  if (/^[0-9a-f]{64}$/i.test(s)) return protocol.hexDecode(s);
+  try {
+    const b = protocol.base64urlDecode(s);
+    return b.length === 32 ? b : null;
+  } catch { return null; }
+}
+
 function clientFor(el: HTMLElement) {
-  return new SubEtha({ baseUrl: el.getAttribute("base-url") ?? scriptOrigin, token: el.getAttribute("token") ?? undefined });
+  const topic = el.getAttribute("topic") ?? "";
+  const rawKey = parseKeyAttr(el.getAttribute("key"));
+  const kid = el.getAttribute("kid") ?? "k1";
+  const topicKeys: Record<string, { kid: string; key: Uint8Array }> = {};
+  if (rawKey && topic) {
+    for (const t of topic.split(",").map((x) => x.trim()).filter(Boolean)) topicKeys[t] = { kid, key: rawKey };
+  }
+  return new SubEtha({ baseUrl: el.getAttribute("base-url") ?? scriptOrigin, token: el.getAttribute("token") ?? undefined, ...(Object.keys(topicKeys).length ? { topicKeys } : {}) });
 }
 
 function safeHref(u: unknown): string | null {
@@ -38,7 +55,7 @@ function listAttr(el: HTMLElement, name: string): string[] | undefined {
 }
 
 class SubEthaFeed extends HTMLElement {
-  static observedAttributes = ["topic", "token", "base-url", "since", "priority", "tags", "max"];
+  static observedAttributes = ["topic", "token", "base-url", "since", "priority", "tags", "max", "key", "kid"];
   private sub?: { close(): void };
   private mounted = false;
 
@@ -101,10 +118,26 @@ class SubEthaFeed extends HTMLElement {
 }
 
 class SubEthaSend extends HTMLElement {
+  static observedAttributes = ["topic", "token", "base-url", "placeholder", "label", "title", "priority", "tags", "key", "kid"];
+  private mounted = false;
+
   connectedCallback() {
+    this.mounted = true;
+    this.render();
+  }
+
+  attributeChangedCallback(_name: string, prev: string | null, next: string | null) {
+    if (this.mounted && prev !== next) this.render();
+  }
+
+  disconnectedCallback() {
+    this.mounted = false;
+  }
+
+  private render() {
     const topic = this.getAttribute("topic");
-    if (!topic) return;
     const root = this.shadowRoot ?? this.attachShadow({ mode: "open" });
+    if (!topic) { root.replaceChildren(); return; }
     const style = document.createElement("style");
     style.textContent = ":host{display:inline-block}";
     const form = document.createElement("form");

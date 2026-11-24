@@ -2,6 +2,7 @@
 import type { Envelope, Transport } from "./protocol/index.ts";
 import type { TransportEstimate } from "./routing.ts";
 import type { SubEtha } from "./client.ts";
+import type { GossipNode } from "./edge/gossip.ts";
 
 export interface TransportCapabilities {
   kind: Transport;
@@ -51,5 +52,34 @@ export class RelayTransport implements TransportModule {
   async costEstimate(envelope: Envelope): Promise<number> {
     const est = await this.client.estimate(envelope.topic, envelope.message ?? "");
     return est.estimate_usd_micros;
+  }
+}
+
+/** Edge-side TransportModule adapter (BLE, audio, QR, or LAN) backed by a GossipNode; always $0. */
+export class EdgeGossipTransport implements TransportModule {
+  private readonly kind: "ble" | "audio" | "qr" | "lan";
+  private readonly node: GossipNode;
+  private readonly onPublish?: (env: Envelope) => void | Promise<void>;
+  constructor(kind: "ble" | "audio" | "qr" | "lan", node: GossipNode, onPublish?: (env: Envelope) => void | Promise<void>) {
+    this.kind = kind;
+    this.node = node;
+    this.onPublish = onPublish;
+  }
+  capabilities(): TransportCapabilities {
+    const latency = this.kind === "lan" ? 15 : this.kind === "ble" ? 250 : this.kind === "qr" ? 1500 : 2500;
+    const maxBytes = this.kind === "audio" ? 190 : 4096;
+    return { kind: this.kind, edge: true, direction: "in/out", maxPayloadBytes: maxBytes, typicalLatencyMs: latency, supportsE2ee: true };
+  }
+  async send(envelope: Envelope): Promise<SendResult> {
+    this.node.publish(envelope);
+    await this.onPublish?.(envelope);
+    return { transport: this.kind, id: envelope.id, costUsdMicros: 0 };
+  }
+  async receive(topic?: string): Promise<Envelope[]> {
+    const all = this.node.storedEnvelopes();
+    return topic ? all.filter((e) => e.topic === topic) : all;
+  }
+  costEstimate(): number {
+    return 0;
   }
 }

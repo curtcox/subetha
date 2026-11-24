@@ -93,6 +93,16 @@ export class GossipNode {
     return this.subscriptions.has(topic) || this.relayable.has(topic);
   }
 
+  /** Subscribed topics on this gossip node. */
+  subscribedTopics(): string[] {
+    return [...this.subscriptions];
+  }
+
+  /** Snapshot of all envelopes currently held in the gossip store. */
+  storedEnvelopes(): Envelope[] {
+    return [...this.store.values()];
+  }
+
   hasSeen(id: string): boolean {
     return this.seen.has(id.toUpperCase());
   }

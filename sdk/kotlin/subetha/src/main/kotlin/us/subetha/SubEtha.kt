@@ -47,15 +47,26 @@ public class SubEtha @JvmOverloads constructor(
     private val deviceSigner: DeviceSigner? = null,
     private val signRequests: Boolean = false,
     private val crypto: EnvelopeCrypto? = null,
-    private val topicKeys: Map<String, TopicKey> = emptyMap(),
+    topicKeys: Map<String, TopicKey> = emptyMap(),
     private val transport: HttpTransport = UrlConnectionTransport(),
     private val clock: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
     public val baseUrl: String = baseUrl.trimEnd('/')
+    private val topicKeys: java.util.concurrent.ConcurrentHashMap<String, TopicKey> = java.util.concurrent.ConcurrentHashMap(topicKeys)
 
     init {
         require(!signRequests || deviceSigner != null) { "signRequests needs a deviceSigner" }
         require(topicKeys.isEmpty() || crypto != null) { "topicKeys need an EnvelopeCrypto (us.subetha:subetha-core)" }
+    }
+
+    /** Set or clear (with null) the E2EE topic key used automatically for [topic]. */
+    public fun setTopicKey(topic: String, key: TopicKey?) {
+        if (key == null) {
+            topicKeys.remove(topic)
+            return
+        }
+        require(crypto != null) { "topicKeys need an EnvelopeCrypto (us.subetha:subetha-core)" }
+        topicKeys[topic] = key
     }
 
     // ---------------------------------------------------------------- HTTP

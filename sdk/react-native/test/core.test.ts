@@ -118,4 +118,23 @@ describe("coreKeyUnwrapper", () => {
     expect(JSON.parse(seen[0]!)).toEqual(wrapped); // created_at stripped
     expect(seen).toHaveLength(2);
   });
+
+  it("wraps topic keys through coreKeyWrapper for client.shareTopicKey", async () => {
+    const dev = await sdk.deviceKeyFromSeed(SEED);
+    const topicKey = new Uint8Array(32).fill(9);
+    const preWrapped = await sdk.wrapTopicKey(topicKey, { topic: "@a/vault", kid: "k2", to: dev.deviceId });
+    const core = {
+      ...fakeCore,
+      wrapTopicKeyJson: () => JSON.stringify(preWrapped),
+    } as unknown as SubEthaCore;
+    let uploaded: unknown = null;
+    const fetch = (async (_u: RequestInfo | URL, init?: RequestInit) => {
+      uploaded = JSON.parse(String(init?.body ?? "{}"));
+      return Response.json({ stored: 1 });
+    }) as typeof globalThis.fetch;
+    const client = new sdk.SubEtha({ baseUrl: "https://relay.test", token: "t", fetch });
+    const res = await client.shareTopicKey("@a/vault", "k2", topicKey, [dev.deviceId], { wrapper: rn.coreKeyWrapper(core) });
+    expect(res).toEqual({ stored: 1 });
+    expect(uploaded).toEqual({ keys: [preWrapped] });
+  });
 });

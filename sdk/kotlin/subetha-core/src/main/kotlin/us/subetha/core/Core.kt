@@ -60,6 +60,10 @@ object CoreKeyWrap {
     fun wrap(key: ByteArray, topic: String, kid: String, deviceId: String): String = wrapTopicKeyJson(key, topic, kid, deviceId)
 }
 
+/** Re-exports for store-and-forward outbox and LRU deduper backed by the Rust core. */
+typealias CoreOutbox = us.subetha.core.ffi.CoreOutbox
+typealias CoreDeduper = us.subetha.core.ffi.CoreDeduper
+
 /** Whether libsubetha_core can be loaded in this process. */
 object Core {
     val available: Boolean by lazy {

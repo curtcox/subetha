@@ -41,15 +41,26 @@ class SubEtha {
     this.deviceSigner,
     this.signRequests = false,
     this.crypto,
-    this.topicKeys = const {},
+    Map<String, TopicKey> topicKeys = const {},
     http.Client? httpClient,
     int Function()? clock,
   })  : baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), ''),
+        topicKeys = Map<String, TopicKey>.of(topicKeys),
         _http = httpClient ?? http.Client(),
         _ownsHttp = httpClient == null,
         clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch ~/ 1000) {
     if (signRequests && deviceSigner == null) throw ArgumentError('signRequests needs a deviceSigner');
-    if (topicKeys.isNotEmpty && crypto == null) throw ArgumentError('topicKeys need an EnvelopeCrypto (core binding)');
+    if (this.topicKeys.isNotEmpty && crypto == null) throw ArgumentError('topicKeys need an EnvelopeCrypto (core binding)');
+  }
+
+  /// Sets or clears (when [key] is null) the E2EE topic key used automatically for [topic].
+  void setTopicKey(String topic, TopicKey? key) {
+    if (key == null) {
+      topicKeys.remove(topic);
+      return;
+    }
+    if (crypto == null) throw StateError('topicKeys need an EnvelopeCrypto (core binding)');
+    topicKeys[topic] = key;
   }
 
   /// Closes the HTTP client if this instance created it.

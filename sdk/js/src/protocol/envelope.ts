@@ -69,16 +69,27 @@ export function validateEnvelope(env: unknown): string[] {
   opt("tags", (v) => Array.isArray(v) && v.length <= 16 && v.every((t) => isStr(t, 64)), "up to 16 strings");
   opt("click", (v) => isStr(v, 2048), "string");
   opt("icon", (v) => isStr(v, 2048), "string");
-  opt("actions", (v) => Array.isArray(v) && v.length <= 3 && v.every((a) =>
-    typeof a === "object" && a !== null && ["view", "http", "broadcast"].includes((a as Action).action) && typeof (a as Action).label === "string"),
-    "up to 3 actions with action and label");
-  opt("attachment", (v) => typeof v === "object" && v !== null && typeof (v as Attachment).name === "string" && typeof (v as Attachment).url === "string", "needs name and url");
+  opt("actions", (v) => Array.isArray(v) && v.length <= 3 && v.every((a) => {
+    if (typeof a !== "object" || a === null) return false;
+    const act = a as Action;
+    return ["view", "http", "broadcast"].includes(act.action) && typeof act.label === "string" &&
+      (act.url === undefined || isStr(act.url, 2048)) &&
+      (act.clear === undefined || typeof act.clear === "boolean");
+  }), "up to 3 actions with action and label");
+  opt("attachment", (v) => {
+    if (typeof v !== "object" || v === null) return false;
+    const att = v as Attachment;
+    return typeof att.name === "string" && typeof att.url === "string" &&
+      (att.size === undefined || isInt(att.size, 0)) &&
+      (att.type === undefined || typeof att.type === "string") &&
+      (att.expires === undefined || isInt(att.expires, 0));
+  }, "needs name and url");
   opt("content_type", (v) => CONTENT_TYPES.includes(v as string), "unsupported content type");
   opt("sender", (v) => typeof v === "string" && DEVICE_ID_RE.test(v), "must be a device id");
   opt("sig", (v) => typeof v === "string" && /^ed25519:[A-Za-z0-9_-]{86}$/.test(v), "must be ed25519:<base64url>");
   opt("enc", (v) => {
     const x = v as Enc;
-    return typeof v === "object" && v !== null && x.alg === "xchacha20poly1305" && typeof x.kid === "string" && /^[A-Za-z0-9_-]{32}$/.test(x.nonce);
+    return typeof v === "object" && v !== null && x.alg === "xchacha20poly1305" && typeof x.kid === "string" && x.kid.length > 0 && x.kid.length <= 64 && /^[A-Za-z0-9_-]{32}$/.test(x.nonce);
   }, "invalid enc block");
   opt("route", (v) => {
     if (typeof v !== "object" || v === null) return false;

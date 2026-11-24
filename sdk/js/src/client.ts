@@ -5,9 +5,12 @@ import {
   type DeviceKey, type Envelope, type RouteMode, type Transport, type WrappedKey,
 } from "./protocol/index.ts";
 
+export type TokenProvider = string | (() => string | null | undefined | Promise<string | null | undefined>);
+
 export interface ClientOptions {
   baseUrl?: string;
-  token?: string;
+  /** Static bearer token or an async/sync provider (e.g. Clerk `() => getToken()` so short-lived JWTs stay fresh). */
+  token?: TokenProvider;
   fetch?: typeof fetch;
   /** Sign every publish with this device key (spec §4). Shorthand for `signer: webCryptoSigner(deviceKey)`. */
   deviceKey?: DeviceKey;
@@ -29,6 +32,11 @@ export interface ClientOptions {
 export interface KeyUnwrapper {
   deviceId: string;
   unwrap(w: WrappedKey): Uint8Array | null | Promise<Uint8Array | null>;
+}
+
+/** Wraps a topic key for a recipient device (spec §5.1). For runtimes without WebCrypto X25519. */
+export interface KeyWrapper {
+  wrap(key: Uint8Array, meta: { topic: string; kid: string; to: string }): WrappedKey | Promise<WrappedKey>;
 }
 
 export interface PublishOptions {
@@ -137,7 +145,7 @@ const topicPath = (topics: string | string[]) => (Array.isArray(topics) ? topics
 
 export class SubEtha {
   readonly baseUrl: string;
-  private readonly token?: string;
+  private readonly token?: TokenProvider;
   private f: typeof fetch;
   private readonly signer?: DeviceSigner;
   private readonly deviceKey?: DeviceKey;
@@ -173,14 +181,21 @@ export class SubEtha {
     }
   }
 
-  private headers(extra: Record<string, string> = {}): Record<string, string> {
-    return { ...(this.token ? { authorization: `Bearer ${this.token}` } : {}), ...extra };
+  private async resolveToken(): Promise<string | undefined> {
+    if (!this.token) return undefined;
+    const t = typeof this.token === "function" ? await this.token() : this.token;
+    return t || undefined;
+  }
+
+  private async headers(extra: Record<string, string> = {}): Promise<Record<string, string>> {
+    const t = await this.resolveToken();
+    return { ...(t ? { authorization: `Bearer ${t}` } : {}), ...extra };
   }
 
   async request<T = unknown>(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
     const r = await this.f(`${this.baseUrl}${path}`, {
       method,
-      headers: this.headers(body !== undefined ? { "content-type": "application/json", ...headers } : headers),
+      headers: await this.headers(body !== undefined ? { "content-type": "application/json", ...headers } : headers),
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     const text = await r.text();
@@ -249,7 +264,7 @@ export class SubEtha {
     return this.request<Estimate>("POST", "/", env, { "x-dry-run": "1" });
   }
 
-  private fileHeaders(file: { name: string; type?: string }, o: PublishOptions & { message?: string } = {}, extra: Record<string, string> = {}): Record<string, string> {
+  private async fileHeaders(file: { name: string; type?: string }, o: PublishOptions & { message?: string } = {}, extra: Record<string, string> = {}): Promise<Record<string, string>> {
     const h: Record<string, string> = { "content-type": file.type || "application/octet-stream", "x-filename": file.name, ...extra };
     if (o.message) h["x-message"] = o.message;
     if (o.title) h["x-title"] = o.title;
@@ -273,7 +288,7 @@ export class SubEtha {
   async publishFile(topic: string, file: { name: string; bytes: Uint8Array; type?: string }, o: PublishOptions & { message?: string } = {}): Promise<Envelope> {
     const r = await this.f(`${this.baseUrl}/${topicPath(topic)}`, {
       method: "PUT",
-      headers: this.fileHeaders(file, o),
+      headers: await this.fileHeaders(file, o),
       body: file.bytes as BodyInit,
     });
     const text = await r.text();
@@ -286,7 +301,7 @@ export class SubEtha {
   async estimateFile(topic: string, file: { name: string; bytes: Uint8Array; type?: string }, o: PublishOptions & { message?: string } = {}): Promise<Estimate> {
     const r = await this.f(`${this.baseUrl}/${topicPath(topic)}`, {
       method: "PUT",
-      headers: this.fileHeaders(file, o, { "x-dry-run": "1" }),
+      headers: await this.fileHeaders(file, o, { "x-dry-run": "1" }),
       body: file.bytes as BodyInit,
     });
     const text = await r.text();
@@ -307,7 +322,7 @@ export class SubEtha {
 
   /** Cached messages (since defaults to "all"). */
   async poll(topics: string | string[], o: { since?: string; priority?: number[]; tags?: string[] } = {}): Promise<Envelope[]> {
-    const r = await this.f(`${this.baseUrl}/${topicPath(topics)}/json${this.query({ ...o, since: o.since ?? "all", poll: true })}`, { headers: this.headers() });
+    const r = await this.f(`${this.baseUrl}/${topicPath(topics)}/json${this.query({ ...o, since: o.since ?? "all", poll: true })}`, { headers: await this.headers() });
     const text = await r.text();
     if (!r.ok) throw new SubEthaError(r.status, (() => { try { return JSON.parse(text); } catch { return { message: text }; } })());
     const out: Envelope[] = [];
@@ -339,11 +354,13 @@ export class SubEtha {
     let abort: AbortController | null = null;
     let backoff = 500;
     const list = Array.isArray(topics) ? topics : [topics];
-    const mode = o.transport === undefined || o.transport === "auto" ? (this.WS && list.length === 1 && !this.signRequests ? "ws" : "stream") : o.transport;
+    const autoMode = o.transport === undefined || o.transport === "auto";
+    let mode: "ws" | "stream" | "poll" = autoMode ? (this.WS && list.length === 1 && !this.signRequests ? "ws" : "stream") : (o.transport as "ws" | "stream" | "poll");
+    let wsFailuresWithoutOpen = 0;
 
     const deliver = async (raw: Envelope) => {
       if (raw.event && raw.event !== "message") {
-        if (raw.event === "open") { backoff = 500; o.onOpen?.(); }
+        if (raw.event === "open") { backoff = 500; wsFailuresWithoutOpen = 0; o.onOpen?.(); }
         return;
       }
       if (!dedupe.accept(raw)) return;
@@ -370,13 +387,30 @@ export class SubEtha {
       if (closed) return;
       const q = this.query({ since, priority: o.priority, tags: o.tags });
       if (mode === "ws") {
-        const url = new URL(`${this.baseUrl}/${topicPath(list)}/ws${q}`);
-        url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-        if (this.token) url.searchParams.set("auth", btoa(`Bearer ${this.token}`).replace(/=+$/, ""));
-        ws = new this.WS!(url.toString());
-        ws.addEventListener("message", (e: MessageEvent) => void deliver(JSON.parse(String(e.data))).catch((err) => o.onError?.(err)));
-        ws.addEventListener("close", () => { ws = null; if (!closed) fail(new Error("websocket closed")); });
-        ws.addEventListener("error", () => {});
+        try {
+          const url = new URL(`${this.baseUrl}/${topicPath(list)}/ws${q}`);
+          url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+          const t = typeof this.token === "function" ? (await this.token()) || undefined : this.token;
+          if (t) url.searchParams.set("auth", btoa(`Bearer ${t}`).replace(/=+$/, ""));
+          if (closed) return;
+          ws = new this.WS!(url.toString());
+          let opened = false;
+          ws.addEventListener("open", () => { opened = true; });
+          ws.addEventListener("message", (e: MessageEvent) => void deliver(JSON.parse(String(e.data))).catch((err) => o.onError?.(err)));
+          ws.addEventListener("close", () => {
+            ws = null;
+            if (closed) return;
+            if (autoMode && !opened && ++wsFailuresWithoutOpen >= 2) {
+              mode = "stream";
+              backoff = 500;
+            }
+            fail(new Error("websocket closed"));
+          });
+          ws.addEventListener("error", () => {});
+        } catch (e) {
+          if (autoMode) mode = "stream";
+          fail(e);
+        }
         return;
       }
       if (mode === "poll") {
@@ -391,7 +425,7 @@ export class SubEtha {
       }
       abort = new AbortController();
       try {
-        const r = await this.f(`${this.baseUrl}/${topicPath(list)}/json${q}`, { headers: this.headers(), signal: abort.signal });
+        const r = await this.f(`${this.baseUrl}/${topicPath(list)}/json${q}`, { headers: await this.headers(), signal: abort.signal });
         if (!r.ok || !r.body) throw new SubEthaError(r.status, (await r.json().catch(() => ({}))) as Record<string, unknown>);
         const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
         let buf = "";
@@ -426,20 +460,27 @@ export class SubEtha {
   }
 
   // ---- control plane ----
-  account() { return this.request<{ id: string; handle: string | null; balance_usd_micros: number; reserved_usd_micros?: number; tier: string; has_saved_card?: boolean; auto_recharge?: { threshold_micros: number; amount_micros: number } | null; daily_cap_micros?: number | null; monthly_cap_micros?: number | null; allow_transports?: Transport[] | null; deny_transports?: Transport[] | null; paused?: boolean; telephony_countries?: string[]; telephony_circuit?: string | null }>("GET", "/v1/account"); }
-  updateAccount(body: { handle?: string; paused?: boolean; daily_cap_usd?: number | null; monthly_cap_usd?: number | null; allow_transports?: Transport[] | null; deny_transports?: Transport[] | null; oauth_daily_cap_usd?: number | null; telephony_countries?: string[]; auto_recharge?: { threshold_usd: number; amount_usd: number } | null }) {
-    return this.request<Record<string, unknown>>("PATCH", "/v1/account", body);
+  account() { return this.request<{ id: string; handle: string | null; email?: string | null; balance_usd_micros: number; reserved_usd_micros?: number; tier: string; has_saved_card?: boolean; auto_recharge?: { threshold_micros: number; amount_micros: number } | null; auto_recharge_last_error?: string | null; daily_cap_micros?: number | null; monthly_cap_micros?: number | null; allow_transports?: Transport[] | null; deny_transports?: Transport[] | null; oauth_daily_cap_micros?: number | null; paused?: boolean; telephony_countries?: string[]; telephony_circuit?: string | null }>("GET", "/v1/account"); }
+  updateAccount(body: { handle?: string; paused?: boolean; daily_cap_micros?: number | null; monthly_cap_micros?: number | null; oauth_daily_cap_micros?: number | null; daily_cap_usd?: number | null; monthly_cap_usd?: number | null; oauth_daily_cap_usd?: number | null; allow_transports?: Transport[] | null; deny_transports?: Transport[] | null; telephony_countries?: string[]; auto_recharge?: { threshold_usd: number; amount_usd: number } | null }) {
+    const { daily_cap_usd, monthly_cap_usd, oauth_daily_cap_usd, ...rest } = body;
+    const payload: Record<string, unknown> = { ...rest };
+    if (daily_cap_usd !== undefined && payload.daily_cap_micros === undefined) payload.daily_cap_micros = daily_cap_usd === null ? null : Math.round(daily_cap_usd * 1e6);
+    if (monthly_cap_usd !== undefined && payload.monthly_cap_micros === undefined) payload.monthly_cap_micros = monthly_cap_usd === null ? null : Math.round(monthly_cap_usd * 1e6);
+    if (oauth_daily_cap_usd !== undefined && payload.oauth_daily_cap_micros === undefined) payload.oauth_daily_cap_micros = oauth_daily_cap_usd === null ? null : Math.round(oauth_daily_cap_usd * 1e6);
+    return this.request<Record<string, unknown>>("PATCH", "/v1/account", payload);
   }
   balance() { return this.request<{ available_usd_micros: number; reserved_usd_micros: number }>("GET", "/v1/balance"); }
-  ledger(after = 0) { return this.request<{ entries: unknown[] }>("GET", `/v1/ledger?after=${after}`); }
+  ledger(after = 0, limit = 100) { return this.request<{ entries: unknown[] }>("GET", `/v1/ledger?after=${after}&limit=${limit}`); }
   usage(days = 30) { return this.request<Record<string, unknown>>("GET", `/v1/usage?days=${days}`); }
-  audit(limit = 50) { return this.request<{ entries: Record<string, unknown>[] }>("GET", `/v1/audit?limit=${limit}`); }
+  audit(limit = 50, before?: number) { return this.request<{ entries: Record<string, unknown>[]; next_before?: number | null }>("GET", `/v1/audit?limit=${limit}${before ? `&before=${before}` : ""}`); }
   /**
    * Wraps a topic key for each device (spec §5.1) and uploads the wrapped keys (PUT /v1/keys).
    * The relay stores them but can't read them. Needs an admin token for a topic you own.
+   * Pass `wrapper` where WebCrypto X25519 is missing (React Native: `coreKeyWrapper`).
    */
-  async shareTopicKey(topic: string, kid: string, key: Uint8Array, deviceIds: string[]): Promise<{ stored: number }> {
-    const wrapped = await Promise.all(deviceIds.map((to) => wrapTopicKey(key, { topic, kid, to })));
+  async shareTopicKey(topic: string, kid: string, key: Uint8Array, deviceIds: string[], o: { wrapper?: KeyWrapper } = {}): Promise<{ stored: number }> {
+    const wrap = o.wrapper ? (to: string) => o.wrapper!.wrap(key, { topic, kid, to }) : (to: string) => wrapTopicKey(key, { topic, kid, to });
+    const wrapped = await Promise.all(deviceIds.map(wrap));
     let stored = 0;
     for (let i = 0; i < wrapped.length; i += 100) {
       stored += (await this.request<{ stored: number }>("PUT", "/v1/keys", { keys: wrapped.slice(i, i + 100) })).stored;
@@ -494,22 +535,25 @@ export class SubEtha {
 
   /** The HTML receipt for one payment (GET /v1/payments/{id}/receipt). */
   async receipt(id: string): Promise<string> {
-    const r = await this.f(`${this.baseUrl}/v1/payments/${encodeURIComponent(id)}/receipt`, { headers: this.headers() });
+    const r = await this.f(`${this.baseUrl}/v1/payments/${encodeURIComponent(id)}/receipt`, { headers: await this.headers() });
     const text = await r.text();
     if (!r.ok) throw new SubEthaError(r.status, (() => { try { return JSON.parse(text); } catch { return { message: text }; } })());
     return text;
   }
   payments(limit = 50) { return this.request<{ payments: { id: string; kind: "checkout" | "auto_recharge"; amount_micros: number; fee_micros: number; credit_micros: number; refunded_micros: number; disputed: boolean; created_at: number }[] }>("GET", `/v1/payments?limit=${limit}`); }
   prices() { return this.request<Record<string, unknown>>("GET", "/v1/prices"); }
+  destinationPrices() { return this.request<Record<string, unknown>>("GET", "/v1/prices/destinations"); }
   createToken(body: { name?: string; scopes: string[]; transports?: Transport[]; deny_transports?: Transport[]; daily_cap_usd?: number; total_cap_usd?: number; origins?: string[]; ips?: string[]; expires_in_s?: number }) {
     return this.request<{ id: string; token: string; scopes: string[] }>("POST", "/v1/tokens", body);
   }
   listTokens() { return this.request<{ tokens: unknown[] }>("GET", "/v1/tokens"); }
   revokeToken(id: string) { return this.request("DELETE", `/v1/tokens/${encodeURIComponent(id)}`); }
   topics() { return this.request<{ topics: { name: string; policy: Record<string, unknown>; endpoint_subscriptions?: number; created_at?: number }[] }>("GET", "/v1/topics"); }
-  topic(topic: string) { return this.request<Record<string, unknown>>("GET", `/v1/topics/${topic}`); }
-  configureTopic(topic: string, policy: Record<string, unknown>) { return this.request("PUT", `/v1/topics/${topic}`, { policy }); }
-  deleteTopic(topic: string) { return this.request<{ deleted: true }>("DELETE", `/v1/topics/${topic}`); }
+  topic(topic: string) { return this.request<Record<string, unknown>>("GET", `/v1/topics/${topicPath(topic)}`); }
+  configureTopic(topic: string, policy: Record<string, unknown>) { return this.request("PUT", `/v1/topics/${topicPath(topic)}`, { policy }); }
+  deleteTopic(topic: string) { return this.request<{ deleted: true }>("DELETE", `/v1/topics/${topicPath(topic)}`); }
+  listSlackTeams() { return this.request<{ teams: { team_id: string; team_name: string; created_at: number }[] }>("GET", "/v1/slack/teams"); }
+  slackInstallUrl() { return this.request<{ url: string }>("GET", "/v1/slack/install"); }
   listDevices() { return this.request<{ devices: Record<string, unknown>[] }>("GET", "/v1/devices"); }
   updateDevice(id: string, body: { name?: string; capabilities?: string[]; paused?: boolean; allow_transports?: Transport[] | null; deny_transports?: Transport[] | null }) {
     return this.request<Record<string, unknown>>("PATCH", `/v1/devices/${encodeURIComponent(id)}`, body);

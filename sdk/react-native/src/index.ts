@@ -8,7 +8,7 @@
 import { SubEtha, type ClientOptions, type Envelope, type SubscribeOptions, type Subscription } from "@subetha/sdk";
 
 export * from "@subetha/sdk";
-export { coreKeyUnwrapper, coreSigner, coreVerifier, loadCore, urlParts, type SubEthaCore } from "./core.ts";
+export { coreKeyUnwrapper, coreKeyWrapper, coreSigner, coreVerifier, loadCore, urlParts, type SubEthaCore } from "./core.ts";
 import { coreSigner, coreVerifier, type SubEthaCore } from "./core.ts";
 
 /** Options for the React Native client: the JS SDK's, plus the Rust core when it's installed. */

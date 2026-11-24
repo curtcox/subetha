@@ -35,7 +35,22 @@
   },
   "publishConfig": {
     "exports": {
-      ".": "./dist/index.js"
+      ".": {
+        "types": "./dist/types/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./protocol": {
+        "types": "./dist/types/protocol/index.d.ts",
+        "import": "./dist/protocol.js"
+      },
+      "./edge": {
+        "types": "./dist/types/edge/index.d.ts",
+        "import": "./dist/edge-lib.js"
+      },
+      "./edge/lan-node": {
+        "types": "./dist/types/edge/lan-node.d.ts",
+        "import": "./dist/edge-lan-node.js"
+      }
     }
   }
 }

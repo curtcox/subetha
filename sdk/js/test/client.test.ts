@@ -152,4 +152,24 @@ describe("SubEtha client", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(acks).toContain("01JD0000000000000000000001");
   });
+
+  it("supports dynamic async token providers, updateAccount micros conversion, topic encoding, and custom KeyWrapper", async () => {
+    let n = 0;
+    const { f, calls } = mockFetch((u, init) => {
+      if (u.endsWith("/v1/keys")) return new Response(JSON.stringify({ stored: JSON.parse(init.body as string).keys.length }));
+      return new Response(JSON.stringify({ ok: true }));
+    });
+    const c = new SubEtha({ baseUrl: "https://x.test", token: async () => `jwt_${++n}`, fetch: f });
+    await c.balance();
+    await c.updateAccount({ daily_cap_usd: 2.5, monthly_cap_micros: 10_000_000, paused: false });
+    await c.topic("@a/b");
+    const wrappedRes = await c.shareTopicKey("@a/b", "k1", new Uint8Array(32).fill(7), ["dev_a"], {
+      wrapper: { wrap: (_k, m) => ({ alg: "x25519-xchacha20poly1305", topic: m.topic, kid: m.kid, to: m.to, epk: "A".repeat(43), nonce: "B".repeat(32), ct: "C".repeat(64) }) },
+    });
+    expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer jwt_1");
+    expect((calls[1]!.init.headers as Record<string, string>).authorization).toBe("Bearer jwt_2");
+    expect(JSON.parse(calls[1]!.init.body as string)).toEqual({ daily_cap_micros: 2_500_000, monthly_cap_micros: 10_000_000, paused: false });
+    expect(calls[2]!.url).toBe("https://x.test/v1/topics/%40a/b");
+    expect(wrappedRes).toEqual({ stored: 1 });
+  });
 });

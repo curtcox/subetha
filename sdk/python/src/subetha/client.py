@@ -300,6 +300,11 @@ class Client:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         return self._json(self._http.post("/", content=body, headers=headers))
 
+    def estimate(self, topic: str, message: str = "test", **kwargs: Any) -> dict[str, Any]:
+        """Dry-run cost estimate and delivery plan for ``publish``."""
+        kwargs["dry_run"] = True
+        return self.publish(topic, message, **kwargs)
+
     def publish_file(
         self,
         topic: str,
@@ -312,6 +317,10 @@ class Client:
         priority: int | str | None = None,
         tags: Sequence[str] | None = None,
         click: str | None = None,
+        icon: str | None = None,
+        actions: Sequence[Mapping[str, Any]] | None = None,
+        expires: int | None = None,
+        markdown: bool = False,
         route: str | Mapping[str, Any] | None = None,
         idempotency_key: str | None = None,
         dry_run: bool = False,
@@ -331,6 +340,14 @@ class Client:
             headers["X-Tags"] = ",".join(str(t) for t in tags)
         if click is not None:
             headers["X-Click"] = click
+        if icon is not None:
+            headers["X-Icon"] = icon
+        if actions is not None:
+            headers["X-Actions"] = json.dumps([dict(a) for a in actions], separators=(",", ":"))
+        if expires is not None:
+            headers["X-Expires"] = str(int(expires))
+        if markdown:
+            headers["X-Markdown"] = "1"
         r = _normalize_route(route)
         if r:
             headers.update(_route_headers(r))
@@ -544,8 +561,42 @@ class Client:
     def account(self) -> dict[str, Any]:
         return self._json(self._http.get("/v1/account"))
 
+    def update_account(self, **body: Any) -> dict[str, Any]:
+        return self._json(self._http.patch("/v1/account", json=body))
+
     def balance(self) -> dict[str, Any]:
         return self._json(self._http.get("/v1/balance"))
+
+    def ledger(self, *, after: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+        return list(self._json(self._http.get("/v1/ledger", params={"after": str(after), "limit": str(limit)})).get("entries", []))
+
+    def usage(self, *, days: int = 30) -> dict[str, Any]:
+        return self._json(self._http.get("/v1/usage", params={"days": str(days)}))
+
+    def audit(self, *, limit: int = 50, before: int | None = None) -> dict[str, Any]:
+        params = {"limit": str(limit)}
+        if before is not None:
+            params["before"] = str(before)
+        return self._json(self._http.get("/v1/audit", params=params))
+
+    def payments(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        return list(self._json(self._http.get("/v1/payments", params={"limit": str(limit)})).get("payments", []))
+
+    def receipt(self, payment_id: str) -> str:
+        resp = self._http.get(f"/v1/payments/{payment_id}/receipt")
+        if resp.status_code >= 400:
+            raise SubEthaError.from_response(resp)
+        return resp.text
+
+    def checkout(self, amount_usd: float, *, save_card: bool = False, success_url: str | None = None, cancel_url: str | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {"amount_usd": amount_usd}
+        if save_card:
+            payload["save_card"] = True
+        if success_url is not None:
+            payload["success_url"] = success_url
+        if cancel_url is not None:
+            payload["cancel_url"] = cancel_url
+        return self._json(self._http.post("/v1/billing/checkout", json=payload))
 
     def prices(self) -> dict[str, Any]:
         return self._json(self._http.get("/v1/prices"))
@@ -555,6 +606,9 @@ class Client:
 
     def topics(self) -> list[dict[str, Any]]:
         return list(self._json(self._http.get("/v1/topics")).get("topics", []))
+
+    def topic(self, topic: str) -> dict[str, Any]:
+        return self._json(self._http.get(f"/v1/topics/{topic}"))
 
     def configure_topic(self, topic: str, policy: Mapping[str, Any]) -> dict[str, Any]:
         return self._json(self._http.put(f"/v1/topics/{topic}", json={"policy": dict(policy)}))
@@ -574,8 +628,44 @@ class Client:
     def list_devices(self) -> list[dict[str, Any]]:
         return list(self._json(self._http.get("/v1/devices")).get("devices", []))
 
+    def update_device(self, device_id: str, **body: Any) -> dict[str, Any]:
+        return self._json(self._http.patch(f"/v1/devices/{device_id}", json=body))
+
     def revoke_device(self, device_id: str) -> dict[str, Any]:
         return self._json(self._http.delete(f"/v1/devices/{device_id}"))
+
+    def approve_device(self, user_code: str) -> dict[str, Any]:
+        return self._json(self._http.post("/v1/device/approve", json={"user_code": user_code}))
+
+    def list_endpoints(self) -> list[dict[str, Any]]:
+        return list(self._json(self._http.get("/v1/endpoints")).get("endpoints", []))
+
+    def create_endpoint(self, kind: str, address: str, **extra: Any) -> dict[str, Any]:
+        return self._json(self._http.post("/v1/endpoints", json={"kind": kind, "address": address, **extra}))
+
+    def verify_endpoint(self, endpoint_id: str, code: str) -> dict[str, Any]:
+        return self._json(self._http.post(f"/v1/endpoints/{endpoint_id}/verify", json={"code": code}))
+
+    def update_endpoint(self, endpoint_id: str, **body: Any) -> dict[str, Any]:
+        return self._json(self._http.patch(f"/v1/endpoints/{endpoint_id}", json=body))
+
+    def test_endpoint(self, endpoint_id: str, **body: Any) -> dict[str, Any]:
+        return self._json(self._http.post(f"/v1/endpoints/{endpoint_id}/test", json=body))
+
+    def delete_endpoint(self, endpoint_id: str) -> dict[str, Any]:
+        return self._json(self._http.delete(f"/v1/endpoints/{endpoint_id}"))
+
+    def list_subscriptions(self) -> list[dict[str, Any]]:
+        return list(self._json(self._http.get("/v1/subscriptions")).get("subscriptions", []))
+
+    def create_subscription(self, topic: str, endpoint_id: str, **extra: Any) -> dict[str, Any]:
+        return self._json(self._http.post("/v1/subscriptions", json={"topic": topic, "endpoint_id": endpoint_id, **extra}))
+
+    def update_subscription(self, subscription_id: str, **body: Any) -> dict[str, Any]:
+        return self._json(self._http.patch(f"/v1/subscriptions/{subscription_id}", json=body))
+
+    def delete_subscription(self, subscription_id: str) -> dict[str, Any]:
+        return self._json(self._http.delete(f"/v1/subscriptions/{subscription_id}"))
 
     # -- helpers --
 
