@@ -91,14 +91,29 @@ export class AccountDO extends DurableObject<Env> {
   // ---------- auto-recharge ----------
   /** Enable (or disable with null) auto-recharge. The alarm tops up when available < threshold. */
   async setAutoRecharge(cfg: AutoRecharge | null): Promise<void> {
-    if (cfg) await this.ctx.storage.put("auto_recharge", cfg);
-    else await this.ctx.storage.delete("auto_recharge");
+    if (cfg) {
+      await this.ctx.storage.put("auto_recharge", cfg);
+      await this.ctx.storage.delete("auto_recharge_last_error");
+    } else {
+      await this.ctx.storage.delete("auto_recharge");
+    }
     await this.scheduleJournal();
+  }
+
+  async autoRechargeLastError(): Promise<string | null> {
+    return (await this.ctx.storage.get<string>("auto_recharge_last_error")) ?? null;
   }
 
   async autoRechargeFailed(reason: string): Promise<void> {
     await this.ctx.storage.delete("auto_recharge");
     await this.ctx.storage.put("auto_recharge_last_error", reason);
+    const accountId = await this.ctx.storage.get<string>("account_id");
+    if (accountId) {
+      await this.env.DB.prepare("UPDATE accounts SET auto_recharge = NULL WHERE id = ?").bind(accountId).run().catch(() => {});
+      await this.env.CACHE.delete(`acct:${accountId}`).catch(() => {});
+      await this.env.DB.prepare("INSERT INTO audit_log (account_id, actor, action, detail, time) VALUES (?, ?, ?, ?, ?)")
+        .bind(accountId, "system", "billing.auto_recharge_disabled", JSON.stringify({ reason }), Date.now()).run().catch(() => {});
+    }
   }
 
   private async maybeRecharge(now: number) {
@@ -117,8 +132,13 @@ export class AccountDO extends DurableObject<Env> {
     }
   }
 
+  private async scheduleAlarmAt(at: number) {
+    const cur = await this.ctx.storage.getAlarm();
+    if (cur === null || at < cur) await this.ctx.storage.setAlarm(at);
+  }
+
   private async scheduleJournal() {
-    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + 5_000);
+    await this.scheduleAlarmAt(Date.now() + 5_000);
   }
 
   async balance(): Promise<Balance> {
@@ -152,7 +172,10 @@ export class AccountDO extends DurableObject<Env> {
   }
   private static PAUSED: ReserveResult = { ok: false, code: "spend_cap_exceeded", cap: "account_paused", remaining: 0 };
 
-  async charge(amount: number, ref: string, tokenId: string | null, caps: Caps, once = false, meta?: string): Promise<ReserveResult> {
+  async charge(amount: number, ref: string, tokenId: string | null, caps: Caps, once = false, meta?: string, bypassControls = false): Promise<ReserveResult> {
+    if (bypassControls) {
+      return this.tx(() => this.ledger.charge(amount, ref, { tokenId, caps, once, meta }));
+    }
     const c = await this.withControls(caps);
     if (!c) return AccountDO.PAUSED;
     return this.tx(() => this.ledger.charge(amount, ref, { tokenId, caps: c, once, meta }));
@@ -216,21 +239,22 @@ export class AccountDO extends DurableObject<Env> {
     });
   }
 
-  async lease(min: number, max: number, ref: string) {
+  async lease(min: number, max: number, ref: string): Promise<{ granted: number; shortfall?: number; reason?: "paused" | "account_daily" | "account_monthly" | "insufficient_balance" }> {
     const c = await this.getControls();
-    if (c.paused) return { granted: 0 as const, shortfall: min };
+    if (c.paused) return { granted: 0, shortfall: min, reason: "paused" };
     const nowIso = new Date().toISOString();
     if (c.dailyCapMicros != null) {
       const left = c.dailyCapMicros - this.store.getSpend("a", nowIso.slice(0, 10));
-      if (left < min) return { granted: 0 as const, shortfall: min - Math.max(0, left) };
+      if (left < min) return { granted: 0, shortfall: min - Math.max(0, left), reason: "account_daily" };
       max = Math.min(max, left);
     }
     if (c.monthlyCapMicros != null) {
       const left = c.monthlyCapMicros - this.store.getSpend("a", nowIso.slice(0, 7));
-      if (left < min) return { granted: 0 as const, shortfall: min - Math.max(0, left) };
+      if (left < min) return { granted: 0, shortfall: min - Math.max(0, left), reason: "account_monthly" };
       max = Math.min(max, left);
     }
-    return this.tx(() => this.ledger.lease(min, max, ref));
+    const r = this.tx(() => this.ledger.lease(min, max, ref));
+    return r.granted === 0 ? { ...r, reason: "insufficient_balance" } : r;
   }
 
   async returnLease(ref: string, unused: number, meta?: string) {
@@ -270,22 +294,33 @@ export class AccountDO extends DurableObject<Env> {
     const journaled = (await this.ctx.storage.get<number>("journaled_seq")) ?? 0;
     const batch = await this.entries(journaled, 500);
     if (batch.length === 0) return;
+    let failed = false;
     try {
       await this.env.DB.batch(batch.map((e) =>
         this.env.DB.prepare("INSERT OR IGNORE INTO ledger_journal (account_id, seq, kind, amount, ref, available_after, reserved_after, time, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
           .bind(accountId, e.seq, e.kind, e.amount, e.ref, e.available_after, e.reserved_after, e.time, e.meta ?? null)));
       await this.ctx.storage.put("journaled_seq", batch[batch.length - 1]!.seq);
     } catch (err) {
+      failed = true;
       console.error("journal failed", err);
     }
-    if (batch.length === 500) await this.ctx.storage.setAlarm(Date.now() + 1_000);
+    if (failed) await this.scheduleAlarmAt(Date.now() + 15_000);
+    else if (batch.length === 500) await this.scheduleAlarmAt(Date.now() + 1_000);
   }
 
-  /** Delivery reservations older than a day are settled in full (the action may have happened). */
+  /** Delivery and test reservations older than a day are settled in full (the action may have happened). */
   private sweepStaleReservations(now: number) {
-    const stale = this.ctx.storage.sql.exec<{ ref: string; amount: number }>("SELECT ref, amount FROM reservations WHERE time < ? AND ref LIKE 'dlv:%'", now - 86_400_000).toArray();
-    for (const r of stale) this.tx(() => this.ledger.settle(r.ref, r.amount));
-    if (this.ctx.storage.sql.exec("SELECT 1 FROM reservations LIMIT 1").toArray().length) void this.ctx.storage.setAlarm(now + 3_600_000);
+    const stale = this.ctx.storage.sql.exec<{ ref: string; amount: number }>(
+      "SELECT ref, amount FROM reservations WHERE time < ? AND (ref LIKE 'dlv:%' OR ref LIKE 'test:%')",
+      now - 86_400_000,
+    ).toArray();
+    for (const r of stale) {
+      this.tx(() => {
+        this.ledger.settle(r.ref, r.amount);
+        this.store.takeTelephonyRef(r.ref);
+      });
+    }
+    if (this.ctx.storage.sql.exec("SELECT 1 FROM reservations LIMIT 1").toArray().length) void this.scheduleAlarmAt(now + 3_600_000);
   }
 
   /** Single-use claim of a device request signature (replay protection within the skew window). */
@@ -304,7 +339,7 @@ export class AccountDO extends DurableObject<Env> {
   }
 }
 
-export type AccountRpc = Pick<AccountDO, "usage" | "balance" | "topup" | "charge" | "reserve" | "settle" | "release" | "lease" | "returnLease" | "adjust" | "entries" | "setAccountId" | "setAutoRecharge" | "autoRechargeFailed" | "trackTokenSpend" | "refundTokenSpend" | "setControls" | "claimNonce">;
+export type AccountRpc = Pick<AccountDO, "usage" | "balance" | "topup" | "charge" | "reserve" | "settle" | "release" | "lease" | "returnLease" | "adjust" | "entries" | "setAccountId" | "setAutoRecharge" | "autoRechargeLastError" | "autoRechargeFailed" | "trackTokenSpend" | "refundTokenSpend" | "setControls" | "claimNonce">;
 
 export function accountStub(env: Env, accountId: string): AccountRpc {
   return env.ACCOUNT.get(env.ACCOUNT.idFromName(accountId)) as unknown as AccountRpc;

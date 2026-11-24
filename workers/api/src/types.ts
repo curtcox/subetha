@@ -81,7 +81,7 @@ export interface TopicMeta {
 
 export type Principal =
   | { kind: "anonymous" }
-  | { kind: "token"; accountId: string; tokenId: string; scopes: string[]; caps: { daily: number | null; total: number | null }; transports: Transport[] | null; denyTransports?: Transport[] | null }
+  | { kind: "token"; accountId: string; tokenId: string; scopes: string[]; caps: { daily: number | null; total: number | null }; transports: Transport[] | null; denyTransports?: Transport[] | null; origins?: string[] | null; ips?: string[] | null; expiresAt?: number | null }
   | { kind: "user"; accountId: string | null; clerkId: string; orgId?: string; orgRole?: string }
   | { kind: "device"; accountId: string; deviceId: string; transports: Transport[] | null; denyTransports: Transport[] | null };
 
@@ -104,6 +104,8 @@ export interface PublishInput {
   autoCreateAccountTransports?: { allow: Transport[] | null; deny: Transport[] | null };
   /** Account pricing tier to apply if the topic is auto-created. */
   autoCreateTier?: string;
+  /** Account kill-switch state to apply if the topic is auto-created. */
+  autoCreateAccountPaused?: boolean;
   idempotencyKey: string | null;
   bodyHash: string;
   dryRun: boolean;
@@ -119,6 +121,8 @@ export interface PublishResult {
   cost_micros: number;
   plan: PlannedDelivery[];
   dry_run: boolean;
+  /** Storage expiry epoch seconds (always set, even when signed/encrypted envelopes omit `expires`). */
+  store_until?: number;
 }
 
 export interface DeliveryJob {

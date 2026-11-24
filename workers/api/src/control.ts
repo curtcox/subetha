@@ -13,7 +13,7 @@ import { topicStub } from "./durable/topic.ts";
 import { ApiError, unwrap } from "./errors.ts";
 import { EMAIL_RE, sendEmail } from "./delivery/email.ts";
 import { verifySlackSignature } from "./delivery/slack.ts";
-import { ackToken, fetchInboundMedia, makeCall, sendSms, sendWhatsApp, verifyTwilioSignature, voiceMinutes, voiceTwiml } from "./delivery/twilio.ts";
+import { ackToken, fetchInboundMedia, makeCall, sendSms, sendWhatsApp, smsSegments, verifyTwilioSignature, voiceMinutes, voiceTwiml } from "./delivery/twilio.ts";
 import { DEST_PRICES_KEY, destUnitPrice, INTL_COUNTRIES, phoneCountry, type DestinationPrices } from "./delivery/destinations.ts";
 import type { Env, Principal, QueuedSubscription, SubscriptionFilter } from "./types.ts";
 import { registerDeviceRoutes } from "./devices.ts";
@@ -471,11 +471,15 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     if (!cfg.inbound_topic) return twiml(c);
     // First image attachment becomes the message's attachment; other media types are dropped.
     const media = Number(params.NumMedia ?? 0) > 0 && c.env.FILES ? await fetchInboundMedia(c.env, params.MediaUrl0 ?? "").catch(() => null) : null;
+    const rawSegs = Number(params.NumSegments);
+    const segments = !isWhatsapp && !media
+      ? Math.max(1, Math.min(20, Number.isFinite(rawSegs) && rawSegs >= 1 ? Math.ceil(rawSegs) : smsSegments(body)))
+      : 1;
     const sku = isWhatsapp ? "inbound_whatsapp" : media ? "inbound_mms_us" : "inbound_sms_us";
-    const price = actionPriceMicros(PRICES, sku, await accountTier(c.env, ep.account_id));
-    const charge = await accountStub(c.env, ep.account_id).charge(price, `insms:${params.MessageSid}`, null, {}, true);
+    const price = actionPriceMicros(PRICES, sku, await accountTier(c.env, ep.account_id)) * segments;
+    const charge = await accountStub(c.env, ep.account_id).charge(price, `insms:${params.MessageSid}`, null, {}, true, `sku=${sku}`);
     if (!charge.ok) return twiml(c);
-    emitMetric(c.env, { accountId: ep.account_id, event: isWhatsapp ? "inbound_whatsapp" : "inbound_sms", transport: kind, sku, revenueMicros: price, providerCostMicros: estimatedCostMicros(sku) });
+    emitMetric(c.env, { accountId: ep.account_id, event: isWhatsapp ? "inbound_whatsapp" : "inbound_sms", transport: kind, sku, revenueMicros: price, providerCostMicros: estimatedCostMicros(sku, segments), units: segments });
     const stored = media ? await storeAttachment(c.env, media) : null;
     const envelope = {
       topic: cfg.inbound_topic,
@@ -495,7 +499,8 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
       }));
     } catch (e) {
       if (stored) await discardAttachment(c.env, stored.fileId);
-      throw e;
+      console.error("inbound twilio publish failed", e);
+      return twiml(c);
     }
     if (stored) await recordAttachment(c.env, stored.fileId, media!, cfg.inbound_topic, result);
     return twiml(c);

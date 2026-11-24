@@ -36,6 +36,8 @@ export interface SubscribeParams {
   filter: SubscriptionFilter;
   caller: Caller;
   poll: boolean;
+  /** Optional transport override for policy/metering (e.g. "mcp" from the MCP worker). */
+  transport?: "ws" | "sse" | "poll" | "mcp";
 }
 
 const enc = new TextEncoder();
@@ -57,6 +59,7 @@ export class TopicDO extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private meta: TopicMeta | null = null;
   private accountTransports: { allow: Transport[] | null; deny: Transport[] | null } = { allow: null, deny: null };
+  private accountPaused = false;
   private leases: Lease[] = [];
   private nanoDebt = 0;
   private readonly streams = new Map<string, Stream>();
@@ -78,6 +81,7 @@ export class TopicDO extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => {
       this.meta = this.kvGet<TopicMeta>("meta");
       this.accountTransports = this.kvGet<{ allow: Transport[] | null; deny: Transport[] | null }>("account_transports") ?? { allow: null, deny: null };
+      this.accountPaused = this.kvGet<boolean>("account_paused") ?? false;
       this.leases = this.kvGet<Lease[]>("leases") ?? [];
       this.nanoDebt = this.kvGet<number>("nano_debt") ?? 0;
     });
@@ -137,6 +141,15 @@ export class TopicDO extends DurableObject<Env> {
     this.kvPut("account_transports", this.accountTransports);
   }
 
+  async setAccountPaused(paused: boolean): Promise<void> {
+    this.accountPaused = paused;
+    this.kvPut("account_paused", paused);
+    if (paused) {
+      this.closeAll(4403, "account paused");
+      await this.returnLeases(true);
+    }
+  }
+
   async setTier(tier: string): Promise<void> {
     if (!this.meta) return;
     this.meta = { ...this.meta, tier };
@@ -180,7 +193,7 @@ export class TopicDO extends DurableObject<Env> {
 
   // ---------- money ----------
   /** Read-side spend (polls, streams, backlog) also counts toward the topic's daily and monthly caps. */
-  private async spendOwnerCapped(micros: number): Promise<"ok" | "cap_daily" | "cap_monthly" | "broke"> {
+  private async spendOwnerCapped(micros: number): Promise<"ok" | "cap_daily" | "cap_monthly" | "paused" | "account_daily" | "account_monthly" | "broke"> {
     const dailyCap = this.meta?.policy.daily_cap_micros;
     const monthlyCap = this.meta?.policy.monthly_cap_micros;
     const dayKey = `topic_spend:${today()}`;
@@ -192,10 +205,11 @@ export class TopicDO extends DurableObject<Env> {
     // Count it before awaiting, so concurrent requests can't all pass the same check.
     this.kvPut(dayKey, daySpent + micros);
     this.kvPut(monthKey, monthSpent + micros);
-    if (!(await this.spendOwner(micros))) {
+    const paid = await this.spendOwner(micros);
+    if (paid !== "ok") {
       this.bump(dayKey, -micros);
       this.bump(monthKey, -micros);
-      return "broke";
+      return paid;
     }
     return "ok";
   }
@@ -204,10 +218,24 @@ export class TopicDO extends DurableObject<Env> {
    * Token (and OAuth client) spend caps cover everything the token causes, reads included,
    * even though the topic owner pays for reads.
    */
-  private async capTokenRead(caller: Caller, micros: number): Promise<void> {
-    if (!caller.tokenId || !caller.accountId || (caller.caps.daily == null && caller.caps.total == null)) return;
+  private async capTokenRead(caller: Caller, micros: number): Promise<boolean> {
+    if (!caller.tokenId || !caller.accountId || (caller.caps.daily == null && caller.caps.total == null)) return false;
     const r = await accountStub(this.env, caller.accountId).trackTokenSpend(caller.tokenId, micros, { tokenDaily: caller.caps.daily, tokenTotal: caller.caps.total });
     if (!r.ok && r.code === "spend_cap_exceeded") throw rpcError("spend_cap_exceeded", `spend cap reached: ${r.cap}`, { cap: r.cap, remaining_usd_micros: r.remaining });
+    return true;
+  }
+
+  private async refundTokenRead(caller: Caller, micros: number): Promise<void> {
+    if (!caller.tokenId || !caller.accountId || micros <= 0) return;
+    await accountStub(this.env, caller.accountId).refundTokenSpend(caller.tokenId, micros).catch(() => {});
+  }
+
+  private spendFailureError(reason: Exclude<Awaited<ReturnType<TopicDO["spendOwnerCapped"]>>, "ok">, anonymous = false): Error {
+    if (reason === "paused") return rpcError("topic_paused", "account is paused");
+    if (reason === "cap_daily") return rpcError("spend_cap_exceeded", "topic daily cap reached", { cap: "topic_daily" });
+    if (reason === "cap_monthly") return rpcError("spend_cap_exceeded", "topic monthly cap reached", { cap: "topic_monthly" });
+    if (reason === "account_daily" || reason === "account_monthly") return rpcError("spend_cap_exceeded", `spend cap reached: ${reason}`, { cap: reason });
+    return rpcError(anonymous ? "no_funded_owner" : "insufficient_balance", "topic owner's balance cannot cover delivery", { payer: "topic_owner" });
   }
 
   /** Lease bookkeeping spans awaits (input gates stay open during RPC), so it is serialized. */
@@ -219,25 +247,26 @@ export class TopicDO extends DurableObject<Env> {
   }
 
   /** Spend µ$ from the owner's credit leases, taking a new lease if needed. */
-  private spendOwner(micros: number, nanos = 0): Promise<boolean> {
+  private spendOwner(micros: number, nanos = 0, ownerOverride?: string): Promise<"ok" | "paused" | "account_daily" | "account_monthly" | "broke"> {
     if (!Number.isSafeInteger(micros) || micros < 0 || !Number.isFinite(nanos) || nanos < 0) throw new Error(`invalid spend: ${micros} µ$ ${nanos} n$`);
-    return this.withMoney(() => this.spendOwnerLocked(micros, Math.ceil(nanos)));
+    return this.withMoney(() => this.spendOwnerLocked(micros, Math.ceil(nanos), ownerOverride));
   }
 
-  private async spendOwnerLocked(micros: number, nanos: number): Promise<boolean> {
+  private async spendOwnerLocked(micros: number, nanos: number, ownerOverride?: string): Promise<"ok" | "paused" | "account_daily" | "account_monthly" | "broke"> {
+    if (this.accountPaused) return "paused";
     this.nanoDebt += nanos;
     const fromNanos = Math.floor(this.nanoDebt / 1000);
     const total = micros + fromNanos;
     if (total === 0) {
       this.persistMoney();
-      return true;
+      return "ok";
     }
     const have = this.leases.reduce((n, l) => n + l.remaining, 0);
     if (have < total) {
-      const ok = await this.takeLease(total - have);
-      if (!ok) {
+      const leased = await this.takeLease(total - have, ownerOverride);
+      if (leased !== "ok") {
         this.nanoDebt -= nanos;
-        return false;
+        return leased;
       }
     }
     let need = total;
@@ -252,7 +281,7 @@ export class TopicDO extends DurableObject<Env> {
     this.nanoDebt -= fromNanos * 1000;
     this.persistMoney();
     await this.ensureAlarm();
-    return true;
+    return "ok";
   }
 
   /** Give back owner spend for an action that didn't happen (spread across leases, newest first). */
@@ -268,14 +297,21 @@ export class TopicDO extends DurableObject<Env> {
     this.persistMoney();
   }
 
-  private async takeLease(min: number): Promise<boolean> {
-    if (!this.meta) return false;
-    const ref = `lease:${this.meta.name}:${ulid()}`;
-    const r = await accountStub(this.env, this.meta.owner).lease(min, Math.max(min, LEASE_MICROS), ref);
-    if (r.granted === 0) return false;
+  private async takeLease(min: number, ownerOverride?: string): Promise<"ok" | "paused" | "account_daily" | "account_monthly" | "broke"> {
+    const owner = ownerOverride ?? this.meta?.owner;
+    const name = this.meta?.name ?? "new";
+    if (!owner) return "broke";
+    const ref = `lease:${name}:${ulid()}`;
+    const r = await accountStub(this.env, owner).lease(min, Math.max(min, LEASE_MICROS), ref);
+    if (r.granted === 0) {
+      if (r.reason === "paused") return "paused";
+      if (r.reason === "account_daily") return "account_daily";
+      if (r.reason === "account_monthly") return "account_monthly";
+      return "broke";
+    }
     this.leases.push({ ref, granted: r.granted, remaining: r.granted, at: Date.now() });
     this.persistMoney();
-    return true;
+    return "ok";
   }
 
   private returnLeases(all: boolean): Promise<void> {
@@ -309,8 +345,7 @@ export class TopicDO extends DurableObject<Env> {
   }
 
   // ---------- permissions ----------
-  private canPublish(c: Caller): boolean {
-    const m = this.meta!;
+  private canPublish(c: Caller, m: TopicMeta = this.meta!): boolean {
     return c.accountId === m.owner || !!m.policy.public_publish || idMatch(m.policy.allowed_publishers, c);
   }
 
@@ -327,14 +362,20 @@ export class TopicDO extends DurableObject<Env> {
   private async publishInner(input: PublishInput): Promise<PublishResult> {
     // Read before any check below: a KV read lets other requests interleave.
     const dest = await this.destPrices();
-    let created = false;
-    if (!this.meta) {
+    const pendingCreate = !this.meta;
+    let meta: TopicMeta;
+    let effectiveTransports = this.accountTransports;
+    let effectiveAccountPaused = this.accountPaused;
+    if (pendingCreate) {
       if (!input.autoCreateOwner) throw rpcError("no_funded_owner", "topic has no owner; create it first");
-      await this.configure({ name: input.envelope.topic, owner: input.autoCreateOwner, policy: {}, created_at: Date.now(), tier: input.autoCreateTier ?? "standard" }, input.autoCreateAccountTransports);
-      created = true;
+      meta = { name: input.envelope.topic, owner: input.autoCreateOwner, policy: {}, created_at: Date.now(), tier: input.autoCreateTier ?? "standard" };
+      if (input.autoCreateAccountTransports) effectiveTransports = input.autoCreateAccountTransports;
+      if (input.autoCreateAccountPaused) effectiveAccountPaused = true;
+    } else {
+      meta = this.meta!;
     }
-    const meta = this.meta!;
     const { caller } = input;
+    if (effectiveAccountPaused) throw rpcError("topic_paused", "account is paused");
     if (meta.policy.paused) throw rpcError("topic_paused");
 
     // Signatures (spec §4).
@@ -346,20 +387,26 @@ export class TopicDO extends DurableObject<Env> {
     const signed = env.sig !== undefined;
     if (env.sender !== undefined && !signed) throw rpcError("invalid_message", "sender is only accepted on signed messages");
     const signer: Caller = signed ? { ...caller, deviceId: env.sender as string } : caller;
-    if (!this.canPublish(signer)) throw rpcError("forbidden", "not allowed to publish to this topic");
+    if (!this.canPublish(signer, meta)) throw rpcError("forbidden", "not allowed to publish to this topic");
     const anonymous = caller.accountId === null;
+    const tier = meta.tier ?? "standard";
 
     // Idempotency.
-    if (input.idempotencyKey) {
+    if (input.idempotencyKey && !pendingCreate) {
       const row = this.sql.exec<{ body_hash: string; message_id: string }>("SELECT body_hash, message_id FROM idem WHERE key = ?", input.idempotencyKey).toArray()[0];
       if (row) {
         if (row.body_hash !== input.bodyHash) throw rpcError("conflict", "Idempotency-Key reused with a different request");
         const msg = this.messageById(row.message_id);
         if (msg) {
           // A replay is still an API request: charged, and rate limited when anonymous.
-          const price = actionPriceMicros(PRICES, "api_request", this.tier());
-          if (anonymous) { this.anonRateLimit(Date.now()); if ((await this.spendOwnerCapped(price)) !== "ok") throw rpcError("no_funded_owner"); }
-          else await this.chargeCaller(caller, price, `idem:${row.message_id}:${ulid()}`);
+          const price = actionPriceMicros(PRICES, "api_request", tier);
+          if (anonymous) {
+            this.anonRateLimit(Date.now());
+            const paid = await this.spendOwnerCapped(price);
+            if (paid !== "ok") throw this.spendFailureError(paid, true);
+          } else {
+            await this.chargeCaller(caller, price, `idem:${row.message_id}:${ulid()}`);
+          }
           return { message: msg, created_topic: false, duplicate: true, cost_micros: anonymous ? 0 : price, plan: [], dry_run: input.dryRun };
         }
       }
@@ -386,69 +433,80 @@ export class TopicDO extends DurableObject<Env> {
       if (env.priority === 3) delete env.priority;
     }
 
-    const apiPrice = actionPriceMicros(PRICES, "api_request", this.tier());
+    const idKey = env.id!.toUpperCase();
+    const apiPrice = actionPriceMicros(PRICES, "api_request", tier);
     // Signed messages are accepted for MAX_MESSAGE_AGE_S but stored only for the retention
     // period: remember their ids for the whole window so a captured one can't be replayed.
-    this.sql.exec("DELETE FROM seen WHERE until < ?", nowSec);
-    if (signed && !this.messageById(env.id!) && this.sql.exec("SELECT 1 FROM seen WHERE id = ?", env.id!.toUpperCase()).toArray().length) {
-      throw rpcError("conflict", "this signed message was already published");
-    }
-    const dup = this.messageById(env.id!);
-    if (dup) {
-      if (anonymous) { this.anonRateLimit(nowMs); if (!(await this.spendOwnerCapped(apiPrice).then((r) => r === "ok"))) throw rpcError("no_funded_owner"); }
-      else await this.chargeCaller(caller, apiPrice, `dup:${env.id}:${ulid()}`);
-      return { message: dup, created_topic: created, duplicate: true, cost_micros: anonymous ? 0 : apiPrice, plan: [], dry_run: input.dryRun };
+    if (!pendingCreate) {
+      this.sql.exec("DELETE FROM seen WHERE until < ?", nowSec);
+      if (signed && !this.messageById(idKey) && this.sql.exec("SELECT 1 FROM seen WHERE id = ?", idKey).toArray().length) {
+        throw rpcError("conflict", "this signed message was already published");
+      }
+      const dup = this.messageById(idKey);
+      if (dup) {
+        if (anonymous) {
+          this.anonRateLimit(nowMs);
+          const paid = await this.spendOwnerCapped(apiPrice);
+          if (paid !== "ok") throw this.spendFailureError(paid, true);
+        } else {
+          await this.chargeCaller(caller, apiPrice, `dup:${idKey}:${ulid()}`);
+        }
+        return { message: dup, created_topic: false, duplicate: true, cost_micros: anonymous ? 0 : apiPrice, plan: [], dry_run: input.dryRun, store_until: storeUntil };
+      }
     }
 
     // Plan.
-    const live = this.liveSubscribers(env);
+    const live = pendingCreate ? [] : this.liveSubscribers(env);
     const plan = planDeliveries({
       liveSubscribers: live,
-      queued: this.queuedSubs(),
+      queued: pendingCreate ? [] : this.queuedSubs(),
       mode: input.route.mode,
       priority: env.priority ?? 3,
-      allowLists: [input.route.allow, caller.transports, this.accountTransports.allow],
-      denyLists: [input.route.deny, caller.denyTransports, this.accountTransports.deny],
+      allowLists: [input.route.allow, caller.transports, effectiveTransports.allow],
+      denyLists: [input.route.deny, caller.denyTransports, effectiveTransports.deny],
       policy: meta.policy,
       maxCostMicros: input.route.maxCost,
       deadlineS: input.route.deadlineS ?? null,
       prices: PRICES,
-      tier: this.tier(),
+      tier,
       nowMs,
       units: { sms: smsSegments(smsBody(env)), voice: voiceMinutes(renderText(env, 1500)) },
       tags: env.tags ?? [],
-      destPrice: (t, country) => (t === "sms" || t === "voice" ? destUnitPrice(dest, t, country, this.tier()) : null),
+      destPrice: (t, country) => (t === "sms" || t === "voice" ? destUnitPrice(dest, t, country, tier) : null),
       mms: mmsMedia(env) !== null,
     });
-    let publishPrice = actionPriceMicros(PRICES, "publish", this.tier());
+    let publishPrice = actionPriceMicros(PRICES, "publish", tier);
     if (input.attachmentBytes) {
       const mbDays = (input.attachmentBytes / 1_048_576) * ((storeUntil - nowSec) / 86400);
-      publishPrice += actionPriceMicros(PRICES, "attachment_upload", this.tier()) + Math.ceil(rentNanos(PRICES, "attachment_mb_day", mbDays, this.tier()) / 1000);
+      publishPrice += actionPriceMicros(PRICES, "attachment_upload", tier) + Math.ceil(rentNanos(PRICES, "attachment_mb_day", mbDays, tier) / 1000);
     }
     const liveAll = new Set(live.map((l) => l.id));
     const livePlanned = plan.deliveries.filter((d) => liveAll.has(d.subscriber));
     const liveAllowedIds = new Set(livePlanned.map((d) => d.subscriber));
     const liveCost = livePlanned.reduce((n, d) => n + d.cost_micros, 0);
     const queued = plan.deliveries.filter((d) => !liveAll.has(d.subscriber));
-    const retentionNanos = rentNanos(PRICES, "retention_message_day", (storeUntil - nowSec) / 86400, this.tier());
+    const retentionNanos = rentNanos(PRICES, "retention_message_day", (storeUntil - nowSec) / 86400, tier);
+    const retentionMicros = Math.ceil(retentionNanos / 1000);
 
     if (input.dryRun) {
       if (anonymous) throw rpcError("unauthorized", "dry runs need an account (they're charged as an API request)");
-      await this.chargeCaller(caller, apiPrice, `dry:${env.id}`);
-      const estimate = publishPrice + plan.costMicros + Math.ceil(retentionNanos / 1000);
-      return { message: env, created_topic: created, duplicate: false, cost_micros: estimate, plan: caller.accountId === meta.owner ? plan.deliveries : [], dry_run: true };
+      await this.chargeCaller(caller, apiPrice, `dry:${idKey}`);
+      const estimate = publishPrice + plan.costMicros + retentionMicros;
+      return { message: env, created_topic: false, duplicate: false, cost_micros: estimate, plan: caller.accountId === meta.owner ? plan.deliveries : [], dry_run: true, store_until: storeUntil };
     }
 
     // Owner-side spend: live deliveries (+ the publish when anonymous), queued reservations,
     // and retention. Both daily counters are checked and incremented with no await in between,
     // so concurrent publishes can't all pass the same check; failures below roll them back.
-    this.topicRateLimit(nowMs);
+    this.topicRateLimit(nowMs, meta);
+    const queuedCost = queued.reduce((n, d) => n + d.cost_micros, 0);
     const ownerCost = liveCost + (anonymous ? publishPrice : 0);
-    const ownerTotal = ownerCost + queued.reduce((n, d) => n + d.cost_micros, 0);
-    const ownerAll = ownerTotal + Math.ceil(retentionNanos / 1000);
+    const ownerTotal = ownerCost + queuedCost;
+    const ownerAll = ownerTotal + retentionMicros;
+    const topicCapDelta = ownerAll + (!anonymous && caller.accountId === meta.owner ? publishPrice : 0);
     const anonKey = `anon_spend:${today()}`;
     if (anonymous) {
-      this.anonRateLimit(nowMs);
+      this.anonRateLimit(nowMs, meta);
       const spent = this.kvGet<number>(anonKey) ?? 0;
       const cap = meta.policy.anon_daily_cap_micros ?? 1_000_000;
       if (spent + ownerAll > cap) throw rpcError("spend_cap_exceeded", "anonymous daily cap reached for this topic");
@@ -457,38 +515,37 @@ export class TopicDO extends DurableObject<Env> {
     const topicMonthKey = `topic_spend_month:${thisMonth()}`;
     const topicSpent = this.kvGet<number>(topicKey) ?? 0;
     const topicMonthSpent = this.kvGet<number>(topicMonthKey) ?? 0;
-    if (meta.policy.daily_cap_micros != null && topicSpent + ownerTotal > meta.policy.daily_cap_micros) {
+    if (meta.policy.daily_cap_micros != null && topicSpent + topicCapDelta > meta.policy.daily_cap_micros) {
       throw rpcError("spend_cap_exceeded", "topic daily cap reached", { cap: "topic_daily" });
     }
-    if (meta.policy.monthly_cap_micros != null && topicMonthSpent + ownerTotal > meta.policy.monthly_cap_micros) {
+    if (meta.policy.monthly_cap_micros != null && topicMonthSpent + topicCapDelta > meta.policy.monthly_cap_micros) {
       throw rpcError("spend_cap_exceeded", "topic monthly cap reached", { cap: "topic_monthly" });
     }
     if (anonymous) this.bump(anonKey, ownerAll);
-    this.kvPut(topicKey, topicSpent + ownerTotal);
-    this.kvPut(topicMonthKey, topicMonthSpent + ownerTotal);
+    this.kvPut(topicKey, topicSpent + topicCapDelta);
+    this.kvPut(topicMonthKey, topicMonthSpent + topicCapDelta);
     let trackedTokenSpend = 0;
     const rollback = () => {
       if (anonymous) this.bump(anonKey, -ownerAll);
-      this.bump(topicKey, -ownerTotal);
-      this.bump(topicMonthKey, -ownerTotal);
+      this.bump(topicKey, -topicCapDelta);
+      this.bump(topicMonthKey, -topicCapDelta);
     };
     try {
 
     // A token of the owner's own account is capped on everything it causes, not just the publish.
     if (caller.tokenId && caller.accountId === meta.owner) {
-      const amt = ownerTotal + Math.ceil(retentionNanos / 1000);
+      const amt = ownerAll;
       const r = await accountStub(this.env, meta.owner).trackTokenSpend(caller.tokenId, amt, { tokenDaily: caller.caps.daily, tokenTotal: caller.caps.total });
       if (!r.ok && r.code === "spend_cap_exceeded") throw rpcError("spend_cap_exceeded", `spend cap reached: ${r.cap}`, { cap: r.cap, remaining_usd_micros: r.remaining });
       trackedTokenSpend = amt;
     }
 
     // Pay: owner first (lease), then the publisher (direct, with token caps).
-    if (!(await this.spendOwner(ownerCost, retentionNanos))) {
-      throw rpcError(anonymous ? "no_funded_owner" : "insufficient_balance", "topic owner's balance cannot cover delivery", { payer: "topic_owner" });
-    }
+    const paid = await this.spendOwner(ownerCost, retentionNanos, meta.owner);
+    if (paid !== "ok") throw this.spendFailureError(paid, anonymous);
     if (!anonymous) {
       try {
-        await this.chargeCaller(caller, publishPrice, `pub:${env.id}`);
+        await this.chargeCaller(caller, publishPrice, `pub:${idKey}`);
       } catch (e) {
         this.refundOwner(ownerCost, retentionNanos);
         throw e;
@@ -502,12 +559,18 @@ export class TopicDO extends DurableObject<Env> {
       throw e;
     }
 
-    // Store and fan out.
+    let created = false;
+    if (!this.meta) {
+      await this.configure(meta, input.autoCreateAccountTransports);
+      created = true;
+    }
+
+    // Store and fan out (store canonical uppercase id for case-insensitive dedupe/traces/since while preserving env.id verbatim in json).
     const json = JSON.stringify(env);
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec("INSERT INTO messages (id, time, expires, json) VALUES (?, ?, ?, ?)", env.id!, time, storeUntil, json);
-      if (signed) this.sql.exec("INSERT OR IGNORE INTO seen (id, until) VALUES (?, ?)", env.id!.toUpperCase(), time + MAX_MESSAGE_AGE_S + MAX_CLOCK_SKEW_S);
-      if (input.idempotencyKey) this.sql.exec("INSERT OR REPLACE INTO idem (key, body_hash, message_id, created) VALUES (?, ?, ?, ?)", input.idempotencyKey, input.bodyHash, env.id!, nowMs);
+      this.sql.exec("INSERT INTO messages (id, time, expires, json) VALUES (?, ?, ?, ?)", idKey, time, storeUntil, json);
+      if (signed) this.sql.exec("INSERT OR IGNORE INTO seen (id, until) VALUES (?, ?)", idKey, time + MAX_MESSAGE_AGE_S + MAX_CLOCK_SKEW_S);
+      if (input.idempotencyKey) this.sql.exec("INSERT OR REPLACE INTO idem (key, body_hash, message_id, created) VALUES (?, ?, ?, ?)", input.idempotencyKey, input.bodyHash, idKey, nowMs);
     });
     this.broadcast(env, liveAllowedIds);
 
@@ -515,43 +578,50 @@ export class TopicDO extends DurableObject<Env> {
     const jobs: { body: DeliveryJob; delaySeconds?: number }[] = [];
     const subs = new Map(this.queuedSubs().map((s) => [s.id, s]));
     const owner = accountStub(this.env, meta.owner);
+    let sentCount = 0;
     try {
-    for (const d of queued) {
-      const sub = subs.get(d.subscriber);
-      if (!sub || !this.env.DELIVERY) continue;
-      const ref = `dlv:${env.id}:${sub.id}:${ulid()}`;
-      const r = await accountStub(this.env, meta.owner).reserve(d.cost_micros, ref, null, {}, d.transport === "sms" || d.transport === "voice" || d.transport === "whatsapp" ? "telephony" : null, d.sku ? `sku=${d.sku}` : undefined);
-      if (!r.ok) {
-        this.trace(env.id!, {}, storeUntil);
-        await this.recordDelivery(env.id!, { sub: sub.id, transport: d.transport, result: "not sent", error: r.code });
-        continue;
+      for (const d of queued) {
+        const sub = subs.get(d.subscriber);
+        if (!sub || !this.env.DELIVERY) continue;
+        const ref = `dlv:${idKey}:${sub.id}:${ulid()}`;
+        const r = await accountStub(this.env, meta.owner).reserve(d.cost_micros, ref, null, {}, d.transport === "sms" || d.transport === "voice" || d.transport === "whatsapp" ? "telephony" : null, d.sku ? `sku=${d.sku}` : undefined);
+        if (!r.ok) {
+          this.trace(idKey, {}, storeUntil);
+          await this.recordDelivery(idKey, { sub: sub.id, transport: d.transport, result: "not sent", error: r.code });
+          continue;
+        }
+        const deadline_ms = input.route.deadlineS ? nowMs + input.route.deadlineS * 1000 : undefined;
+        jobs.push({ body: { topic: meta.name, owner: meta.owner, message: env, sub: { ...sub, after_s: d.after_s }, reservation: { ref, micros: d.cost_micros }, attempt: 0, sku: d.sku, mode: input.route.mode, ...(deadline_ms ? { deadline_ms } : {}) }, delaySeconds: d.after_s || undefined });
       }
-      const deadline_ms = input.route.deadlineS ? nowMs + input.route.deadlineS * 1000 : undefined;
-      jobs.push({ body: { topic: meta.name, owner: meta.owner, message: env, sub: { ...sub, after_s: d.after_s }, reservation: { ref, micros: d.cost_micros }, attempt: 0, sku: d.sku, mode: input.route.mode, ...(deadline_ms ? { deadline_ms } : {}) }, delaySeconds: d.after_s || undefined });
-    }
-    if (jobs.length && this.env.DELIVERY) await this.env.DELIVERY.sendBatch(jobs);
+      if (jobs.length && this.env.DELIVERY) {
+        // Cloudflare Queues sendBatch accepts at most 100 messages per call.
+        for (let i = 0; i < jobs.length; i += 100) {
+          await this.env.DELIVERY.sendBatch(jobs.slice(i, i + 100));
+          sentCount = Math.min(jobs.length, i + 100);
+        }
+      }
     } catch (e) {
-      // Nothing was queued: give every reservation back rather than leaving it stranded.
-      for (const j of jobs) await owner.release(j.body.reservation.ref).catch(() => {});
-      await this.recordDelivery(env.id!, { result: "queue failed", error: String((e as Error).message ?? e) });
+      // Give every unsent reservation back rather than leaving it stranded.
+      for (const j of jobs.slice(sentCount)) await owner.release(j.body.reservation.ref).catch(() => {});
+      await this.recordDelivery(idKey, { result: "queue failed", error: String((e as Error).message ?? e) });
     }
 
-    const callerCost = (anonymous ? 0 : publishPrice) + (caller.accountId === meta.owner ? liveCost + queued.reduce((n, d) => n + d.cost_micros, 0) : 0);
+    const callerCost = (anonymous ? 0 : publishPrice) + (caller.accountId === meta.owner ? liveCost + queuedCost : 0);
     emitMetric(this.env, {
       accountId: meta.owner, event: "publish", transport: livePlanned.length ? livePlanned[0]!.transport : "", sku: "publish",
       detail: meta.name, revenueMicros: publishPrice + liveCost,
       providerCostMicros: estimatedCostMicros("publish") + estimatedCostMicros("deliver_live", livePlanned.length),
       units: 1 + livePlanned.length,
     });
-    this.trace(env.id!, { published: nowMs, plan: plan.deliveries, dropped: plan.dropped, cost_micros: { publish: publishPrice, live: liveCost, queued: queued.reduce((n, d) => n + d.cost_micros, 0), retention_nanos: retentionNanos }, publisher: caller.tokenId ?? caller.deviceId ?? caller.accountId ?? "anonymous" }, storeUntil);
+    this.trace(idKey, { published: nowMs, plan: plan.deliveries, dropped: plan.dropped, cost_micros: { publish: publishPrice, live: liveCost, queued: queuedCost, retention_nanos: retentionNanos }, publisher: caller.tokenId ?? caller.deviceId ?? caller.accountId ?? "anonymous" }, storeUntil);
     await this.ensureAlarm();
-    return { message: env, created_topic: created, duplicate: false, cost_micros: callerCost, plan: caller.accountId === meta.owner ? plan.deliveries : [], dry_run: false };
+    return { message: env, created_topic: created, duplicate: false, cost_micros: callerCost, plan: caller.accountId === meta.owner ? plan.deliveries : [], dry_run: false, store_until: storeUntil };
   }
 
-  private topicRateLimit(nowMs: number) {
-    const rate = this.meta?.policy.rate_per_min;
+  private topicRateLimit(nowMs: number, meta: TopicMeta | null = this.meta) {
+    const rate = meta?.policy.rate_per_min;
     if (!rate) return;
-    const burst = this.meta?.policy.burst ?? rate;
+    const burst = meta?.policy.burst ?? rate;
     if (!this.rateBucket) this.rateBucket = { tokens: burst, at: nowMs };
     const elapsed = Math.max(0, nowMs - this.rateBucket.at);
     const tokens = Math.min(burst, this.rateBucket.tokens + (elapsed / 60_000) * rate);
@@ -559,10 +629,10 @@ export class TopicDO extends DurableObject<Env> {
     this.rateBucket = { tokens: tokens - 1, at: nowMs };
   }
 
-  private anonRateLimit(nowMs: number) {
+  private anonRateLimit(nowMs: number, meta: TopicMeta | null = this.meta) {
     const minute = Math.floor(nowMs / 60000);
     if (this.anonWindow.minute !== minute) this.anonWindow = { minute, count: 0 };
-    if (this.anonWindow.count >= (this.meta?.policy.anon_rate_per_min ?? 60)) throw rpcError("rate_limited");
+    if (this.anonWindow.count >= (meta?.policy.anon_rate_per_min ?? 60)) throw rpcError("rate_limited");
     this.anonWindow.count++;
   }
 
@@ -573,17 +643,19 @@ export class TopicDO extends DurableObject<Env> {
 
   // ---------- traces & acks ----------
   private trace(id: string, data: Record<string, unknown>, expires: number) {
-    const prev = this.sql.exec<{ json: string }>("SELECT json FROM traces WHERE id = ?", id).toArray()[0];
+    const key = id.toUpperCase();
+    const prev = this.sql.exec<{ json: string }>("SELECT json FROM traces WHERE id = ?", key).toArray()[0];
     const merged = prev ? { ...JSON.parse(prev.json), ...data } : data;
-    this.sql.exec("INSERT OR REPLACE INTO traces (id, json, expires) VALUES (?, ?, ?)", id, JSON.stringify(merged), expires);
+    this.sql.exec("INSERT OR REPLACE INTO traces (id, json, expires) VALUES (?, ?, ?)", key, JSON.stringify(merged), expires);
   }
 
   async recordDelivery(id: string, event: Record<string, unknown>): Promise<void> {
-    const prev = this.sql.exec<{ json: string; expires: number }>("SELECT json, expires FROM traces WHERE id = ?", id).toArray()[0];
+    const key = id.toUpperCase();
+    const prev = this.sql.exec<{ json: string; expires: number }>("SELECT json, expires FROM traces WHERE id = ?", key).toArray()[0];
     if (!prev) return;
     const t = JSON.parse(prev.json);
     (t.events ??= []).push({ at: Date.now(), ...event });
-    this.sql.exec("UPDATE traces SET json = ? WHERE id = ?", JSON.stringify(t), id);
+    this.sql.exec("UPDATE traces SET json = ? WHERE id = ?", JSON.stringify(t), key);
   }
 
   async getTrace(id: string, caller: Caller): Promise<RpcResult<Record<string, unknown> | null>> {
@@ -655,8 +727,9 @@ export class TopicDO extends DurableObject<Env> {
     return rows.map((r) => JSON.parse(r.json) as Envelope).filter((m) => matchesFilter(m, filter));
   }
 
-  private checkRead(caller: Caller, transport?: "ws" | "sse" | "poll") {
+  private checkRead(caller: Caller, transport?: "ws" | "sse" | "poll" | "mcp") {
     if (!this.meta) throw rpcError("not_found", "no such topic");
+    if (this.accountPaused) throw rpcError("topic_paused", "account is paused");
     if (this.meta.policy.paused) throw rpcError("topic_paused");
     if (!this.canRead(caller)) throw rpcError("forbidden", "not allowed to read this topic");
     if (transport && !transportAllowed(
@@ -664,7 +737,7 @@ export class TopicDO extends DurableObject<Env> {
       [caller.transports, this.accountTransports.allow, this.meta.policy.allow_transports],
       [caller.denyTransports, this.accountTransports.deny, this.meta.policy.deny_transports],
     )) {
-      throw rpcError("forbidden", `transport ${transport} denied by policy`);
+      throw rpcError("transport_denied", `transport ${transport} denied by policy`);
     }
   }
 
@@ -682,38 +755,48 @@ export class TopicDO extends DurableObject<Env> {
   }
 
   private async pollInner(params: SubscribeParams): Promise<Envelope[]> {
-    this.checkRead(params.caller, "poll");
+    const transport = params.transport ?? "poll";
+    this.checkRead(params.caller, transport);
     const msgs = this.backlog(params.since ?? "all", params.filter);
-    const cost = actionPriceMicros(PRICES, "api_request", this.tier()) + msgs.length * actionPriceMicros(PRICES, "deliver_live", this.tier());
-    await this.capTokenRead(params.caller, cost);
+    const deliverySku = transport === "mcp" ? "deliver_mcp" : "deliver_live";
+    const cost = actionPriceMicros(PRICES, "api_request", this.tier()) + msgs.length * actionPriceMicros(PRICES, deliverySku, this.tier());
+    const tracked = await this.capTokenRead(params.caller, cost);
     const paid = await this.spendOwnerCapped(cost);
-    if (paid === "cap_daily") throw rpcError("spend_cap_exceeded", "topic daily cap reached", { cap: "topic_daily" });
-    if (paid === "cap_monthly") throw rpcError("spend_cap_exceeded", "topic monthly cap reached", { cap: "topic_monthly" });
-    if (paid === "broke") throw rpcError("insufficient_balance", "topic owner's balance cannot cover delivery", { payer: "topic_owner" });
+    if (paid !== "ok") {
+      if (tracked) await this.refundTokenRead(params.caller, cost);
+      throw this.spendFailureError(paid);
+    }
     return msgs;
   }
 
   override async fetch(req: Request): Promise<Response> {
     const params = JSON.parse(req.headers.get("x-subetha-subscribe") ?? "null") as SubscribeParams | null;
     if (!params) return new Response("bad internal request", { status: 400 });
+    const transport = params.transport ?? (params.format === "ws" ? "ws" : "sse");
     try {
-      this.checkRead(params.caller, params.format === "ws" ? "ws" : "sse");
+      this.checkRead(params.caller, transport);
     } catch (e) {
       return new Response((e as Error).message, { status: 403 });
     }
     const backlog = this.backlog(params.since, params.filter);
-    const cost = actionPriceMicros(PRICES, "api_request", this.tier()) + backlog.length * actionPriceMicros(PRICES, "deliver_live", this.tier());
+    const deliverySku = transport === "mcp" ? "deliver_mcp" : "deliver_live";
+    const cost = actionPriceMicros(PRICES, "api_request", this.tier()) + backlog.length * actionPriceMicros(PRICES, deliverySku, this.tier());
+    let tracked = false;
     try {
-      await this.capTokenRead(params.caller, cost);
+      tracked = await this.capTokenRead(params.caller, cost);
     } catch (e) {
-      return new Response((e as Error).message.split("\u0000")[0], { status: 403 });
+      return new Response((e as Error).message, { status: 403 });
     }
     const paid = await this.spendOwnerCapped(cost);
-    if (paid === "cap_daily") return new Response("ApiError:spend_cap_exceeded:topic daily cap reached", { status: 403 });
-    if (paid === "cap_monthly") return new Response("ApiError:spend_cap_exceeded:topic monthly cap reached", { status: 403 });
-    if (paid === "broke") return new Response("ApiError:insufficient_balance:topic owner's balance cannot cover delivery", { status: 402 });
+    if (paid !== "ok") {
+      if (tracked) await this.refundTokenRead(params.caller, cost);
+      const err = this.spendFailureError(paid);
+      return new Response(err.message, { status: paid === "broke" ? 402 : 403 });
+    }
     const id = `c_${ulid()}`;
     const openEvt = { id: ulid(), time: Math.floor(Date.now() / 1000), event: "open", topic: this.meta!.name };
+    // Reset connection-rent clock when transitioning from 0 -> 1 live connections so idle periods aren't billed.
+    if (this.streams.size + this.ctx.getWebSockets().length === 0) this.kvPut("rent_at", Date.now());
     await this.ensureAlarm();
 
     if (params.format === "ws") {
@@ -811,8 +894,9 @@ export class TopicDO extends DurableObject<Env> {
     const conns = this.streams.size + this.ctx.getWebSockets().length;
     const last = this.kvGet<number>("rent_at") ?? now;
     if (conns > 0) {
-      const nanos = rentNanos(PRICES, "connection_hour", (conns * (now - last)) / 3_600_000, this.tier());
-      if (!(await this.spendOwner(0, nanos))) this.closeAll(4402, "topic owner's balance is empty");
+      const nanos = rentNanos(PRICES, "connection_hour", (conns * Math.max(0, now - last)) / 3_600_000, this.tier());
+      const paid = await this.spendOwner(0, nanos);
+      if (paid !== "ok") this.closeAll(paid === "paused" ? 4403 : 4402, paid === "paused" ? "account paused" : "topic owner's balance is empty");
     }
     this.kvPut("rent_at", now);
     await this.returnLeases(conns === 0);
@@ -824,10 +908,15 @@ export class TopicDO extends DurableObject<Env> {
   async flushLeases(): Promise<void> {
     await this.returnLeases(true);
   }
+
+  /** Close live connections matching a specific device (e.g. on device pause/revocation). */
+  async closeAllLive(code = 4403, reason = "closed"): Promise<void> {
+    this.closeAll(code, reason);
+  }
 }
 
 /** Typed RPC surface (Envelope's index signature defeats the generated Rpc types). */
-export type TopicRpc = Pick<TopicDO, "configure" | "destroy" | "setAccountTransports" | "setTier" | "getMeta" | "subscriberCounts" | "setSubscriptions" | "publish" | "checkAuth" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases">;
+export type TopicRpc = Pick<TopicDO, "configure" | "destroy" | "setAccountTransports" | "setAccountPaused" | "setTier" | "getMeta" | "subscriberCounts" | "setSubscriptions" | "publish" | "checkAuth" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases" | "closeAllLive">;
 
 export function topicStub(env: Env, topic: string): TopicRpc {
   return env.TOPIC.get(env.TOPIC.idFromName(topic)) as unknown as TopicRpc;

@@ -10,7 +10,13 @@ export interface TopicPath { topics: string[]; format: string | null }
 
 /** Parses `/@alice/doorbell/json`, `/t_xxx/sse`, `/t_a,t_b/json`, `/@alice/doorbell`. Returns null for non-topic paths. */
 export function parseTopicPath(pathname: string): TopicPath | null {
-  const path = decodeURIComponent(pathname).replace(/^\/+|\/+$/g, "");
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    throw new ApiError("bad_request", "invalid URL encoding");
+  }
+  const path = decoded.replace(/^\/+|\/+$/g, "");
   if (!path) return null;
   const first = path.split("/")[0]!;
   if (RESERVED.has(first)) return null;
@@ -51,12 +57,19 @@ function transports(v: string | null): Transport[] {
 function decodeHeader(v: string | null): string | null {
   if (!v) return v;
   return v.replace(/=\?utf-8\?([bq])\?([^?]*)\?=/gi, (_m, enc: string, text: string) => {
-    if (enc.toLowerCase() === "b") return utf8.decode(Uint8Array.from(atob(text), (c) => c.charCodeAt(0)));
+    if (enc.toLowerCase() === "b") {
+      try {
+        return utf8.decode(Uint8Array.from(atob(text), (c) => c.charCodeAt(0)));
+      } catch {
+        throw new ApiError("bad_request", "invalid base64 in RFC 2047 header");
+      }
+    }
     return text.replace(/_/g, " ").replace(/=([0-9a-f]{2})/gi, (_x, h: string) => String.fromCharCode(parseInt(h, 16)));
   });
 }
 
 export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+export const MAX_JSON_BODY_BYTES = 16 * 1024;
 
 export interface ParsedPublish {
   file?: { name: string; bytes: Uint8Array; type: string };
@@ -92,13 +105,14 @@ function parseRoute(req: Request, url: URL, env: Envelope) {
 /** Publish via PUT/POST /<topic> with ntfy headers. */
 export async function parseHeaderPublish(req: Request, topic: string): Promise<ParsedPublish> {
   const url = new URL(req.url);
-  if (header(req, url, "X-Delay", "Delay", "X-At", "X-In")) throw new ApiError("unsupported", "scheduled delivery (X-Delay) is not supported in v0");
+  if (header(req, url, "X-Delay", "Delay", "X-At", "At", "X-In", "In")) throw new ApiError("unsupported", "scheduled delivery (X-Delay) is not supported in v0");
   const buf = new Uint8Array(await req.arrayBuffer());
   const env: Envelope = { topic };
-  const filename = header(req, url, "X-Filename", "Filename", "f");
+  const attach = header(req, url, "X-Attach", "Attach", "a");
+  const filename = header(req, url, "X-Filename", "Filename", "File", "f");
   const msgParam = header(req, url, "X-Message", "Message", "m");
   let file: ParsedPublish["file"];
-  if (filename) {
+  if (filename && !attach) {
     if (buf.length > MAX_ATTACHMENT_BYTES) throw new ApiError("message_too_large", `attachments are limited to ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`);
     if (!/^[^/\\\x00-\x1f]{1,200}$/.test(filename)) throw new ApiError("bad_request", "invalid X-Filename");
     file = { name: filename, bytes: buf, type: req.headers.get("content-type") ?? "application/octet-stream" };
@@ -123,8 +137,7 @@ export async function parseHeaderPublish(req: Request, topic: string): Promise<P
   if (click) env.click = click;
   const icon = header(req, url, "X-Icon", "Icon");
   if (icon) env.icon = icon;
-  const attach = header(req, url, "X-Attach", "Attach", "a");
-  if (attach) env.attachment = { name: url.searchParams.get("filename") ?? attach.split("/").pop() ?? "file", url: attach };
+  if (attach) env.attachment = { name: filename ?? attach.split("/").pop() ?? "file", url: attach };
   const md = header(req, url, "X-Markdown", "Markdown", "md");
   const ctHdr = header(req, url, "X-Content-Type");
   if (md && ["1", "yes", "true"].includes(md.toLowerCase())) {
@@ -147,7 +160,7 @@ export async function parseHeaderPublish(req: Request, topic: string): Promise<P
     if (!Number.isSafeInteger(h) || h < 0 || h > 16) throw new ApiError("invalid_message", "X-Hops must be an integer 0..16");
     env.hops = h;
   }
-  const actions = header(req, url, "X-Actions", "Actions");
+  const actions = header(req, url, "X-Actions", "Actions", "Action");
   if (actions) env.actions = parseActions(actions);
   const sender = header(req, url, "X-Sender"), sig = header(req, url, "X-Signature"), id = header(req, url, "X-Message-Id"), time = header(req, url, "X-Time");
   if (sender) env.sender = sender;
@@ -177,8 +190,12 @@ export function parseActions(s: string): NonNullable<Envelope["actions"]> {
     const a: Record<string, unknown> = { action, label };
     if (url) a.url = url;
     for (const kv of rest) {
-      const [k, v] = kv.split("=", 2);
-      if (k && v !== undefined) a[k] = v === "true" ? true : v === "false" ? false : v;
+      const eq = kv.indexOf("=");
+      if (eq > 0) {
+        const k = kv.slice(0, eq).trim();
+        const v = kv.slice(eq + 1).trim();
+        if (k) a[k] = v === "true" ? true : v === "false" ? false : v;
+      }
     }
     return a as NonNullable<Envelope["actions"]>[number];
   });
@@ -187,16 +204,25 @@ export function parseActions(s: string): NonNullable<Envelope["actions"]> {
 /** Publish via POST / with a JSON body (ntfy JSON publishing, plus full envelopes). */
 export async function parseJsonPublish(req: Request): Promise<ParsedPublish> {
   const url = new URL(req.url);
+  if (header(req, url, "X-Delay", "Delay", "X-At", "At", "X-In", "In")) throw new ApiError("unsupported", "scheduled delivery (X-Delay) is not supported in v0");
+  const buf = new Uint8Array(await req.arrayBuffer());
+  if (buf.length > MAX_JSON_BODY_BYTES) throw new ApiError("message_too_large", `JSON publish body is limited to ${MAX_JSON_BODY_BYTES / 1024} KB`);
   let body: Record<string, unknown>;
   try {
-    body = (await req.json()) as Record<string, unknown>;
+    body = JSON.parse(utf8.decode(buf)) as Record<string, unknown>;
   } catch {
     throw new ApiError("bad_request", "body must be JSON");
   }
-  if (typeof body !== "object" || body === null) throw new ApiError("bad_request", "body must be a JSON object");
+  if (typeof body !== "object" || body === null || Array.isArray(body)) throw new ApiError("bad_request", "body must be a JSON object");
   // ntfy JSON uses string priority names sometimes, and "attach"/"filename".
   const env = { ...body } as Envelope;
-  if (typeof body.priority === "string") env.priority = parsePriority(body.priority as string);
+  if (typeof body.priority === "string") {
+    try {
+      env.priority = parsePriority(body.priority as string);
+    } catch {
+      throw new ApiError("invalid_message", "priority must be 1-5 or min|low|default|high|max|urgent");
+    }
+  }
   if (env.priority === 3) delete env.priority;
   if (typeof body.attach === "string") {
     env.attachment = { name: (body.filename as string) ?? (body.attach as string).split("/").pop() ?? "file", url: body.attach as string };
@@ -225,7 +251,13 @@ export async function parseJsonPublish(req: Request): Promise<ParsedPublish> {
 export function parseFilter(url: URL): SubscriptionFilter {
   const f: SubscriptionFilter = {};
   const p = url.searchParams.get("priority") ?? url.searchParams.get("prio") ?? url.searchParams.get("p");
-  if (p) f.priority = p.split(",").map((x) => parsePriority(x)!).filter(Boolean);
+  if (p) {
+    try {
+      f.priority = p.split(",").map((x) => parsePriority(x)!).filter(Boolean);
+    } catch {
+      throw new ApiError("bad_request", "invalid priority filter");
+    }
+  }
   const t = url.searchParams.get("tags") ?? url.searchParams.get("tag") ?? url.searchParams.get("ta");
   if (t) f.tags = t.split(",").map((s) => s.trim()).filter(Boolean);
   return f;

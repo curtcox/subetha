@@ -21,11 +21,12 @@ export async function discardAttachment(env: Env, fileId: string) {
 }
 
 /** After the publish: record the file against the stored message, or drop it for a duplicate. */
-export async function recordAttachment(env: Env, fileId: string, file: AttachmentFile, topic: string, result: { duplicate: boolean; message: Envelope }) {
+export async function recordAttachment(env: Env, fileId: string, file: AttachmentFile, topic: string, result: { duplicate: boolean; message: Envelope; store_until?: number }) {
   if (result.duplicate) return discardAttachment(env, fileId);
   const meta = await topicStub(env, topic).getMeta();
+  const expires = result.store_until ?? result.message.expires ?? (Math.floor(Date.now() / 1000) + 12 * 3600);
   await env.DB.prepare("INSERT INTO files (id, topic, owner_account_id, name, type, size, message_id, expires, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(fileId, topic, meta!.owner, file.name, file.type, file.bytes.length, result.message.id, result.message.expires, Date.now()).run();
+    .bind(fileId, topic, meta!.owner, file.name, file.type, file.bytes.length, result.message.id, expires, Date.now()).run();
 }
 
 /** Deletes all R2 attachments and D1 metadata rows for a deleted topic. */

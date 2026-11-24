@@ -88,12 +88,13 @@ export async function authenticate(req: Request, env: Env): Promise<Principal> {
     if (!row || row.revoked_at) throw new ApiError("unauthorized", "unknown or revoked token");
     if (!timingSafeEqual(row.secret_hash, await sha256Hex(m[2]!))) throw new ApiError("unauthorized", "unknown or revoked token");
     if (row.expires_at && row.expires_at < Date.now()) throw new ApiError("unauthorized", "token expired");
-    if (row.origins) {
-      const origins = JSON.parse(row.origins) as string[];
+    const parsedOrigins = row.origins ? (JSON.parse(row.origins) as string[]) : null;
+    const parsedIps = row.ips ? (JSON.parse(row.ips) as string[]) : null;
+    if (parsedOrigins) {
       const origin = req.headers.get("origin");
-      if (!origin || !origins.includes(origin)) throw new ApiError("forbidden", "token not valid for this origin");
+      if (!origin || !parsedOrigins.includes(origin)) throw new ApiError("forbidden", "token not valid for this origin");
     }
-    if (row.ips && !ipAllowed(req.headers.get("cf-connecting-ip"), JSON.parse(row.ips) as string[])) {
+    if (parsedIps && !ipAllowed(req.headers.get("cf-connecting-ip"), parsedIps)) {
       throw new ApiError("forbidden", "token not valid from this IP address");
     }
     return {
@@ -104,6 +105,9 @@ export async function authenticate(req: Request, env: Env): Promise<Principal> {
       caps: { daily: row.daily_cap_micros, total: row.total_cap_micros },
       transports: row.transports ? (JSON.parse(row.transports) as Transport[]) : null,
       denyTransports: row.deny_transports ? (JSON.parse(row.deny_transports) as Transport[]) : null,
+      origins: parsedOrigins,
+      ips: parsedIps,
+      expiresAt: row.expires_at ?? null,
     };
   }
   if (cred.startsWith("eyJ")) {

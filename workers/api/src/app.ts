@@ -4,8 +4,9 @@ import { Hono, type Context } from "hono";
 import { canonicalize, isTopic, validateEnvelope, ulid, type Envelope, type Json } from "@subetha/sdk/protocol";
 import { actionPriceMicros, topupSplit, tierFor, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
-import { accountTier, accountTransportsOf, audit, autoCreateOwnerFor, createAccount, getAccount, invalidateAccount, recomputeAccountTopups12mo, recordTopic, syncAccountTier, syncAccountTopics, validateHandle, validatePolicy } from "./accounts.ts";
+import { accountTier, accountTransportsOf, audit, autoCreateOwnerFor, createAccount, flushAccountTopicLeases, getAccount, invalidateAccount, recomputeAccountTopups12mo, recordTopic, syncAccountPaused, syncAccountTier, syncAccountTopics, validateHandle, validatePolicy } from "./accounts.ts";
 import { authenticate, callerOf, invalidateToken, newTokenSecret, requireAdmin, scopeAllows, validateScopes, validateTransports } from "./auth.ts";
+import { EMAIL_RE } from "./delivery/email.ts";
 import { sha256Hex } from "./crypto.ts";
 import { parseCidr } from "./ip.ts";
 import { accountStub } from "./durable/account.ts";
@@ -158,7 +159,8 @@ app.get("/v1/account", async (c) => {
   if (!acct) throw new ApiError("not_found");
   const [bal, telephonyCircuit] = await Promise.all([accountStub(c.env, id).balance(), checkTelephonyCircuit(c.env, id)]);
   const transports = accountTransportsOf(acct);
-  return c.json({ id: acct.id, handle: acct.handle, email: acct.email, tier: tierFor(PRICES, acct.topups_12mo_micros), balance_usd_micros: bal.available, reserved_usd_micros: bal.reserved, daily_cap_micros: acct.daily_cap_micros, monthly_cap_micros: acct.monthly_cap_micros ?? null, allow_transports: transports.allow, deny_transports: transports.deny, oauth_daily_cap_micros: acct.oauth_daily_cap_micros ?? null, telephony_countries: JSON.parse(acct.telephony_countries ?? "[]") as string[], telephony_circuit: telephonyCircuit, has_saved_card: !!acct.stripe_customer_id, auto_recharge: acct.auto_recharge ? (JSON.parse(acct.auto_recharge) as { threshold_micros: number; amount_micros: number }) : null, paused: !!acct.paused, created_at: acct.created_at });
+  const autoRechargeLastError = await accountStub(c.env, id).autoRechargeLastError();
+  return c.json({ id: acct.id, handle: acct.handle, email: acct.email, tier: tierFor(PRICES, acct.topups_12mo_micros), balance_usd_micros: bal.available, reserved_usd_micros: bal.reserved, daily_cap_micros: acct.daily_cap_micros, monthly_cap_micros: acct.monthly_cap_micros ?? null, allow_transports: transports.allow, deny_transports: transports.deny, oauth_daily_cap_micros: acct.oauth_daily_cap_micros ?? null, telephony_countries: JSON.parse(acct.telephony_countries ?? "[]") as string[], telephony_circuit: telephonyCircuit, has_saved_card: !!acct.stripe_customer_id, auto_recharge: acct.auto_recharge ? (JSON.parse(acct.auto_recharge) as { threshold_micros: number; amount_micros: number }) : null, auto_recharge_last_error: autoRechargeLastError, paused: !!acct.paused, created_at: acct.created_at });
 });
 
 app.post("/v1/account", async (c) => {
@@ -168,6 +170,9 @@ app.post("/v1/account", async (c) => {
   if (p.accountId) throw new ApiError("conflict", "account already exists");
   const body = (await c.req.json().catch(() => ({}))) as { handle?: string; email?: string };
   const handle = body.handle === undefined ? null : validateHandle(body.handle);
+  if (body.email !== undefined && body.email !== null && (typeof body.email !== "string" || !EMAIL_RE.test(body.email))) {
+    throw new ApiError("bad_request", "invalid email address");
+  }
   const acct = await createAccount(c.env, { handle, clerkId: p.clerkId, email: body.email ?? null });
   await accountStub(c.env, acct.id).setAccountId(acct.id);
   await audit(c.env, acct.id, p.clerkId, "account.create", { handle });
@@ -185,7 +190,7 @@ app.patch("/v1/account", async (c) => {
     } else {
       const customer = (acct as { stripe_customer_id?: string | null } | null)?.stripe_customer_id;
       if (!customer) throw new ApiError("conflict", "top up once with save_card: true to store a card first");
-      const threshold = Math.round(Number(body.auto_recharge.threshold_usd) * 1e6), amount = Math.round(Number(body.auto_recharge.amount_usd) * 1e6);
+      const threshold = Math.round(Number(body.auto_recharge.threshold_usd) * 1e6), amount = Math.round(Number(body.auto_recharge.amount_usd) * 100) * 10_000;
       try { topupSplit(PRICES, amount); } catch { throw new ApiError("bad_request", "amount_usd is outside the allowed top-up range"); }
       if (!(threshold >= 0 && threshold < amount)) throw new ApiError("bad_request", "threshold_usd must be ≥ 0 and below amount_usd");
       const cfg = { threshold_micros: threshold, amount_micros: amount };
@@ -235,6 +240,8 @@ app.patch("/v1/account", async (c) => {
   }
   await invalidateAccount(c.env, id);
   const updated = await getAccount(c.env, id);
+  if (body.paused !== undefined) await syncAccountPaused(c.env, id, !!body.paused);
+  else if (body.daily_cap_micros !== undefined || body.monthly_cap_micros !== undefined) await flushAccountTopicLeases(c.env, id);
   if (body.allow_transports !== undefined || body.deny_transports !== undefined) {
     const t = accountTransportsOf(updated);
     await syncAccountTopics(c.env, id, t.allow, t.deny);
@@ -251,8 +258,11 @@ app.get("/v1/balance", async (c) => {
 
 app.get("/v1/ledger", async (c) => {
   const id = requireAdmin(await principal(c));
-  const after = Number(c.req.query("after") ?? 0);
-  return c.json({ entries: await accountStub(c.env, id).entries(after, Number(c.req.query("limit") ?? 100)) });
+  const afterRaw = Number(c.req.query("after") ?? 0);
+  const after = Number.isFinite(afterRaw) && afterRaw >= 0 ? Math.floor(afterRaw) : 0;
+  const limitRaw = Number(c.req.query("limit") ?? 100);
+  const limit = Math.min(Math.max(Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 100, 1), 1000);
+  return c.json({ entries: await accountStub(c.env, id).entries(after, limit) });
 });
 
 app.get("/v1/usage", async (c) => {
@@ -275,19 +285,37 @@ app.get("/v1/audit", async (c) => {
   return c.json({ entries, next_before: entries.length === limit ? entries[entries.length - 1]!.id : null });
 });
 
+function assertSafeRedirectUrl(raw: string | undefined, name: string): string | undefined {
+  if (raw === undefined) return undefined;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new ApiError("bad_request", `${name} must be a valid URL`);
+  }
+  const isLocal = u.protocol === "http:" && (u.hostname === "localhost" || u.hostname === "127.0.0.1");
+  if (u.protocol !== "https:" && !isLocal) throw new ApiError("bad_request", `${name} must use https://`);
+  return u.toString();
+}
+
 // ---------------- billing ----------------
 app.post("/v1/billing/checkout", async (c) => {
   const id = requireAdmin(await principal(c));
   const body = (await c.req.json()) as { amount_usd?: number; success_url?: string; cancel_url?: string; save_card?: boolean };
-  const amountMicros = Math.round(Number(body.amount_usd) * 1e6);
+  const amountUsd = Number(body.amount_usd);
+  if (!Number.isFinite(amountUsd)) throw new ApiError("bad_request", "amount_usd must be a number");
+  // Quantize to whole cents to match Stripe Checkout's cent-granularity unit_amount.
+  const amountMicros = Math.round(amountUsd * 100) * 10_000;
   try {
     topupSplit(PRICES, amountMicros);
   } catch {
     throw new ApiError("bad_request", `amount_usd must be between ${PRICES.topup.min_usd_micros / 1e6} and ${PRICES.topup.max_usd_micros / 1e6}`);
   }
+  const successUrl = assertSafeRedirectUrl(body.success_url, "success_url");
+  const cancelUrl = assertSafeRedirectUrl(body.cancel_url, "cancel_url");
   const acct = await getAccount(c.env, id);
   const base = c.env.BASE_URL;
-  const s = await createCheckoutSession(c.env, { accountId: id, amountMicros, successUrl: body.success_url ?? `${base}/console/#tab=billing&topup=ok`, cancelUrl: body.cancel_url ?? `${base}/console/#tab=billing`, email: acct?.email, saveCard: !!body.save_card, customer: (acct as { stripe_customer_id?: string | null } | null)?.stripe_customer_id ?? null });
+  const s = await createCheckoutSession(c.env, { accountId: id, amountMicros, successUrl: successUrl ?? `${base}/console/#tab=billing&topup=ok`, cancelUrl: cancelUrl ?? `${base}/console/#tab=billing`, email: acct?.email, saveCard: !!body.save_card, customer: (acct as { stripe_customer_id?: string | null } | null)?.stripe_customer_id ?? null });
   return c.json({ id: s.id, url: s.url, ...topupSplit(PRICES, amountMicros) });
 });
 
@@ -394,7 +422,6 @@ app.post("/v1/hooks/clerk", async (c) => {
   if (!ok) throw new ApiError("unauthorized", "bad Clerk signature");
   const dedupeKey = `clerk_evt:${svixId}`;
   if (await c.env.CACHE.get(dedupeKey)) return c.json({ received: true, duplicate: true });
-  await c.env.CACHE.put(dedupeKey, "1", { expirationTtl: 86_400 });
 
   let evt: { type?: string; data?: Record<string, unknown> };
   try {
@@ -404,12 +431,18 @@ app.post("/v1/hooks/clerk", async (c) => {
   }
   const data = evt.data ?? {};
   const clerkId = typeof data.id === "string" ? data.id : null;
-  if (!clerkId) return c.json({ received: true, ignored: true });
+  if (!clerkId) {
+    await c.env.CACHE.put(dedupeKey, "1", { expirationTtl: 86_400 });
+    return c.json({ received: true, ignored: true });
+  }
 
   const acct = await c.env.DB.prepare("SELECT id, email, daily_cap_micros, monthly_cap_micros FROM accounts WHERE clerk_id = ?")
     .bind(clerkId)
     .first<{ id: string; email: string | null; daily_cap_micros: number | null; monthly_cap_micros: number | null }>();
-  if (!acct) return c.json({ received: true, ignored: true });
+  if (!acct) {
+    await c.env.CACHE.put(dedupeKey, "1", { expirationTtl: 86_400 });
+    return c.json({ received: true, ignored: true });
+  }
 
   if (evt.type === "user.updated") {
     const emails = Array.isArray(data.email_addresses) ? (data.email_addresses as { id?: string; email_address?: string }[]) : [];
@@ -420,6 +453,7 @@ app.post("/v1/hooks/clerk", async (c) => {
       await invalidateAccount(c.env, acct.id);
       await audit(c.env, acct.id, "clerk", "account.email_updated", { via: "clerk_webhook" });
     }
+    await c.env.CACHE.put(dedupeKey, "1", { expirationTtl: 86_400 });
     return c.json({ received: true });
   }
 
@@ -434,11 +468,14 @@ app.post("/v1/hooks/clerk", async (c) => {
     for (const r of tokRows) await invalidateToken(c.env, r.id);
     await accountStub(c.env, acct.id).setAutoRecharge(null);
     await accountStub(c.env, acct.id).setControls({ paused: true, dailyCapMicros: acct.daily_cap_micros, monthlyCapMicros: acct.monthly_cap_micros });
+    await syncAccountPaused(c.env, acct.id, true);
     await invalidateAccount(c.env, acct.id);
     await audit(c.env, acct.id, "clerk", "account.clerk_deleted", { event: evt.type, revoked_tokens: tokRows.length });
+    await c.env.CACHE.put(dedupeKey, "1", { expirationTtl: 86_400 });
     return c.json({ received: true });
   }
 
+  await c.env.CACHE.put(dedupeKey, "1", { expirationTtl: 86_400 });
   return c.json({ received: true, ignored: true });
 });
 
@@ -452,7 +489,22 @@ app.get("/v1/tokens", async (c) => {
 app.post("/v1/tokens", async (c) => {
   const p = await principal(c);
   const id = requireAdmin(p);
-  const body = (await c.req.json()) as { name?: string; scopes?: unknown; transports?: unknown; deny_transports?: unknown; daily_cap_usd?: number; total_cap_usd?: number; origins?: string[]; ips?: string[]; expires_in_s?: number };
+  const body = (await c.req.json()) as { name?: unknown; scopes?: unknown; transports?: unknown; deny_transports?: unknown; daily_cap_usd?: unknown; total_cap_usd?: unknown; origins?: string[]; ips?: string[]; expires_in_s?: unknown };
+  if (body.name !== undefined && (typeof body.name !== "string" || body.name.length > 120)) throw new ApiError("bad_request", "name must be a string up to 120 chars");
+  const parseCapUsd = (v: unknown, field: string): number | null => {
+    if (v === undefined || v === null) return null;
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) throw new ApiError("bad_request", `${field} must be a non-negative number`);
+    return Math.round(v * 1e6);
+  };
+  const dailyCapMicros = parseCapUsd(body.daily_cap_usd, "daily_cap_usd");
+  const totalCapMicros = parseCapUsd(body.total_cap_usd, "total_cap_usd");
+  let expiresAt: number | null = null;
+  if (body.expires_in_s !== undefined && body.expires_in_s !== null) {
+    if (typeof body.expires_in_s !== "number" || !Number.isSafeInteger(body.expires_in_s) || body.expires_in_s <= 0) {
+      throw new ApiError("bad_request", "expires_in_s must be a positive integer");
+    }
+    expiresAt = Date.now() + body.expires_in_s * 1000;
+  }
   const scopes = validateScopes(body.scopes);
   const transports = validateTransports(body.transports);
   const denyTransports = validateTransports(body.deny_transports);
@@ -461,13 +513,38 @@ app.post("/v1/tokens", async (c) => {
   if (body.ips !== undefined && (!Array.isArray(body.ips) || body.ips.length > 32 || !body.ips.every((e) => typeof e === "string" && parseCidr(e)))) {
     throw new ApiError("bad_request", "ips must be up to 32 IPv4/IPv6 addresses or CIDR ranges, like 203.0.113.0/24");
   }
-  if (body.origins?.length && body.daily_cap_usd === undefined) throw new ApiError("bad_request", "publishable tokens need a daily_cap_usd");
-  // A token can't grant more than its creator has.
-  if (p.kind === "token" && !scopeAllows(p.scopes, "admin")) throw new ApiError("forbidden");
+  if (body.origins?.length && dailyCapMicros === null) throw new ApiError("bad_request", "publishable tokens need a daily_cap_usd");
+  // A token can't grant more than its creator has (scopes, spend caps, expiry, transports, origins, IPs).
+  if (p.kind === "token") {
+    if (!scopeAllows(p.scopes, "admin")) throw new ApiError("forbidden");
+    if (p.caps.daily !== null && (dailyCapMicros === null || dailyCapMicros > p.caps.daily)) {
+      throw new ApiError("forbidden", "token cannot exceed its creator's daily_cap_usd");
+    }
+    if (p.caps.total !== null && (totalCapMicros === null || totalCapMicros > p.caps.total)) {
+      throw new ApiError("forbidden", "token cannot exceed its creator's total_cap_usd");
+    }
+    if (p.expiresAt != null && (expiresAt === null || expiresAt > p.expiresAt)) {
+      throw new ApiError("forbidden", "token cannot outlive its creator");
+    }
+    if (p.transports && (!transports || !transports.every((x) => p.transports!.includes(x)))) {
+      throw new ApiError("forbidden", "token transports must be a subset of its creator's transports");
+    }
+    if (p.denyTransports?.length) {
+      const childDenied = new Set(denyTransports ?? []);
+      if (!p.denyTransports.every((x) => childDenied.has(x))) {
+        throw new ApiError("forbidden", "token must inherit its creator's deny_transports");
+      }
+    }
+    if (p.origins?.length && (!body.origins?.length || !body.origins.every((o) => p.origins!.includes(o)))) {
+      throw new ApiError("forbidden", "token origins must be a subset of its creator's origins");
+    }
+    if (p.ips?.length && (!body.ips?.length || !body.ips.every((ip) => p.ips!.includes(ip.trim())))) {
+      throw new ApiError("forbidden", "token ips must be a subset of its creator's ips");
+    }
+  }
   const t = await newTokenSecret();
-  const cap = (usd?: number) => (usd === undefined ? null : Math.round(usd * 1e6));
   await c.env.DB.prepare("INSERT INTO tokens (id, account_id, secret_hash, name, scopes, transports, deny_transports, daily_cap_micros, total_cap_micros, origins, ips, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(t.id, id, t.hash, body.name ?? "", JSON.stringify(scopes), transports ? JSON.stringify(transports) : null, denyTransports ? JSON.stringify(denyTransports) : null, cap(body.daily_cap_usd), cap(body.total_cap_usd), body.origins?.length ? JSON.stringify(body.origins) : null, body.ips?.length ? JSON.stringify(body.ips.map((e) => e.trim())) : null, body.expires_in_s ? Date.now() + body.expires_in_s * 1000 : null, Date.now()).run();
+    .bind(t.id, id, t.hash, (body.name as string | undefined) ?? "", JSON.stringify(scopes), transports ? JSON.stringify(transports) : null, denyTransports ? JSON.stringify(denyTransports) : null, dailyCapMicros, totalCapMicros, body.origins?.length ? JSON.stringify(body.origins) : null, body.ips?.length ? JSON.stringify(body.ips.map((e) => e.trim())) : null, expiresAt, Date.now()).run();
   await audit(c.env, id, actorOf(p), "token.create", { id: t.id, scopes });
   return c.json({ id: t.id, token: t.token, scopes, note: "The token is shown once. Store it securely." }, 201);
 });
@@ -609,6 +686,7 @@ async function doPublish(c: C, parsed: ParsedPublish): Promise<Response> {
       autoCreateOwner: autoOwner,
       autoCreateAccountTransports: autoAccountTransports,
       autoCreateTier,
+      autoCreateAccountPaused: !!autoOwnerAcct?.paused,
       idempotencyKey: parsed.idempotencyKey,
       bodyHash,
       dryRun: parsed.dryRun,
@@ -632,7 +710,13 @@ app.get("/file/:id/:name?", async (c) => {
   // Downloads are metered like any other request, paid by the topic owner.
   const dlTier = await accountTier(c.env, row.owner_account_id);
   const charge = await accountStub(c.env, row.owner_account_id).charge(actionPriceMicros(PRICES, "api_request", dlTier), `dl:${row.id}:${ulid()}`, null, {});
-  if (!charge.ok) throw new ApiError("insufficient_balance", "the topic owner's balance can't cover this download");
+  if (!charge.ok) {
+    if (charge.code === "spend_cap_exceeded") {
+      if (charge.cap === "account_paused") throw new ApiError("topic_paused", "account is paused");
+      throw new ApiError("spend_cap_exceeded", `spend cap reached: ${charge.cap}`, { cap: charge.cap, remaining_usd_micros: charge.remaining });
+    }
+    throw new ApiError("insufficient_balance", "the topic owner's balance can't cover this download");
+  }
   const obj = await c.env.FILES.get(`att/${row.id}`);
   if (!obj) throw new ApiError("not_found");
   const inline = /^(image|video|audio)\/|^text\/plain|^application\/pdf/.test(row.type);
@@ -710,11 +794,17 @@ async function doSubscribe(c: C, topics: string[], format: string): Promise<Resp
     headers.set("x-subetha-subscribe", JSON.stringify(params));
     return topicStub(c.env, t).fetch(new Request(c.req.url, { headers }));
   }));
-  for (const r of responses) {
-    if (r.status === 101 || r.ok) continue;
-    const text = await r.text();
+  const failed = responses.find((r) => r.status !== 101 && !r.ok);
+  if (failed) {
+    for (const r of responses) {
+      if (r !== failed) {
+        r.body?.cancel().catch(() => {});
+        try { r.webSocket?.close(1000, "aborted"); } catch { /* ignore */ }
+      }
+    }
+    const text = await failed.text();
     if (text.startsWith("ApiError:")) reviveError(new Error(text));
-    throw new ApiError(r.status === 402 ? "insufficient_balance" : r.status === 404 ? "not_found" : "forbidden", text);
+    throw new ApiError(failed.status === 402 ? "insufficient_balance" : failed.status === 404 ? "not_found" : "forbidden", text);
   }
   if (format === "ws" || responses.length === 1) return responses[0]!;
   return new Response(mergeStreams(responses, format), { headers: responses[0]!.headers });

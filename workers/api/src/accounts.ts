@@ -30,6 +30,18 @@ export async function syncAccountTier(env: Env, accountId: string, tier: string)
   for (const r of results) await topicStub(env, r.name).setTier(tier);
 }
 
+/** Propagates the account kill-switch state to all of its topics' Durable Objects and closes streams / returns leases when paused. */
+export async function syncAccountPaused(env: Env, accountId: string, paused: boolean) {
+  const { results } = await env.DB.prepare("SELECT name FROM topics WHERE owner_account_id = ?").bind(accountId).all<{ name: string }>();
+  for (const r of results) await topicStub(env, r.name).setAccountPaused(paused);
+}
+
+/** Flushes active credit leases on all topics owned by an account (e.g. after tightening account spend caps). */
+export async function flushAccountTopicLeases(env: Env, accountId: string) {
+  const { results } = await env.DB.prepare("SELECT name FROM topics WHERE owner_account_id = ?").bind(accountId).all<{ name: string }>();
+  for (const r of results) await topicStub(env, r.name).flushLeases();
+}
+
 /** Current volume-discount tier for an account (from cached account row). */
 export async function accountTier(env: Env, accountId: string): Promise<string> {
   const acct = await getAccount(env, accountId);

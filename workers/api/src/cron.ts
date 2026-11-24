@@ -65,13 +65,22 @@ export async function meterRent(env: Env, now: number) {
       (SELECT COUNT(*) FROM endpoints e WHERE e.account_id = a.id AND e.verified_at IS NOT NULL) AS endpoints
      FROM accounts a`).all<{ id: string; email: string | null; frozen_since: number | null; topups_12mo_micros: number; devices: number; endpoints: number }>();
   for (const a of results) {
-    if (!a.devices && !a.endpoints) continue;
+    if (!a.devices && !a.endpoints) {
+      if (a.frozen_since) {
+        await env.DB.prepare("UPDATE accounts SET frozen_since = NULL WHERE id = ?").bind(a.id).run();
+        await invalidateAccount(env, a.id);
+      }
+      continue;
+    }
     const tier = tierFor(PRICES, a.topups_12mo_micros ?? 0);
-    const nanos = rentNanos(PRICES, "device_day", a.devices, tier) + rentNanos(PRICES, "endpoint_day", a.endpoints, tier);
-    const micros = Math.ceil(nanos / 1000);
-    const r = await accountStub(env, a.id).charge(micros, `rent:${day}`, null, {}, true);
+    const devNanos = rentNanos(PRICES, "device_day", a.devices, tier);
+    const epNanos = rentNanos(PRICES, "endpoint_day", a.endpoints, tier);
+    const micros = Math.ceil((devNanos + epNanos) / 1000);
+    // Rent bypasses user pause and spend caps (checking balance only) so funded paused accounts aren't frozen/deleted.
+    const r = await accountStub(env, a.id).charge(micros, `rent:${day}`, null, {}, true, "sku=rent", true);
     if (r.ok) {
-      emitMetric(env, { accountId: a.id, event: "rent", sku: "device_day", revenueMicros: micros, units: a.devices + a.endpoints });
+      if (a.devices) emitMetric(env, { accountId: a.id, event: "rent", sku: "device_day", revenueMicros: Math.ceil(devNanos / 1000), units: a.devices });
+      if (a.endpoints) emitMetric(env, { accountId: a.id, event: "rent", sku: "endpoint_day", revenueMicros: Math.ceil(epNanos / 1000), units: a.endpoints });
       if (a.frozen_since) {
         await env.DB.prepare("UPDATE accounts SET frozen_since = NULL WHERE id = ?").bind(a.id).run();
         await invalidateAccount(env, a.id);
@@ -91,6 +100,7 @@ export async function meterRent(env: Env, now: number) {
       await deleteAccountAttachments(env, a.id);
       await env.DB.batch([
         env.DB.prepare("DELETE FROM subscriptions WHERE endpoint_id IN (SELECT id FROM endpoints WHERE account_id = ?)").bind(a.id),
+        env.DB.prepare("DELETE FROM slack_bindings WHERE account_id = ?").bind(a.id),
         env.DB.prepare("DELETE FROM endpoints WHERE account_id = ?").bind(a.id),
         env.DB.prepare("UPDATE devices SET revoked_at = ? WHERE account_id = ? AND revoked_at IS NULL").bind(now, a.id),
         env.DB.prepare("UPDATE accounts SET frozen_since = NULL WHERE id = ?").bind(a.id),
@@ -201,24 +211,44 @@ export async function checkProviderDivergence(env: Env, now: number): Promise<{ 
     const r = await fetch(`${base}/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Usage/Records/Yesterday.json`, { headers });
     if (!r.ok) throw new Error(`twilio usage HTTP ${r.status}`);
     const data = (await r.json()) as { usage_records?: { category?: string; price?: string | number }[] };
-    const totalUsd = (data.usage_records ?? [])
-      .filter((u) => u.category === "totalprice")
-      .reduce((n, u) => n + Math.max(0, Number(u.price ?? 0)), 0)
-      || (data.usage_records ?? [])
-        .filter((u) => /^(sms|mms|calls|phonenumbers)/.test(u.category ?? ""))
-        .reduce((n, u) => n + Math.max(0, Number(u.price ?? 0)), 0);
+    const records = data.usage_records ?? [];
+    // Prefer metered usage categories (excluding fixed monthly fees like phonenumbers / 10DLC);
+    // fall back to totalprice (minus any reported phonenumbers/fixed fees) when specific categories aren't listed.
+    const topMetered = records.filter((u) => /^(sms|mms|calls|whatsapp)$/.test(u.category ?? ""));
+    const subMetered = records.filter((u) => /^(sms|mms|calls|whatsapp)-/.test(u.category ?? ""));
+    const meteredUsd = (topMetered.length ? topMetered : subMetered).reduce((n, u) => n + Math.max(0, Number(u.price ?? 0)), 0);
+    const fixedUsd = records.filter((u) => /^phonenumbers/.test(u.category ?? "")).reduce((n, u) => n + Math.max(0, Number(u.price ?? 0)), 0);
+    const totalPriceUsd = records.filter((u) => u.category === "totalprice").reduce((n, u) => n + Math.max(0, Number(u.price ?? 0)), 0);
+    const totalUsd = (topMetered.length || subMetered.length) ? meteredUsd : Math.max(0, totalPriceUsd - fixedUsd);
     const twilioMicros = Math.round(totalUsd * 1e6);
 
     const todayStart = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate());
     const yestStart = todayStart - 86_400_000;
     // In ledger_journal: reserve is -amount and settle/release is +released, so SUM(-amount) is net charged.
-    // Exclude non-telephony deliveries tagged with a non-telephony sku in meta so webhook/email/push revenue cannot mask Twilio losses.
+    // Attribute each settle row to its corresponding reserve row's sku metadata so non-telephony settlements/releases
+    // and email verification charges cannot skew telephony revenue.
     const row = await env.DB.prepare(
-      `SELECT COALESCE(SUM(-amount), 0) AS net
-         FROM ledger_journal
-        WHERE time >= ? AND time < ? AND kind IN ('reserve', 'settle')
-          AND (ref LIKE 'dlv:%' OR ref LIKE 'verify:%' OR ref LIKE 'test:%' OR ref LIKE 'insms:%')
-          AND (meta IS NULL OR meta NOT LIKE 'sku=%' OR meta LIKE 'sku=deliver_sms%' OR meta LIKE 'sku=deliver_mms%' OR meta LIKE 'sku=deliver_voice%' OR meta LIKE 'sku=deliver_whatsapp%')`,
+      `WITH tagged AS (
+         SELECT j.amount,
+                COALESCE(
+                  (SELECT r.meta FROM ledger_journal r WHERE r.account_id = j.account_id AND r.ref = j.ref AND r.kind = 'reserve' LIMIT 1),
+                  j.meta
+                ) AS sku_meta
+           FROM ledger_journal j
+          WHERE j.time >= ? AND j.time < ? AND j.kind IN ('reserve', 'settle')
+            AND (j.ref LIKE 'dlv:%' OR j.ref LIKE 'verify:%' OR j.ref LIKE 'test:%' OR j.ref LIKE 'insms:%')
+       )
+       SELECT COALESCE(SUM(-amount), 0) AS net
+         FROM tagged
+        WHERE sku_meta IS NULL
+           OR sku_meta NOT LIKE 'sku=%'
+           OR sku_meta LIKE 'sku=deliver_sms%'
+           OR sku_meta LIKE 'sku=deliver_mms%'
+           OR sku_meta LIKE 'sku=deliver_voice%'
+           OR sku_meta LIKE 'sku=deliver_whatsapp%'
+           OR sku_meta LIKE 'sku=inbound_sms%'
+           OR sku_meta LIKE 'sku=inbound_mms%'
+           OR sku_meta LIKE 'sku=inbound_whatsapp%'`,
     ).bind(yestStart, todayStart).first<{ net: number }>();
     const revenueMicros = Math.max(0, Number(row?.net ?? 0));
 
@@ -269,14 +299,20 @@ export async function repriceDestinations(env: Env, now: number) {
   };
   const table: DestinationPrices = { updated_at: now, countries: {} };
   let reached = 0;
-  for (const iso of Object.keys(INTL_COUNTRIES)) {
-    const sms = await get<{ outbound_sms_prices?: { prices?: { current_price?: string }[] }[] }>(`Messaging/Countries/${iso}`);
-    const voice = await get<{ outbound_prefix_prices?: { current_price?: string }[] }>(`Voice/Countries/${iso}`);
-    if (sms || voice) reached++;
-    const smsUsd = Math.max(0, ...(sms?.outbound_sms_prices ?? []).flatMap((c) => nums(c.prices)));
-    const voiceUsd = Math.max(0, ...nums(voice?.outbound_prefix_prices));
-    const entry = { sms: perTier("deliver_sms_intl", smsUsd), voice: perTier("deliver_voice_intl", voiceUsd), provider_usd: { sms: smsUsd || undefined, voice: voiceUsd || undefined } };
-    if (entry.sms || entry.voice) table.countries[iso] = entry;
+  const isos = Object.keys(INTL_COUNTRIES);
+  for (let i = 0; i < isos.length; i += 6) {
+    const batch = isos.slice(i, i + 6);
+    await Promise.all(batch.map(async (iso) => {
+      const [sms, voice] = await Promise.all([
+        get<{ outbound_sms_prices?: { prices?: { current_price?: string }[] }[] }>(`Messaging/Countries/${iso}`),
+        get<{ outbound_prefix_prices?: { current_price?: string }[] }>(`Voice/Countries/${iso}`),
+      ]);
+      if (sms || voice) reached++;
+      const smsUsd = Math.max(0, ...(sms?.outbound_sms_prices ?? []).flatMap((c) => nums(c.prices)));
+      const voiceUsd = Math.max(0, ...nums(voice?.outbound_prefix_prices));
+      const entry = { sms: perTier("deliver_sms_intl", smsUsd), voice: perTier("deliver_voice_intl", voiceUsd), provider_usd: { sms: smsUsd || undefined, voice: voiceUsd || undefined } };
+      if (entry.sms || entry.voice) table.countries[iso] = entry;
+    }));
   }
   // Twilio unreachable: keep yesterday's table until it expires rather than replacing it with nothing.
   if (!reached) return;

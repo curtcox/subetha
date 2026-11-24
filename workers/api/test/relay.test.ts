@@ -126,8 +126,9 @@ describe("payment and authorization", () => {
     const body = (await dry.json()) as { dry_run: boolean; estimate_usd_micros: number };
     expect(body.dry_run).toBe(true);
     expect(body.estimate_usd_micros).toBeGreaterThan(0);
+    // Dry-run must not create the topic or store a message.
     const poll = await SELF.fetch(`${BASE}/@kim/x/json?poll=1`, { headers: auth(a.token) });
-    expect(await poll.text()).toBe("");
+    expect(poll.status).toBe(404);
 
     const one = await publish("@kim/x", "hi", auth(a.token, { "Idempotency-Key": "k1" }));
     const two = await publish("@kim/x", "hi", auth(a.token, { "Idempotency-Key": "k1" }));
