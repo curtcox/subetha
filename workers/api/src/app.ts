@@ -5,7 +5,7 @@ import { canonicalize, isTopic, validateEnvelope, ulid, type Envelope, type Json
 import { actionPriceMicros, topupSplit, tierFor, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { accountTier, accountTransportsOf, audit, autoCreateOwnerFor, createAccount, flushAccountTopicLeases, getAccount, invalidateAccount, recomputeAccountTopups12mo, recordTopic, syncAccountPaused, syncAccountTier, syncAccountTopics, validateHandle, validatePolicy } from "./accounts.ts";
-import { authenticate, callerOf, invalidateToken, newTokenSecret, requireAdmin, scopeAllows, validateScopes, validateTransports } from "./auth.ts";
+import { actorOf, authenticate, callerOf, invalidateToken, newTokenSecret, requireAdmin, requireTopics, scopeAllows, validateScopes, validateTransports } from "./auth.ts";
 import { EMAIL_RE } from "./delivery/email.ts";
 import { sha256Hex } from "./crypto.ts";
 import { parseCidr } from "./ip.ts";
@@ -18,7 +18,7 @@ import { createCheckoutSession, verifyStripeSignature } from "./stripe.ts";
 import type { Env, Principal, TopicMeta } from "./types.ts";
 import { registerControlRoutes, syncAccountEndpoints } from "./control.ts";
 import { DEST_PRICES_KEY, INTL_COUNTRIES, parseCountries, type DestinationPrices } from "./delivery/destinations.ts";
-import { mcpChallenge, registerMcp } from "./mcp.ts";
+import { MCP_INTERNAL_SECRET, mcpChallenge, registerMcp, takeMcpPrincipal } from "./mcp.ts";
 import { registerPaymentRoutes } from "./payments.ts";
 import { registerKeyRoutes } from "./keys.ts";
 import { USAGE_LABELS } from "./usage.ts";
@@ -75,8 +75,14 @@ app.use("*", async (c, next) => {
 });
 
 // Device-signed requests must be verified before anything consumes the body.
+// Internal MCP sub-requests reuse the outer request's verified principal without re-verifying nonces.
 app.use("*", async (c, next) => {
-  if (c.req.header("x-device-id")) c.set("principal", await authenticate(c.req.raw, c.env));
+  if (c.req.header("x-subetha-mcp-internal") === MCP_INTERNAL_SECRET) {
+    const p = takeMcpPrincipal(c.req.header("x-subetha-mcp-req") ?? null);
+    if (p) c.set("principal", p);
+  } else if (c.req.header("x-device-id")) {
+    c.set("principal", await authenticate(c.req.raw, c.env));
+  }
   await next();
 });
 
@@ -85,6 +91,7 @@ app.use("*", async (c, next) => {
 // assets: one console page load is a dozen files, and serving one touches no DO, D1, or provider
 // (a 429 would cost the same Worker invocation).
 app.use("*", async (c, next) => {
+  if (c.req.header("x-subetha-mcp-internal") === MCP_INTERNAL_SECRET) return next();
   const path = new URL(c.req.url).pathname;
   if (path.startsWith("/v1/hooks/") || path === "/v1/health" || path === "/v1/status") return next();
   if (isAssetRequest(c.req.method, path)) return next();
@@ -561,7 +568,7 @@ app.delete("/v1/tokens/:id", async (c) => {
 
 // ---------------- topics ----------------
 app.get("/v1/topics", async (c) => {
-  const id = requireAdmin(await principal(c));
+  const id = requireTopics(await principal(c));
   const { results } = await c.env.DB.prepare(
     `SELECT t.name, t.policy, t.created_at,
             (SELECT COUNT(*) FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id
@@ -572,7 +579,7 @@ app.get("/v1/topics", async (c) => {
 });
 
 app.get("/v1/topics/:topic{.+}", async (c) => {
-  const id = requireAdmin(await principal(c));
+  const id = requireTopics(await principal(c));
   const name = c.req.param("topic");
   const stub = topicStub(c.env, name);
   const meta = await stub.getMeta();
@@ -583,7 +590,7 @@ app.get("/v1/topics/:topic{.+}", async (c) => {
 
 app.put("/v1/topics/:topic{.+}", async (c) => {
   const p = await principal(c);
-  const id = requireAdmin(p);
+  const id = requireTopics(p);
   const name = c.req.param("topic");
   if (!isTopic(name)) throw new ApiError("invalid_topic");
   const body = (await c.req.json().catch(() => ({}))) as { policy?: unknown };
@@ -665,6 +672,12 @@ async function doPublish(c: C, parsed: ParsedPublish): Promise<Response> {
   if (p.kind === "token" && !scopeAllows(p.scopes, "publish", env.topic)) throw new ApiError("forbidden", "token lacks publish scope for this topic");
   const problems = validateEnvelope(env);
   if (problems.length) throw new ApiError("invalid_message", problems.join("; "));
+  // If the message carries an enrolled device signature, ensure that device has not been revoked or paused.
+  if (env.sig && typeof env.sender === "string") {
+    const dev = await c.env.DB.prepare("SELECT paused, revoked_at FROM devices WHERE id = ?").bind(env.sender).first<{ paused: number; revoked_at: number | null }>();
+    if (dev?.revoked_at) throw new ApiError("forbidden", "sender device has been revoked");
+    if (dev?.paused) throw new ApiError("topic_paused", "sender device is paused");
+  }
   const caller = callerOf(p);
   // Attachments go to R2 first; the publish (which charges for them) references the file.
   let fileId: string | null = null;
@@ -770,7 +783,8 @@ async function doSubscribe(c: C, topics: string[], format: string): Promise<Resp
   for (const t of topics) if (p.kind === "token" && !scopeAllows(p.scopes, "subscribe", t)) throw new ApiError("forbidden", `token lacks subscribe scope for ${t}`);
   const url = new URL(c.req.url);
   const poll = ["1", "true", "yes"].includes(url.searchParams.get("poll") ?? "");
-  const params: SubscribeParams = { format: format as SubscribeParams["format"], since: url.searchParams.get("since"), filter: parseFilter(url), caller: callerOf(p), poll };
+  const isMcp = c.req.header("x-subetha-mcp-internal") === MCP_INTERNAL_SECRET;
+  const params: SubscribeParams = { format: format as SubscribeParams["format"], since: url.searchParams.get("since"), filter: parseFilter(url), caller: callerOf(p), poll, ...(isMcp ? { transport: "mcp" as const } : {}) };
 
   if (format === "auth") {
     for (const t of topics) unwrap(await topicStub(c.env, t).checkAuth(params.caller));
@@ -830,8 +844,5 @@ app.all("*", async (c) => {
   throw new ApiError("bad_request", `unsupported method ${method}`);
 });
 
-export function actorOf(p: Principal): string {
-  return p.kind === "token" ? `token:${p.tokenId}` : p.kind === "user" ? `user:${p.clerkId}` : p.kind === "device" ? `device:${p.deviceId}` : "anonymous";
-}
-
+export { actorOf };
 export type { Envelope };

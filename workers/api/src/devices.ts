@@ -18,10 +18,11 @@
 import type { Context, Hono } from "hono";
 import { base64urlDecode, COVERED_REQUEST_HEADERS, DEVICE_ID_RE, parseSignedHeaders, publicKeyFromDeviceId, requestSigningInputV2, utf8, type Transport } from "@subetha/sdk/protocol";
 import { audit } from "./accounts.ts";
-import { requireAdmin, validateTransports } from "./auth.ts";
+import { actorOf, requireAdmin, validateTransports } from "./auth.ts";
 import { randomBase32, sha256Hex } from "./crypto.ts";
 import { ApiError } from "./errors.ts";
 import { accountStub } from "./durable/account.ts";
+import { topicStub } from "./durable/topic.ts";
 import type { Env, Principal } from "./types.ts";
 
 type Vars = { Bindings: Env; Variables: { principal: Principal } };
@@ -140,6 +141,11 @@ function publicDevice(d: Record<string, unknown>) {
   };
 }
 
+async function closeDeviceStreams(env: Env, accountId: string, deviceId: string, reason: string) {
+  const { results } = await env.DB.prepare("SELECT name FROM topics WHERE owner_account_id = ?").bind(accountId).all<{ name: string }>();
+  for (const r of results) await topicStub(env, r.name).closeDevice(deviceId, 4403, reason);
+}
+
 export function registerDeviceRoutes(app: Hono<Vars>, principal: PrincipalFn) {
   app.get("/v1/devices", async (c) => {
     const id = requireAdmin(await principal(c));
@@ -153,14 +159,21 @@ export function registerDeviceRoutes(app: Hono<Vars>, principal: PrincipalFn) {
     const id = c.req.param("id");
     const existing = await c.env.DB.prepare("SELECT id FROM devices WHERE id = ? AND account_id = ? AND revoked_at IS NULL").bind(id, accountId).first();
     if (!existing) throw new ApiError("not_found");
-    const body = (await c.req.json()) as { name?: unknown; paused?: unknown; allow_transports?: unknown; deny_transports?: unknown };
+    const body = (await c.req.json()) as { name?: unknown; capabilities?: unknown; paused?: unknown; allow_transports?: unknown; deny_transports?: unknown };
     if (body.name !== undefined) {
       if (typeof body.name !== "string" || body.name.length > 64) throw new ApiError("bad_request", "name must be a string of up to 64 characters");
       await c.env.DB.prepare("UPDATE devices SET name = ? WHERE id = ?").bind(body.name, id).run();
     }
+    if (body.capabilities !== undefined) {
+      if (!Array.isArray(body.capabilities) || !body.capabilities.every((x) => typeof x === "string" && x.length <= 32)) {
+        throw new ApiError("bad_request", "capabilities must be an array of strings");
+      }
+      await c.env.DB.prepare("UPDATE devices SET capabilities = ? WHERE id = ?").bind(JSON.stringify(body.capabilities.slice(0, 16)), id).run();
+    }
     if (body.paused !== undefined) {
       if (typeof body.paused !== "boolean") throw new ApiError("bad_request", "paused must be a boolean");
       await c.env.DB.prepare("UPDATE devices SET paused = ? WHERE id = ?").bind(body.paused ? 1 : 0, id).run();
+      if (body.paused) await closeDeviceStreams(c.env, accountId, id, "device paused");
     }
     if (body.allow_transports !== undefined) {
       const list = validateTransports(body.allow_transports);
@@ -170,7 +183,7 @@ export function registerDeviceRoutes(app: Hono<Vars>, principal: PrincipalFn) {
       const list = validateTransports(body.deny_transports);
       await c.env.DB.prepare("UPDATE devices SET deny_transports = ? WHERE id = ?").bind(list?.length ? JSON.stringify(list) : null, id).run();
     }
-    await audit(c.env, accountId, p.kind, "device.update", { id, ...body });
+    await audit(c.env, accountId, actorOf(p), "device.update", { id, ...body });
     const updated = await c.env.DB.prepare("SELECT id, name, capabilities, paused, allow_transports, deny_transports, created_at, last_seen_at, revoked_at FROM devices WHERE id = ?").bind(id).first();
     return c.json(publicDevice(updated!));
   });
@@ -186,16 +199,18 @@ export function registerDeviceRoutes(app: Hono<Vars>, principal: PrincipalFn) {
     await c.env.DB.prepare("INSERT INTO devices (id, account_id, name, capabilities, created_at) VALUES (?, ?, ?, ?, ?)")
       .bind(id, accountId, f.name, f.capabilities, Date.now()).run()
       .catch((e) => { throw String(e).includes("UNIQUE") ? new ApiError("conflict", "device already enrolled") : e; });
-    await audit(c.env, accountId, p.kind, "device.enroll", { id });
+    await audit(c.env, accountId, actorOf(p), "device.enroll", { id });
     return c.json({ id, enrolled: true }, 201);
   });
 
   app.delete("/v1/devices/:id", async (c) => {
     const p = await principal(c);
     const accountId = requireAdmin(p);
-    const r = await c.env.DB.prepare("UPDATE devices SET revoked_at = ? WHERE id = ? AND account_id = ? AND revoked_at IS NULL").bind(Date.now(), c.req.param("id"), accountId).run();
+    const id = c.req.param("id");
+    const r = await c.env.DB.prepare("UPDATE devices SET revoked_at = ? WHERE id = ? AND account_id = ? AND revoked_at IS NULL").bind(Date.now(), id, accountId).run();
     if (!r.meta.changes) throw new ApiError("not_found");
-    await audit(c.env, accountId, p.kind, "device.revoke", { id: c.req.param("id") });
+    await closeDeviceStreams(c.env, accountId, id, "device revoked");
+    await audit(c.env, accountId, actorOf(p), "device.revoke", { id });
     return c.json({ revoked: true });
   });
 
@@ -228,7 +243,7 @@ export function registerDeviceRoutes(app: Hono<Vars>, principal: PrincipalFn) {
       .bind(row.device_id, accountId, row.name, row.capabilities, Date.now()).run();
     if (!r.meta.changes) throw new ApiError("conflict", "this device is enrolled in another account; revoke it there first");
     await c.env.DB.prepare("UPDATE device_codes SET account_id = ? WHERE device_code_hash = ?").bind(accountId, row.device_code_hash).run();
-    await audit(c.env, accountId, p.kind, "device.enroll", { id: row.device_id, via: "code" });
+    await audit(c.env, accountId, actorOf(p), "device.enroll", { id: row.device_id, via: "code" });
     return c.json({ device_id: row.device_id, name: row.name, enrolled: true });
   });
 

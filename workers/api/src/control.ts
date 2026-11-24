@@ -6,7 +6,7 @@ import { actionPriceMicros, skuForTransport, type PriceTable } from "@subetha/pr
 import prices from "@subetha/pricing/prices.json";
 import { accountTier, audit } from "./accounts.ts";
 import { discardAttachment, recordAttachment, storeAttachment } from "./attachments.ts";
-import { requireAdmin } from "./auth.ts";
+import { actorOf, requireAdmin } from "./auth.ts";
 import { randomBase32, randomDigits, sha256Hex, timingSafeEqual } from "./crypto.ts";
 import { accountStub } from "./durable/account.ts";
 import { topicStub } from "./durable/topic.ts";
@@ -36,11 +36,17 @@ interface EndpointRecord { id: string; account_id: string; kind: Transport; addr
 
 /** Webhooks must name a public host by DNS name, never the relay itself or an IP literal. */
 export function assertPublicWebhook(address: string, baseUrl: string) {
-  const host = new URL(address).hostname.toLowerCase().replace(/\.+$/, "");
+  let host: string;
+  try {
+    host = new URL(address).hostname.toLowerCase().replace(/\.+$/, "");
+  } catch {
+    throw new ApiError("bad_request", "invalid webhook URL");
+  }
   const own = new URL(baseUrl).hostname.toLowerCase();
   const ipLiteral = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":") || host.startsWith("[");
-  if (ipLiteral || host === own || host === "subetha.us" || host.endsWith(".subetha.us") || host === "localhost" || host.endsWith(".localhost") || !host.includes(".")) {
-    throw new ApiError("bad_request", "webhooks must use a public DNS name (no IP literals, localhost, or the relay itself)");
+  const internal = host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".arpa");
+  if (ipLiteral || host === own || host === "subetha.us" || host.endsWith(".subetha.us") || internal || !host.includes(".")) {
+    throw new ApiError("bad_request", "webhooks must use a public DNS name (no IP literals, localhost, internal hosts, or the relay itself)");
   }
 }
 
@@ -121,7 +127,7 @@ async function releaseVerifySend(env: Env, dest: string, sentAt: number) {
   await env.DB.prepare("DELETE FROM verify_sends WHERE dest = ? AND sent_at = ?").bind(dest, sentAt).run();
 }
 
-async function sendCode(env: Env, e: EndpointRecord, code: string) {
+async function sendCode(env: Env, e: EndpointRecord, code: string, p: Principal) {
   const telephony = e.kind === "sms" || e.kind === "voice" || e.kind === "whatsapp";
   // One code per destination per hour, and a few pending verifications per account per day:
   // verification sends go to unverified numbers/addresses, so they're the abuse surface.
@@ -131,26 +137,36 @@ async function sendCode(env: Env, e: EndpointRecord, code: string) {
   const dest = `${e.kind}:${e.address.toLowerCase()}`;
   const sentAt = await claimVerifySend(env, dest);
   if (sentAt === null) throw new ApiError("rate_limited", "a code was sent to this destination recently; try again in an hour");
-  // The verification message costs the same as a delivery and is paid before it is sent; SMS,
-  // WhatsApp, and calls count toward the new-funds telephony hold.
+  // The verification message costs the same as a delivery and is reserved before sending; SMS,
+  // WhatsApp, and calls count toward the new-funds telephony hold. Settlement happens only after
+  // the provider accepts the send so failed/unconfigured providers never charge the user.
+  const sku = skuForTransport(PRICES, e.kind) ?? `deliver_${e.kind}`;
   const price = e.kind === "sms" || e.kind === "voice" || e.kind === "whatsapp"
     ? await telephonyUnitPrice(env, e.account_id, e.kind, e.address)
-    : actionPriceMicros(PRICES, skuForTransport(PRICES, e.kind)!, await accountTier(env, e.account_id));
+    : actionPriceMicros(PRICES, sku, await accountTier(env, e.account_id));
   const ref = `verify:${e.id}:${ulid()}`;
   const account = accountStub(env, e.account_id);
-  const r = await account.reserve(price, ref, null, {}, telephony ? "telephony" : null);
+  const tokenId = p.kind === "token" ? p.tokenId : null;
+  const caps = p.kind === "token" ? { tokenDaily: p.caps.daily, tokenTotal: p.caps.total } : {};
+  const r = await account.reserve(price, ref, tokenId, caps, telephony ? "telephony" : null, `sku=${sku}`);
   if (!r.ok) {
     await releaseVerifySend(env, dest, sentAt);
-    throw r.code === "insufficient_balance"
-      ? new ApiError("insufficient_balance", "balance can't cover the verification message", { shortfall_usd_micros: r.shortfall })
-      : new ApiError("spend_cap_exceeded", "SMS/WhatsApp/voice spend is limited for new funds; try again later or use email");
+    if (r.code === "insufficient_balance") throw new ApiError("insufficient_balance", "balance can't cover the verification message", { shortfall_usd_micros: r.shortfall });
+    if (r.cap === "account_paused") throw new ApiError("topic_paused", "account is paused");
+    throw new ApiError("spend_cap_exceeded", "SMS/WhatsApp/voice spend is limited for new funds or spend cap reached; try again later or use email", { cap: r.cap });
+  }
+  const text = `Your SubEtha verification code is ${code}. If you didn't request this, ignore it.`;
+  try {
+    if (e.kind === "email") await sendEmail(env, { to: e.address, subject: `SubEtha verification code ${code}`, text });
+    else if (e.kind === "sms") await sendSms(env, e.address, text);
+    else if (e.kind === "whatsapp") await sendWhatsApp(env, e.address, text);
+    else await makeCall(env, e.address, voiceTwiml(`Your SubEtha verification code is ${code.split("").join(", ")}. Again: ${code.split("").join(", ")}.`, null));
+  } catch (err) {
+    await account.release(ref).catch(() => {});
+    await releaseVerifySend(env, dest, sentAt).catch(() => {});
+    throw err;
   }
   await account.settle(ref, price);
-  const text = `Your SubEtha verification code is ${code}. If you didn't request this, ignore it.`;
-  if (e.kind === "email") await sendEmail(env, { to: e.address, subject: `SubEtha verification code ${code}`, text });
-  else if (e.kind === "sms") await sendSms(env, e.address, text);
-  else if (e.kind === "whatsapp") await sendWhatsApp(env, e.address, text);
-  else await makeCall(env, e.address, voiceTwiml(`Your SubEtha verification code is ${code.split("").join(", ")}. Again: ${code.split("").join(", ")}.`, null));
 }
 
 /** Push the topic's current verified subscriptions into its Durable Object. */
@@ -225,18 +241,19 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
       .bind(e.id, e.account_id, e.kind, e.address, e.config, e.verify_code_hash, e.verified_at, e.created_at).run();
     if (code) {
       try {
-        await sendCode(c.env, e, code);
+        await sendCode(c.env, e, code, p);
       } catch (err) {
         await c.env.DB.prepare("DELETE FROM endpoints WHERE id = ?").bind(id).run();
         throw err instanceof ApiError ? err : new ApiError("provider_unavailable", (err as Error).message);
       }
     }
-    await audit(c.env, accountId, p.kind, "endpoint.create", { id, kind });
+    await audit(c.env, accountId, actorOf(p), "endpoint.create", { id, kind });
     return c.json({ ...publicEndpoint(e), ...(secret ? { secret, note: "Verify X-SubEtha-Signature with this secret. Shown once." } : {}), ...(code ? { note: "A verification code was sent. POST /v1/endpoints/:id/verify {code}." } : {}) }, 201);
   });
 
   app.post("/v1/endpoints/:id/verify", async (c) => {
-    const accountId = requireAdmin(await principal(c));
+    const p = await principal(c);
+    const accountId = requireAdmin(p);
     const e = await c.env.DB.prepare("SELECT * FROM endpoints WHERE id = ? AND account_id = ?").bind(c.req.param("id"), accountId).first<EndpointRecord>();
     if (!e) throw new ApiError("not_found");
     if (e.verified_at) return c.json(publicEndpoint(e));
@@ -249,6 +266,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     if (!code || !e.verify_code_hash || !timingSafeEqual(await sha256Hex(`${e.id}:${code}`), e.verify_code_hash)) throw new ApiError("forbidden", "wrong code");
     await c.env.DB.prepare("UPDATE endpoints SET verified_at = ?, verify_code_hash = NULL WHERE id = ?").bind(Date.now(), e.id).run();
     for (const t of await topicsForEndpoint(c.env, e.id)) await syncTopicSubscriptions(c.env, t);
+    await audit(c.env, accountId, actorOf(p), "endpoint.verify", { id: e.id, kind: e.kind });
     return c.json({ ...publicEndpoint(e), verified: true });
   });
 
@@ -286,7 +304,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     }
     e.config = JSON.stringify(cfg);
     await c.env.DB.prepare("UPDATE endpoints SET config = ? WHERE id = ?").bind(e.config, e.id).run();
-    await audit(c.env, accountId, p.kind, "endpoint.update", { id: e.id, ...(body.inbound_topic !== undefined ? { inbound_topic: cfg.inbound_topic ?? null } : {}) });
+    await audit(c.env, accountId, actorOf(p), "endpoint.update", { id: e.id, ...(body.inbound_topic !== undefined ? { inbound_topic: cfg.inbound_topic ?? null } : {}) });
     return c.json(publicEndpoint(e));
   });
 
@@ -302,7 +320,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
       c.env.DB.prepare("UPDATE slack_bindings SET endpoint_id = NULL WHERE endpoint_id = ? AND account_id = ?").bind(id, accountId),
     ]);
     for (const t of topics) await syncTopicSubscriptions(c.env, t);
-    await audit(c.env, accountId, p.kind, "endpoint.delete", { id });
+    await audit(c.env, accountId, actorOf(p), "endpoint.delete", { id });
     return c.json({ deleted: true });
   });
 
@@ -351,7 +369,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     await c.env.DB.prepare("INSERT INTO subscriptions (id, topic, endpoint_id, filter, after_s, min_priority, paused, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
       .bind(id, body.topic, body.endpoint_id, JSON.stringify(filter), after, body.min_priority ?? null, paused ? 1 : 0, Date.now()).run();
     await syncTopicSubscriptions(c.env, body.topic);
-    await audit(c.env, accountId, p.kind, "subscription.create", { id, topic: body.topic });
+    await audit(c.env, accountId, actorOf(p), "subscription.create", { id, topic: body.topic });
     return c.json({ id, topic: body.topic, endpoint_id: body.endpoint_id, filter, after_s: after, min_priority: body.min_priority ?? null, paused }, 201);
   });
 
@@ -389,16 +407,19 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     await c.env.DB.prepare("UPDATE subscriptions SET filter = ?, after_s = ?, min_priority = ?, paused = ? WHERE id = ?")
       .bind(JSON.stringify(filter), after, minPriority, paused ? 1 : 0, id).run();
     await syncTopicSubscriptions(c.env, row.topic);
-    await audit(c.env, accountId, p.kind, "subscription.update", { id, topic: row.topic, after_s: after, min_priority: minPriority, paused });
+    await audit(c.env, accountId, actorOf(p), "subscription.update", { id, topic: row.topic, after_s: after, min_priority: minPriority, paused });
     return c.json({ id: row.id, topic: row.topic, endpoint_id: row.endpoint_id, kind: row.kind, filter, after_s: after, min_priority: minPriority, paused, created_at: row.created_at });
   });
 
   app.delete("/v1/subscriptions/:id", async (c) => {
-    const accountId = requireAdmin(await principal(c));
-    const row = await c.env.DB.prepare("SELECT s.topic FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id WHERE s.id = ? AND e.account_id = ?").bind(c.req.param("id"), accountId).first<{ topic: string }>();
+    const p = await principal(c);
+    const accountId = requireAdmin(p);
+    const subId = c.req.param("id");
+    const row = await c.env.DB.prepare("SELECT s.topic FROM subscriptions s JOIN endpoints e ON e.id = s.endpoint_id WHERE s.id = ? AND e.account_id = ?").bind(subId, accountId).first<{ topic: string }>();
     if (!row) throw new ApiError("not_found");
-    await c.env.DB.prepare("DELETE FROM subscriptions WHERE id = ?").bind(c.req.param("id")).run();
+    await c.env.DB.prepare("DELETE FROM subscriptions WHERE id = ?").bind(subId).run();
     await syncTopicSubscriptions(c.env, row.topic);
+    await audit(c.env, accountId, actorOf(p), "subscription.delete", { id: subId, topic: row.topic });
     return c.json({ deleted: true });
   });
 
@@ -416,7 +437,8 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
   app.post("/v1/hooks/twilio/voice-ack", async (c) => {
     const params = await twilioParams(c);
     const topic = c.req.query("topic") ?? "", id = c.req.query("id") ?? "";
-    if (!isTopic(topic) || c.req.query("t") !== (await ackToken(c.env.TWILIO_AUTH_TOKEN!, topic, id))) throw new ApiError("forbidden");
+    const tok = c.req.query("t") ?? "";
+    if (!isTopic(topic) || !timingSafeEqual(tok, await ackToken(c.env.TWILIO_AUTH_TOKEN!, topic, id))) throw new ApiError("forbidden");
     if (params.Digits === "1") {
       await topicStub(c.env, topic).ack(id, "voice");
       return twiml(c, "<Response><Say>Acknowledged. Goodbye.</Say></Response>");
@@ -428,7 +450,8 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
   app.post("/v1/hooks/twilio/voice-status", async (c) => {
     const params = await twilioParams(c);
     const acct = c.req.query("acct") ?? "", ref = c.req.query("ref") ?? "", max = Number(c.req.query("max") ?? 0);
-    if (c.req.query("t") !== (await ackToken(c.env.TWILIO_AUTH_TOKEN!, acct, `${ref}:${max}`))) throw new ApiError("forbidden");
+    const tok = c.req.query("t") ?? "";
+    if (!timingSafeEqual(tok, await ackToken(c.env.TWILIO_AUTH_TOKEN!, acct, `${ref}:${max}`))) throw new ApiError("forbidden");
     const dur = Math.max(0, Number(params.CallDuration ?? 0) || 0);
     const minutes = Math.ceil(dur / 60);
     const perMinute = Math.floor(max / voiceMinutes(""));
@@ -574,13 +597,14 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
       await c.env.DB.prepare("DELETE FROM endpoints WHERE id = ? AND account_id = ?").bind(row.endpoint_id, accountId).run();
       await syncTopicSubscriptions(c.env, row.topic);
     }
-    await audit(c.env, accountId, p.kind, "slack.unbind", { team_id: teamId, channel, topic: row.topic });
+    await audit(c.env, accountId, actorOf(p), "slack.unbind", { team_id: teamId, channel, topic: row.topic });
     return c.json({ deleted: true });
   });
 
   /** Bind a Slack channel to a topic: messages flow both ways (topic → channel via an endpoint; channel → topic via Events). */
   app.post("/v1/slack/bindings", async (c) => {
-    const accountId = requireAdmin(await principal(c));
+    const p = await principal(c);
+    const accountId = requireAdmin(p);
     const body = (await c.req.json()) as { team_id?: string; channel?: string; topic?: string; inbound?: boolean; outbound?: boolean };
     if (!body.topic || !isTopic(body.topic) || !body.channel || !/^[CG][A-Z0-9]{6,}$/.test(body.channel)) throw new ApiError("bad_request", "team_id, channel (C…), and topic are required");
     const team = await c.env.DB.prepare("SELECT bot_token FROM slack_teams WHERE team_id = ? AND account_id = ?").bind(body.team_id ?? "", accountId).first<{ bot_token: string }>();
@@ -608,6 +632,7 @@ export function registerControlRoutes(app: App, principal: PrincipalFn) {
     } else if (existing) {
       await c.env.DB.prepare("DELETE FROM slack_bindings WHERE team_id = ? AND channel = ? AND account_id = ?").bind(body.team_id, body.channel, accountId).run();
     }
+    await audit(c.env, accountId, actorOf(p), "slack.bind", { team_id: body.team_id, channel: body.channel, topic: body.topic, endpoint_id: endpointId, inbound: body.inbound !== false, outbound: body.outbound !== false });
     return c.json({ bound: true, endpoint_id: endpointId }, 201);
   });
 

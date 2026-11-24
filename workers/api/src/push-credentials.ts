@@ -5,7 +5,7 @@
 import type { Context, Hono } from "hono";
 import { ulid } from "@subetha/sdk/protocol";
 import { audit } from "./accounts.ts";
-import { requireAdmin } from "./auth.ts";
+import { actorOf, requireAdmin } from "./auth.ts";
 import { pemToDer } from "./delivery/push.ts";
 import { PermanentError } from "./delivery/senders.ts";
 import { ApiError } from "./errors.ts";
@@ -162,7 +162,7 @@ export function registerPushCredentialRoutes(app: App, principal: PrincipalFn) {
         .bind(row.id, row.account_id, row.kind, row.name, row.config, row.is_default, row.created_at),
     );
     await c.env.DB.batch(stmts);
-    await audit(c.env, accountId, p.kind, "push_credential.create", { id, kind, name, is_default: isDefault });
+    await audit(c.env, accountId, actorOf(p), "push_credential.create", { id, kind, name, is_default: isDefault });
     return c.json(publicCredential(row), 201);
   });
 
@@ -189,7 +189,7 @@ export function registerPushCredentialRoutes(app: App, principal: PrincipalFn) {
       stmts.push(c.env.DB.prepare("UPDATE push_credentials SET is_default = ? WHERE id = ?").bind(existing.is_default, id));
     }
     if (stmts.length) await c.env.DB.batch(stmts);
-    await audit(c.env, accountId, p.kind, "push_credential.update", { id, name: body.name, is_default: body.is_default });
+    await audit(c.env, accountId, actorOf(p), "push_credential.update", { id, name: body.name, is_default: body.is_default });
     return c.json(publicCredential(existing));
   });
 
@@ -199,7 +199,7 @@ export function registerPushCredentialRoutes(app: App, principal: PrincipalFn) {
     const id = c.req.param("id");
     const r = await c.env.DB.prepare("DELETE FROM push_credentials WHERE id = ? AND account_id = ?").bind(id, accountId).run();
     if (!r.meta.changes) throw new ApiError("not_found");
-    await audit(c.env, accountId, p.kind, "push_credential.delete", { id });
+    await audit(c.env, accountId, actorOf(p), "push_credential.delete", { id });
     return c.json({ deleted: true });
   });
 }

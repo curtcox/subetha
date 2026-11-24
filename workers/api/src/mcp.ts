@@ -162,6 +162,17 @@ async function runTool(name: string, a: Args, call: Call): Promise<unknown> {
 
 interface RpcRequest { jsonrpc: "2.0"; id?: string | number | null; method: string; params?: Record<string, unknown> }
 
+/** Per-isolate unspoofable marker so internal MCP sub-calls skip double rate-limiting and bill/check `mcp` transport. */
+export const MCP_INTERNAL_SECRET = crypto.randomUUID();
+const pendingMcpPrincipals = new Map<string, Principal>();
+
+export function takeMcpPrincipal(reqId: string | null): Principal | null {
+  if (!reqId) return null;
+  const p = pendingMcpPrincipals.get(reqId) ?? null;
+  if (p) pendingMcpPrincipals.delete(reqId);
+  return p;
+}
+
 /** RFC 6750 / RFC 9728 challenge pointing MCP clients at the protected-resource metadata. */
 export function mcpChallenge(origin: string, error?: string): string {
   return `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"${error ? `, error="${error}"` : ""}`;
@@ -183,8 +194,11 @@ export function registerMcp(app: App) {
 
   app.post("/mcp", async (c) => {
     const authz = c.req.header("authorization");
+    const preAuth = c.get("principal");
     // Invalid credentials are rejected (with the same challenge) by the auth middleware.
-    if (!authz) return c.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "authentication required" } }, 401, { "www-authenticate": mcpChallenge(new URL(c.req.url).origin) });
+    if (!authz && (!preAuth || preAuth.kind === "anonymous")) {
+      return c.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "authentication required" } }, 401, { "www-authenticate": mcpChallenge(new URL(c.req.url).origin) });
+    }
     let body: RpcRequest | RpcRequest[];
     try {
       body = await c.req.json();
@@ -192,10 +206,22 @@ export function registerMcp(app: App) {
       return c.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } }, 400);
     }
     const origin = new URL(c.req.url).origin;
-    const call: Call = (path, init = {}) => {
+    const call: Call = async (path, init = {}) => {
       const headers = new Headers(init.headers);
-      headers.set("authorization", authz);
-      return Promise.resolve(app.fetch(new Request(`${origin}${path}`, { ...init, headers }), c.env, c.executionCtx));
+      headers.set("x-subetha-mcp-internal", MCP_INTERNAL_SECRET);
+      let reqId: string | null = null;
+      if (preAuth && preAuth.kind !== "anonymous") {
+        reqId = crypto.randomUUID();
+        pendingMcpPrincipals.set(reqId, preAuth);
+        headers.set("x-subetha-mcp-req", reqId);
+      } else if (authz) {
+        headers.set("authorization", authz);
+      }
+      try {
+        return await app.fetch(new Request(`${origin}${path}`, { ...init, headers }), c.env, c.executionCtx);
+      } finally {
+        if (reqId) pendingMcpPrincipals.delete(reqId);
+      }
     };
     const handle = async (req: RpcRequest) => {
       const id = req.id ?? null;

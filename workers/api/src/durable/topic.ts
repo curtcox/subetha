@@ -27,8 +27,8 @@ const MAX_MESSAGE_AGE_S = 7 * 86400;
 
 interface Lease { ref: string; granted: number; remaining: number; at: number }
 type StreamFormat = "json" | "sse" | "raw";
-interface Stream { id: string; format: StreamFormat; filter: SubscriptionFilter; send: (b: Uint8Array) => void; close: () => void }
-interface WsAttachment { id: string; filter: SubscriptionFilter }
+interface Stream { id: string; format: StreamFormat; filter: SubscriptionFilter; deviceId?: string | null; send: (b: Uint8Array) => void; close: () => void }
+interface WsAttachment { id: string; filter: SubscriptionFilter; deviceId?: string | null }
 
 export interface SubscribeParams {
   format: StreamFormat | "ws";
@@ -803,7 +803,7 @@ export class TopicDO extends DurableObject<Env> {
       const pair = new WebSocketPair();
       const [client, server] = [pair[0], pair[1]];
       this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({ id, filter: params.filter } satisfies WsAttachment);
+      server.serializeAttachment({ id, filter: params.filter, deviceId: params.caller.deviceId } satisfies WsAttachment);
       server.send(JSON.stringify(openEvt));
       for (const m of backlog) server.send(JSON.stringify(m));
       return new Response(null, { status: 101, webSocket: client });
@@ -815,7 +815,7 @@ export class TopicDO extends DurableObject<Env> {
       cancel: () => { this.streams.delete(id); },
     });
     const stream: Stream = {
-      id, format: params.format, filter: params.filter,
+      id, format: params.format, filter: params.filter, deviceId: params.caller.deviceId,
       send: (b) => { try { controller.enqueue(b); } catch { this.streams.delete(id); } },
       close: () => { try { controller.close(); } catch { /* already closed */ } },
     };
@@ -910,13 +910,24 @@ export class TopicDO extends DurableObject<Env> {
   }
 
   /** Close live connections matching a specific device (e.g. on device pause/revocation). */
-  async closeAllLive(code = 4403, reason = "closed"): Promise<void> {
-    this.closeAll(code, reason);
+  async closeDevice(deviceId: string, code = 4403, reason = "device revoked"): Promise<void> {
+    for (const [id, s] of this.streams) {
+      if (s.deviceId === deviceId) {
+        s.close();
+        this.streams.delete(id);
+      }
+    }
+    for (const ws of this.ctx.getWebSockets()) {
+      const a = ws.deserializeAttachment() as WsAttachment | null;
+      if (a?.deviceId === deviceId) {
+        try { ws.close(code, reason); } catch { /* already closed */ }
+      }
+    }
   }
 }
 
 /** Typed RPC surface (Envelope's index signature defeats the generated Rpc types). */
-export type TopicRpc = Pick<TopicDO, "configure" | "destroy" | "setAccountTransports" | "setAccountPaused" | "setTier" | "getMeta" | "subscriberCounts" | "setSubscriptions" | "publish" | "checkAuth" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases" | "closeAllLive">;
+export type TopicRpc = Pick<TopicDO, "configure" | "destroy" | "setAccountTransports" | "setAccountPaused" | "setTier" | "getMeta" | "subscriberCounts" | "setSubscriptions" | "publish" | "checkAuth" | "poll" | "fetch" | "recordDelivery" | "getTrace" | "ack" | "ackAs" | "isAcked" | "markSent" | "wasSent" | "flushLeases" | "closeDevice">;
 
 export function topicStub(env: Env, topic: string): TopicRpc {
   return env.TOPIC.get(env.TOPIC.idFromName(topic)) as unknown as TopicRpc;

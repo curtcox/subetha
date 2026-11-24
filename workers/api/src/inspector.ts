@@ -11,7 +11,7 @@ import { isTopic, ulid, type Envelope } from "@subetha/sdk/protocol";
 import { actionPriceMicros, skuForTransport, type PriceTable } from "@subetha/pricing";
 import prices from "@subetha/pricing/prices.json";
 import { accountTier, audit } from "./accounts.ts";
-import { requireAdmin } from "./auth.ts";
+import { actorOf, requireAdmin } from "./auth.ts";
 import { accountStub } from "./durable/account.ts";
 import { ApiError } from "./errors.ts";
 import { checkTelephonyCircuit } from "./cron.ts";
@@ -99,9 +99,9 @@ export function registerInspectorRoutes(app: Hono<Vars>, principal: PrincipalFn)
     const caps = p.kind === "token" ? { tokenDaily: p.caps.daily, tokenTotal: p.caps.total } : {};
     const r = await account.reserve(price, ref, tokenId, caps, telephony ? "telephony" : null, `sku=${sku}`);
     if (!r.ok) {
-      throw r.code === "insufficient_balance"
-        ? new ApiError("insufficient_balance", "balance can't cover the test delivery", { shortfall_usd_micros: r.shortfall })
-        : new ApiError("spend_cap_exceeded", `spend cap reached (${r.cap})`, { cap: r.cap });
+      if (r.code === "insufficient_balance") throw new ApiError("insufficient_balance", "balance can't cover the test delivery", { shortfall_usd_micros: r.shortfall });
+      if (r.cap === "account_paused") throw new ApiError("topic_paused", "account is paused");
+      throw new ApiError("spend_cap_exceeded", `spend cap reached (${r.cap})`, { cap: r.cap });
     }
 
     const started = Date.now();
@@ -131,7 +131,7 @@ export function registerInspectorRoutes(app: Hono<Vars>, principal: PrincipalFn)
     out.latency_ms = Date.now() - started;
     // Voice settles from the provider's status callback, to the real call length.
     if (!deferSettle) await account.settle(ref, out.charged_usd_micros as number);
-    await audit(c.env, accountId, p.kind, "endpoint.test", { id: ep.id, kind: ep.kind, result: out.result });
+    await audit(c.env, accountId, actorOf(p), "endpoint.test", { id: ep.id, kind: ep.kind, result: out.result });
     return c.json(out);
   });
 }

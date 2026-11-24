@@ -2,6 +2,7 @@
 // actual cost on success and released on permanent failure, so nothing is billed after the fact.
 import { accountStub } from "../durable/account.ts";
 import { topicStub } from "../durable/topic.ts";
+import { optedCountries } from "../control.ts";
 import type { DeliveryJob, Env } from "../types.ts";
 import { senders, PermanentError } from "./index.ts";
 import { checkTelephonyCircuit, tripAccountTelephonyCircuit } from "../cron.ts";
@@ -13,23 +14,38 @@ export async function processJob(job: DeliveryJob, env: Env): Promise<"delivered
   const started = Date.now();
   const topic = topicStub(env, job.topic);
   const account = accountStub(env, job.owner);
-  if (job.mode !== "all" && job.sub.after_s && (await topic.isAcked(job.message.id!))) {
+  const skip = async (reason: string, outcome: string) => {
     await account.release(job.reservation.ref);
-    await topic.recordDelivery(job.message.id!, { sub: job.sub.id, transport: job.sub.transport, result: "skipped: acked" });
-    emitMetric(env, { accountId: job.owner, event: "delivery", transport: job.sub.transport, sku: job.sku, outcome: "skipped_acked", latencyMs: Date.now() - started });
-    return "skipped";
+    await topic.recordDelivery(job.message.id!, { sub: job.sub.id, transport: job.sub.transport, result: `skipped: ${reason}` });
+    emitMetric(env, { accountId: job.owner, event: "delivery", transport: job.sub.transport, sku: job.sku, outcome, latencyMs: Date.now() - started });
+    return "skipped" as const;
+  };
+  if (job.mode !== "all" && (job.sub.after_s || job.attempt > 0) && (await topic.isAcked(job.message.id!))) {
+    return skip("acked", "skipped_acked");
   }
   if (job.deadline_ms && Date.now() > job.deadline_ms) {
-    await account.release(job.reservation.ref);
-    await topic.recordDelivery(job.message.id!, { sub: job.sub.id, transport: job.sub.transport, result: "skipped: past deadline" });
-    emitMetric(env, { accountId: job.owner, event: "delivery", transport: job.sub.transport, sku: job.sku, outcome: "skipped_deadline", latencyMs: Date.now() - started });
-    return "skipped";
+    return skip("past deadline", "skipped_deadline");
   }
   // A retry after a successful send (bookkeeping failed, or the worker died before acking) must
   // not send again: the send is marked before any bookkeeping.
   if (await topic.wasSent(job.reservation.ref)) {
     await account.settle(job.reservation.ref, job.reservation.micros).catch(() => {});
     return "delivered";
+  }
+  // Re-check kill switches, freeze, subscription pause/delete, and country opt-out before sending
+  // (important for delayed escalation jobs queued up to an hour earlier).
+  const acct = await env.DB.prepare("SELECT paused, frozen_since, telephony_countries FROM accounts WHERE id = ?")
+    .bind(job.owner).first<{ paused: number; frozen_since: number | null; telephony_countries: string | null }>();
+  if (acct?.paused) return skip("account paused", "skipped_paused");
+  if (acct?.frozen_since) return skip("account frozen", "skipped_frozen");
+  if (job.sub.country && job.sub.country !== "US" && acct && !optedCountries(acct.telephony_countries).includes(job.sub.country)) {
+    return skip(`country ${job.sub.country} disabled`, "skipped_policy");
+  }
+  const meta = await topic.getMeta();
+  if (meta?.policy.paused) return skip("topic paused", "skipped_paused");
+  if (job.sub.id.startsWith("sub_")) {
+    const subRow = await env.DB.prepare("SELECT paused FROM subscriptions WHERE id = ?").bind(job.sub.id).first<{ paused: number }>();
+    if (!subRow || subRow.paused) return skip(subRow ? "subscription paused" : "subscription deleted", "skipped_paused");
   }
   const send = senders[job.sub.transport];
   let sent = false;

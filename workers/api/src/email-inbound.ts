@@ -69,24 +69,36 @@ function decodeBody(p: Part): string {
   return p.body;
 }
 
-function findText(p: Part, depth = 0): string | null {
+function findPlainText(p: Part, depth = 0): string | null {
   const ct = p.headers["content-type"] ?? "text/plain";
   if (/^text\/plain/i.test(ct)) return decodeBody(p);
+  const boundary = /boundary="?([^";]+)"?/i.exec(ct)?.[1];
+  if (/^multipart\//i.test(ct) && boundary && depth < 5) {
+    const parts = p.body.split(`--${boundary}`).slice(1).filter((x) => !x.startsWith("--"));
+    for (const raw of parts) {
+      const t = findPlainText(splitPart(raw.replace(/^\r?\n/, "")), depth + 1);
+      if (t !== null) return t;
+    }
+  }
+  return null;
+}
+
+function findHtmlText(p: Part, depth = 0): string | null {
+  const ct = p.headers["content-type"] ?? "text/plain";
   if (/^text\/html/i.test(ct)) return decodeBody(p).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   const boundary = /boundary="?([^";]+)"?/i.exec(ct)?.[1];
   if (/^multipart\//i.test(ct) && boundary && depth < 5) {
     const parts = p.body.split(`--${boundary}`).slice(1).filter((x) => !x.startsWith("--"));
     for (const raw of parts) {
-      const t = findText(splitPart(raw.replace(/^\r?\n/, "")), depth + 1);
+      const t = findHtmlText(splitPart(raw.replace(/^\r?\n/, "")), depth + 1);
       if (t !== null) return t;
-    }
-    // Fall back to stripped HTML.
-    for (const raw of parts) {
-      const part = splitPart(raw.replace(/^\r?\n/, ""));
-      if (/^text\/html/i.test(part.headers["content-type"] ?? "")) return decodeBody(part).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
     }
   }
   return null;
+}
+
+function findText(p: Part): string | null {
+  return findPlainText(p) ?? findHtmlText(p);
 }
 
 export function parseEmail(raw: string): { subject: string; from: string; text: string } {
@@ -98,19 +110,31 @@ export function parseEmail(raw: string): { subject: string; from: string; text: 
 }
 
 export async function handleInboundEmail(message: ForwardableEmailMessage, env: Env): Promise<void> {
+  if (env.INBOUND_EMAIL_DOMAIN) {
+    const domain = (message.to.split("@")[1] ?? "").toLowerCase();
+    if (domain !== env.INBOUND_EMAIL_DOMAIN.toLowerCase()) return message.setReject("unknown inbound email domain");
+  }
   const topic = topicFromAddress(message.to);
   if (!topic) return message.setReject("unknown topic address");
   if (message.rawSize > MAX_RAW) return message.setReject("message too large");
   const meta = await topicStub(env, topic).getMeta();
   const from = message.from.toLowerCase();
+  const wildcard = !!meta?.policy.email_senders?.includes("*");
   const allowed = meta?.policy.email_senders?.some((s) => s === "*" || s.toLowerCase() === from || (s.startsWith("@") && from.endsWith(s.toLowerCase())));
   if (!meta || !allowed) return message.setReject("sender not allowed for this topic");
+  if (meta.policy.paused) return message.setReject("topic is paused");
+  if (!wildcard) {
+    const authRes = (message.headers.get("authentication-results") ?? "").toLowerCase();
+    if (/\bdmarc=fail\b/.test(authRes) || /\bspf=fail\b/.test(authRes)) {
+      return message.setReject("sender failed SPF/DMARC authentication");
+    }
+  }
   const raw = await new Response(message.raw).text();
   const parsed = parseEmail(raw);
   // Message-ID is sender-controlled, so scope it to the sender and topic.
   const msgId = await sha256Hex(`${topic}\n${from}\n${message.headers.get("message-id") ?? `${Date.now()}`}`);
   const inPrice = actionPriceMicros(PRICES, "inbound_email", await accountTier(env, meta.owner));
-  const charge = await accountStub(env, meta.owner).charge(inPrice, `inmail:${msgId}`, null, {}, true);
+  const charge = await accountStub(env, meta.owner).charge(inPrice, `inmail:${msgId}`, null, {}, true, "sku=inbound_email");
   if (!charge.ok) return message.setReject("topic owner's balance is empty");
   emitMetric(env, { accountId: meta.owner, event: "inbound_email", transport: "email", sku: "inbound_email", revenueMicros: inPrice, providerCostMicros: estimatedCostMicros("inbound_email"), detail: topic });
   const r = await topicStub(env, topic).publish({

@@ -11,17 +11,18 @@
 // more than publish + subscribe on the user's account, under a per-client daily spend cap
 // (accounts.oauth_daily_cap_micros; default $1, 0 turns OAuth access off). Managing the account
 // (tokens, endpoints, billing) still needs a session or an admin API token.
-import { isOAuthAccessToken, type ClerkClaims } from "./clerk.ts";
+import { isOAuthAccessToken, orgContext, type ClerkClaims } from "./clerk.ts";
 import { sha256Hex } from "./crypto.ts";
 import { ApiError } from "./errors.ts";
 import type { Env, Principal } from "./types.ts";
 
 export const DEFAULT_OAUTH_DAILY_CAP_MICROS = 1_000_000;
-export const OAUTH_SCOPES = ["publish", "subscribe"];
+export const OAUTH_SCOPES = ["publish", "subscribe", "topics"];
 
 export interface OAuthToken {
   sub: string;
   client_id: string;
+  org_id?: string;
   aud?: string | string[];
   exp?: number;
 }
@@ -45,7 +46,8 @@ export function audienceOk(env: Env, aud: string | string[] | undefined, request
 
 export function fromJwt(claims: ClerkClaims): OAuthToken | null {
   if (!isOAuthAccessToken(claims)) return null;
-  return { sub: claims.sub, client_id: claims.client_id ?? claims.azp ?? "unknown", aud: claims.aud, exp: claims.exp };
+  const { orgId } = orgContext(claims);
+  return { sub: claims.sub, client_id: claims.client_id ?? claims.azp ?? "unknown", ...(orgId ? { org_id: orgId } : {}), aud: claims.aud, exp: claims.exp };
 }
 
 export function introspectionConfigured(env: Env): boolean {
@@ -75,7 +77,8 @@ export async function introspect(env: Env, token: string, nowSec = Math.floor(Da
 /** The restricted principal for an OAuth access token. */
 export async function oauthPrincipal(env: Env, t: OAuthToken, requestOrigin?: string): Promise<Principal> {
   if (!audienceOk(env, t.aud, requestOrigin)) throw new ApiError("unauthorized", "access token was issued for another resource");
-  const row = await env.DB.prepare("SELECT id, oauth_daily_cap_micros FROM accounts WHERE clerk_id = ?").bind(t.sub).first<{ id: string; oauth_daily_cap_micros: number | null }>();
+  const clerkId = t.org_id ?? t.sub;
+  const row = await env.DB.prepare("SELECT id, oauth_daily_cap_micros FROM accounts WHERE clerk_id = ?").bind(clerkId).first<{ id: string; oauth_daily_cap_micros: number | null }>();
   if (!row) throw new ApiError("not_found", "no SubEtha account for this user yet: sign in at the console first");
   const cap = row.oauth_daily_cap_micros ?? DEFAULT_OAUTH_DAILY_CAP_MICROS;
   if (cap <= 0) throw new ApiError("forbidden", "OAuth access is turned off for this account");

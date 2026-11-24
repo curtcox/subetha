@@ -121,6 +121,7 @@ registerSender("webpush", async (job, env) => {
     await unverifyEndpoint(env, ep.id);
     throw new PermanentError(`push subscription expired (HTTP ${r.status})`);
   }
+  if (r.status >= 300 && r.status < 400) throw new PermanentError(`push endpoint redirected (HTTP ${r.status})`);
   if (!r.ok) throw httpFailure(r.status, await r.text());
   return { detail: { status: r.status, location: r.headers.get("location") ?? undefined } };
 });

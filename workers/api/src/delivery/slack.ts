@@ -26,7 +26,12 @@ export async function verifySlackSignature(secret: string, body: string, ts: str
 
 registerSender("slack", async (job, env) => {
   const ep = await loadEndpoint(env, job.sub.endpoint);
-  const token = String(ep.cfg.bot_token ?? env.SLACK_BOT_TOKEN ?? "");
+  let token = "";
+  if (typeof ep.cfg.team_id === "string" && ep.cfg.team_id) {
+    const team = await env.DB.prepare("SELECT bot_token FROM slack_teams WHERE team_id = ? AND account_id = ?").bind(ep.cfg.team_id, ep.account_id).first<{ bot_token: string }>();
+    if (team?.bot_token) token = team.bot_token;
+  }
+  if (!token) token = String(ep.cfg.bot_token ?? env.SLACK_BOT_TOKEN ?? "");
   if (!token) throw new PermanentError("no Slack token for this endpoint");
   const m = job.message;
   const text = renderText(m, 3000);

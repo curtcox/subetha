@@ -129,8 +129,8 @@ export async function authenticate(req: Request, env: Env): Promise<Principal> {
   throw new ApiError("unauthorized", "unrecognized credential");
 }
 
-/** Scope grammar: "<action>:<pattern>" where action is publish|subscribe|admin and pattern is "*", an exact topic, or "@handle/*". */
-export function scopeAllows(scopes: string[], action: "publish" | "subscribe" | "admin", topic?: string): boolean {
+/** Scope grammar: "<action>:<pattern>" where action is publish|subscribe|topics|admin and pattern is "*", an exact topic, or "@handle/*". */
+export function scopeAllows(scopes: string[], action: "publish" | "subscribe" | "admin" | "topics", topic?: string): boolean {
   for (const s of scopes) {
     if (s === "*" || s === "admin") return true;
     const i = s.indexOf(":");
@@ -147,7 +147,7 @@ export function scopeAllows(scopes: string[], action: "publish" | "subscribe" | 
 export function validateScopes(scopes: unknown): string[] {
   if (!Array.isArray(scopes) || scopes.length === 0) throw new ApiError("bad_request", "scopes must be a non-empty array");
   for (const s of scopes) {
-    if (typeof s !== "string" || !/^(\*|admin|(publish|subscribe)(:(\*|@[a-z0-9-]+\/(\*|[A-Za-z0-9_-]+)|t_[a-z2-7]{26}))?)$/.test(s)) {
+    if (typeof s !== "string" || !/^(\*|admin|topics|(publish|subscribe)(:(\*|@[a-z0-9-]+\/(\*|[A-Za-z0-9_-]+)|t_[a-z2-7]{26}))?)$/.test(s)) {
       throw new ApiError("bad_request", `invalid scope: ${String(s)}`);
     }
   }
@@ -181,4 +181,17 @@ export function requireAdmin(p: Principal): string {
   if (p.kind === "token" && !scopeAllows(p.scopes, "admin")) throw new ApiError("forbidden", "token lacks admin scope");
   if (p.kind === "user" && p.orgId && !isOrgAdminRole(p.orgRole)) throw new ApiError("forbidden", "organization admin role required");
   return id;
+}
+
+/** Topic listing/creation: allowed for admins and OAuth/MCP tokens with the `topics` scope (PLAN §6). */
+export function requireTopics(p: Principal): string {
+  const id = requireAccount(p);
+  if (p.kind === "device") throw new ApiError("forbidden", "devices can publish and subscribe but not manage topics");
+  if (p.kind === "token" && !scopeAllows(p.scopes, "admin") && !scopeAllows(p.scopes, "topics")) throw new ApiError("forbidden", "token lacks topics or admin scope");
+  if (p.kind === "user" && p.orgId && !isOrgAdminRole(p.orgRole)) throw new ApiError("forbidden", "organization admin role required");
+  return id;
+}
+
+export function actorOf(p: Principal): string {
+  return p.kind === "token" ? `token:${p.tokenId}` : p.kind === "user" ? `user:${p.clerkId}` : p.kind === "device" ? `device:${p.deviceId}` : "anonymous";
 }
