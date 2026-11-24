@@ -18,6 +18,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm test
       - name: Vectors and generated pricing are up to date
@@ -33,6 +34,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+      - run: cargo run -p subetha-core --example sign_and_encrypt
       - run: cargo clippy --workspace -- -D warnings
 
   python:

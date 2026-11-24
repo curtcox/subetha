@@ -253,6 +253,6 @@ export function registerDeviceRoutes(app: Hono<Vars>, principal: PrincipalFn) {
     const row = await c.env.DB.prepare("SELECT device_id, account_id, expires_at FROM device_codes WHERE device_code_hash = ?").bind(await sha256Hex(device_code ?? "")).first<{ device_id: string; account_id: string | null; expires_at: number }>();
     if (!row || (row.expires_at < Date.now() && !row.account_id)) return c.json({ error: "expired_token" }, 400);
     if (!row.account_id) return c.json({ error: "authorization_pending" }, 400);
-    return c.json({ device_id: row.device_id, account_id: row.account_id, auth: "Sign requests with X-Device-Id / X-Device-Time / X-Device-Signature" });
+    return c.json({ device_id: row.device_id, account_id: row.account_id, auth: "Sign requests with X-Device-Id / X-Device-Time / X-Device-Nonce / X-Device-Signed-Headers / X-Device-Signature" });
   });
 }

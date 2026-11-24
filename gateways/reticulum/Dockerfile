@@ -4,7 +4,7 @@
 #   docker build -f gateways/reticulum/Dockerfile -t subetha-reticulum .
 # Run:
 #   docker run -d --name subetha-reticulum \
-#     -e SUBETHA_TOKEN=tk_... \
+#     -e SUBETHA_TOKEN=se_... \
 #     -v subetha-reticulum:/data \
 #     -v $PWD/gateway.toml:/config/gateway.toml:ro \
 #     subetha-reticulum

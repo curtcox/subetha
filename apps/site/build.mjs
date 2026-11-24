@@ -346,11 +346,12 @@ function buildInfo() {
   const tomlVersion = (p) => /^version\s*=\s*"([^"]+)"/m.exec(readFileSync(join(repo, p), "utf8"))?.[1] ?? "?";
   const yamlVersion = (p) => /^version:\s*([^\s#]+)/m.exec(readFileSync(join(repo, p), "utf8"))?.[1] ?? "?";
   const gradleVersion = (p) => /^\s*version\s*=\s*"([^"]+)"/m.exec(readFileSync(join(repo, p), "utf8"))?.[1] ?? "?";
+  const swiftVersion = (p) => /public\s+static\s+let\s+version\s*=\s*"([^"]+)"/.exec(readFileSync(join(repo, p), "utf8"))?.[1] ?? "?";
   const sdks = [
     ["TypeScript SDK + CLI + web components", "@subetha/sdk", json("sdk/js/package.json").version, "https://www.npmjs.com/package/@subetha/sdk", "sdk/js"],
     ["Rust core", "subetha-core", tomlVersion("sdk/core/Cargo.toml"), "https://crates.io/crates/subetha-core", "sdk/core"],
     ["Python SDK", "subetha", tomlVersion("sdk/python/pyproject.toml"), "https://pypi.org/project/subetha/", "sdk/python"],
-    ["Swift SDK", "SubEtha", version, null, "sdk/swift"],
+    ["Swift SDK", "SubEtha", swiftVersion("sdk/swift/Sources/SubEtha/SubEtha.swift"), null, "sdk/swift"],
     ["Kotlin SDK", "us.subetha:subetha", gradleVersion("sdk/kotlin/build.gradle.kts"), null, "sdk/kotlin"],
     ["Dart / Flutter SDK", "subetha", yamlVersion("sdk/flutter/pubspec.yaml"), "https://pub.dev/packages/subetha", "sdk/flutter"],
     ["Flutter native core plugin", "subetha_core", yamlVersion("sdk/flutter_core/pubspec.yaml"), null, "sdk/flutter_core"],

@@ -52,15 +52,23 @@ def main(argv: list[str] | None = None) -> int:
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
 
+    ready = threading.Event()
+
+    def deliver_when_ready(dest: str, msg: dict) -> None:
+        if not ready.is_set():
+            raise RuntimeError("bridge starting")
+        bridge.deliver_direct(dest, msg)
+
     if cfg.health_port:  # up first, so the platform sees the container as started
         serve_health(
             cfg.health_port,
-            lambda: {"ok": True, "version": __version__, "topics": bridge.destinations()},
-            deliver=bridge.deliver_direct,
+            lambda: {"ok": True, "ready": ready.is_set(), "version": __version__, "topics": bridge.destinations()},
+            deliver=deliver_when_ready,
             deliver_secret=cfg.deliver_secret,
         )
 
     bridge.start()
+    ready.set()
     for topic, dest in bridge.destinations().items():
         print(f"{topic}  ->  LXMF <{dest}>", flush=True)
 

@@ -26,6 +26,8 @@ instance, a separate Firebase project) for staging.
 | `ASSETS` | Static assets | `apps/site/public` (landing page, console, docs, `sdk.js`, `sw.js`). |
 | `RL_AUTH`, `RL_ANON` | Rate Limiting | Per-credential and per-IP request limits. |
 | `EMAIL` | `send_email` (optional) | Cloudflare Email Service for outbound email; when absent, SES is used. |
+| `BACKUPS` | R2 (optional) | Nightly D1 SQLite backup dumps (`d1/<env>/YYYY-MM-DD.sql.gz`). |
+| `ANALYTICS` | Analytics Engine (optional) | Per-account/SKU usage and cost telemetry. |
 
 ## Vars
 
@@ -33,6 +35,7 @@ instance, a separate Firebase project) for staging.
 |---|---|---|
 | `ENVIRONMENT` | `local`, `staging`, `production` | Set per environment in `wrangler.jsonc`. |
 | `BASE_URL` | `http://localhost:8787`, `https://staging.subetha.us`, `https://subetha.us` | Used in links, OAuth redirects, attachment URLs, and Twilio signature checks. |
+| `BACKUP_RETENTION_DAYS` | integer (default `30`) | Days to retain nightly D1 backups in `BACKUPS`. |
 | `DEV_BOOTSTRAP_SECRET` | `local-dev-only` | **Local only.** Enables `POST /v1/dev/bootstrap` when `ENVIRONMENT=local`. Never set it for staging or production. |
 
 ## Secrets
@@ -58,7 +61,7 @@ applications in the Clerk dashboard, so clients can register themselves.
 | Name | Where to get it |
 |---|---|
 | `STRIPE_SECRET_KEY` | Stripe dashboard → Developers → API keys → Secret key (`sk_live_…`; `sk_test_…` for staging). A restricted key with Checkout Sessions write is enough. |
-| `STRIPE_WEBHOOK_SECRET` | Developers → Webhooks → add endpoint `https://<host>/v1/hooks/stripe` for `checkout.session.completed`, `charge.refunded`, `charge.dispute.created` → Signing secret (`whsec_…`). |
+| `STRIPE_WEBHOOK_SECRET` | Developers → Webhooks → add endpoint `https://<host>/v1/hooks/stripe` for `checkout.session.completed`, `payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`, `charge.dispute.created` → Signing secret (`whsec_…`). |
 
 ### Web Push
 
@@ -82,6 +85,7 @@ applications in the Clerk dashboard, so clients can register themselves.
 | `APNS_TEAM_ID` | Apple Developer → Membership → Team ID. |
 | `APNS_TOPIC` | The iOS app's bundle id. |
 | `APNS_ENDPOINT` | Optional. Default `https://api.push.apple.com`. APNs requires HTTP/2, which a Worker's `fetch()` may not negotiate: run [`gateways/apns-relay`](../gateways/apns-relay/README.md) and set this to its URL (e.g. `https://apns-relay.subetha.us`), or use FCM for iOS. |
+| `APNS_SANDBOX_ENDPOINT` | Optional. Default `https://api.sandbox.push.apple.com`. Used when a BYO APNs credential has `sandbox: true`. |
 | `APNS_RELAY_SECRET` | With the relay: the same random value as its `RELAY_SECRET` (at least 16 characters), sent as `x-relay-secret`. |
 
 ### Slack

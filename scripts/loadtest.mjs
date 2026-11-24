@@ -24,6 +24,11 @@ async function subscriber() {
   const ctl = new AbortController();
   controllers.push(ctl);
   const r = await fetch(`${base}/${topic}/json`, { headers, signal: ctl.signal });
+  if (!r.ok || !r.body) {
+    errors++;
+    if (errors < 5) console.error("sub failed", r.status, await r.text().catch(() => ""));
+    return;
+  }
   const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
   let buf = "";
   try {

@@ -602,6 +602,10 @@ paths:
                   live_by_topic:
                     type: array
                     items: { type: object, properties: { topic: { type: string }, micros: { type: integer } } }
+                  by_sku:
+                    type: array
+                    description: Spend grouped by pricing SKU (sorted descending).
+                    items: { type: object, properties: { sku: { type: string }, micros: { type: integer } } }
         "403": { $ref: "#/components/responses/Error" }
   /v1/audit:
     get:
@@ -960,10 +964,11 @@ paths:
       operationId: createEndpoint
       summary: Add an endpoint
       description: |
-        `email`, `sms`, and `voice` endpoints get a 6-digit code (charged like one delivery) and
-        must be verified within 30 minutes (5 attempts). `sms`/`voice` accept US numbers only
-        (`+1NXXNXXXXXX`). `webhook` endpoints return a signing secret once. Slack endpoints are
-        created by `POST /v1/slack/bindings`.
+        `email`, `sms`, `voice`, and `whatsapp` endpoints get a 6-digit code (charged like one
+        delivery) and must be verified within 30 minutes (5 attempts). `sms`/`voice`/`whatsapp`
+        accept US numbers (`+1NXXNXXXXXX`) by default, plus numbers in countries the account opted
+        into via `telephony_countries` (see `GET /v1/prices/destinations`). `webhook` endpoints
+        return a signing secret once. Slack endpoints are created by `POST /v1/slack/bindings`.
       requestBody:
         required: true
         content:
@@ -976,9 +981,9 @@ paths:
                 address:
                   type: string
                   description: |
-                    email address; E.164 US number; `https://` URL; Web Push subscription JSON
-                    (`{"endpoint":…,"keys":{"p256dh":…,"auth":…}}`); APNs device token (hex);
-                    FCM registration token; LXMF destination hash (32 hex).
+                    email address; E.164 phone number (US or opted-in country); `https://` URL;
+                    Web Push subscription JSON (`{"endpoint":…,"keys":{"p256dh":…,"auth":…}}`);
+                    APNs device token (hex); FCM registration token; LXMF destination hash (32 hex).
                 name: { type: string }
                 credential_id:
                   type: string
@@ -1494,6 +1499,7 @@ paths:
               type: object
               properties:
                 name: { type: string, maxLength: 64 }
+                capabilities: { type: array, maxItems: 32, items: { $ref: "#/components/schemas/Transport" } }
                 paused: { type: boolean, description: Device kill switch. Paused devices cannot sign requests until resumed. }
                 allow_transports: { type: [array, "null"], items: { $ref: "#/components/schemas/Transport" } }
                 deny_transports: { type: [array, "null"], items: { $ref: "#/components/schemas/Transport" } }
@@ -1588,7 +1594,7 @@ paths:
       tags: [devices]
       operationId: deviceToken
       summary: "Device flow, step 3: poll until approved"
-      description: After approval the device authenticates every request with `X-Device-Id`, `X-Device-Time`, and `X-Device-Signature` (see the `deviceSignature` security scheme). No bearer token is issued.
+      description: After approval the device authenticates every request with `X-Device-Id`, `X-Device-Time`, `X-Device-Nonce`, `X-Device-Signed-Headers`, and `X-Device-Signature` (see the `deviceSignature` security scheme). No bearer token is issued.
       security: []
       requestBody:
         required: true
@@ -2312,6 +2318,7 @@ components:
               properties:
                 threshold_micros: { type: integer }
                 amount_micros: { type: integer }
+        auto_recharge_last_error: { type: [string, "null"], description: "Last off-session auto-recharge failure reason, cleared when auto-recharge is re-enabled or a top-up succeeds." }
         paused: { type: boolean }
         created_at: { type: integer }
 

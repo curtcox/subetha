@@ -1,0 +1,95 @@
+name: Release
+
+# Tagged release workflow (PLAN §12): verifies all workspace suites, packs publishable SDK
+# tarballs/wheels and checksums, and creates a GitHub Release on tags matching `v*.*.*`.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag name to build release artifacts for (optional; dry-run without publishing a release)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: Verify workspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: Check vectors and pricing are up to date
+        run: |
+          pnpm vectors
+          pnpm pricing
+          git diff --exit-code -- spec/vectors pricing/generated
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace -- -D warnings
+      - run: |
+          pip install -e "sdk/python[test]" -e "gateways/reticulum[test]"
+          pytest sdk/python gateways/reticulum
+      - run: scripts/check-file-sizes.sh --tree
+
+  package:
+    name: Build release artifacts
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Pack JS/TS SDKs and APNs relay
+        run: |
+          mkdir -p release-assets
+          pnpm --dir sdk/js pack --pack-destination "$GITHUB_WORKSPACE/release-assets"
+          pnpm --dir sdk/react-native pack --pack-destination "$GITHUB_WORKSPACE/release-assets"
+          pnpm --dir gateways/apns-relay pack --pack-destination "$GITHUB_WORKSPACE/release-assets"
+      - name: Build Python sdist and wheels
+        run: |
+          pip install build
+          python -m build sdk/python --outdir release-assets
+          python -m build gateways/reticulum --outdir release-assets
+      - name: Compute SHA-256 checksums
+        working-directory: release-assets
+        run: sha256sum * > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets/*
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" release-assets/* \
+            --title "SubEtha $TAG" \
+            --notes-file CHANGELOG.md \
+            --verify-tag

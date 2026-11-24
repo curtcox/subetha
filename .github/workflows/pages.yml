@@ -49,7 +49,7 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p test-results
-          for pkg in spec pricing sdk/js workers/api docs/samples apps/site gateways/apns-relay; do
+          for pkg in spec pricing sdk/js sdk/react-native workers/api docs/samples apps/site gateways/apns-relay; do
             name=$(echo "$pkg" | tr / -)
             pnpm --dir "$pkg" exec vitest run --reporter=default --reporter=json \
               --outputFile.json="$GITHUB_WORKSPACE/test-results/ts-$name.json" || true

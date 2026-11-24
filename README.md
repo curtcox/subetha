@@ -67,7 +67,7 @@ docs/             developer docs (Markdown), samples/ (runnable, CI-tested), leg
 infra/            Cloudflare setup, secrets manifest, zone notes
 e2e/              Playwright tests: the console against the relay under wrangler dev
 scripts/          file-size check, load test, D1 restore from nightly backups
-.github/workflows ci.yml, mobile.yml, pages.yml, deploy.yml, nightly.yml, file-size-check.yml
+.github/workflows ci.yml, mobile.yml, pages.yml, deploy.yml, nightly.yml, release.yml, file-size-check.yml
 ```
 
 ## Tests

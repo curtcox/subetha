@@ -39,7 +39,10 @@ class Upstream {
   get(): ClientHttp2Session {
     if (this.session && !this.session.closed && !this.session.destroyed) return this.session;
     const s = connect(this.url);
-    s.on("error", (e) => this.log(`upstream error: ${e.message}`));
+    s.on("error", (e) => {
+      this.log(`upstream error: ${e.message}`);
+      if (this.session === s) this.session = null;
+    });
     s.on("goaway", () => { if (this.session === s) this.session = null; });
     s.on("close", () => { if (this.session === s) this.session = null; });
     s.setTimeout(60 * 60_000, () => s.close()); // idle for an hour: let it go

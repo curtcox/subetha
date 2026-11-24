@@ -43,7 +43,11 @@ def serve_health(
             if self.path != "/deliver" or deliver is None or not deliver_secret:
                 self.send_error(404)
                 return
-            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                self.send_error(400)
+                return
             if length <= 0 or length > MAX_BODY:
                 self.send_error(413)
                 return

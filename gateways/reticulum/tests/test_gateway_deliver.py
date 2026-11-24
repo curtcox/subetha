@@ -58,5 +58,11 @@ def test_http_deliver_endpoint():
         assert lxmf.sent[0]["to"] == PEER
         bad = json.dumps({"destination": "nothex", "message": {}}).encode()
         assert post(bad, sign("sec", bad)) == 400
+        # Malformed Content-Length returns 400 rather than crashing the request handler.
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        c.putrequest("POST", "/deliver")
+        c.putheader("Content-Length", "not-a-number")
+        c.endheaders()
+        assert c.getresponse().status == 400
     finally:
         server.shutdown()

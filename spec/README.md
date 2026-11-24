@@ -175,8 +175,9 @@ Publish headers (ntfy): `X-Title`/`Title`/`t`, `X-Priority`/`Priority`/`p` (1–
 (`?title=…`) are accepted too.
 
 SubEtha headers: `X-Route-Mode` (`any|fast|all|cheap`), `X-Max-Cost` (USD, decimal),
-`X-Deny`/`X-Allow` (comma-separated transport ids), `X-Deadline` (seconds),
-`Idempotency-Key`, `X-Dry-Run: 1`, `X-Sender`, `X-Signature`, `X-Message-Id`, `X-Time`.
+`X-Deny`/`X-Allow` (comma-separated transport ids), `X-Deadline` (seconds), `X-Content-Type`,
+`X-Hops`, `X-Expires`, `Idempotency-Key`, `X-Dry-Run: 1`, `X-Sender`, `X-Signature`,
+`X-Message-Id`, `X-Time`.
 
 Auth: `Authorization: Bearer <token>` (API token or Clerk session JWT), or ntfy-style
 `?auth=<base64("Bearer <token>")>`, or HTTP Basic with an empty username and the token as the
@@ -218,8 +219,8 @@ its ntfy aliases (`X-Title`/`Title`/`t`, `X-Priority`/`Priority`/`prio`/`p`,
 `X-Message`/`Message`/`m`, `X-Delay`/`Delay`/`X-At`/`At`/`X-In`/`In`), the ntfy names
 `X-Email`/`Email`/`e`, `X-Call`/`Call`, `X-Cache`/`Cache`, `X-Firebase`/`Firebase`,
 `X-UnifiedPush`/`UnifiedPush`/`up`, `X-Poll-Id`/`Poll-Id`, and the SubEtha headers
-`X-Sender`, `X-Signature`, `X-Message-Id`, `X-Time`, `X-Expires`, `X-Route-Mode`, `X-Max-Cost`,
-`X-Deny`, `X-Allow`, `X-Deadline`, `X-Dry-Run`. Other headers (`User-Agent`, `Accept`,
+`X-Sender`, `X-Signature`, `X-Message-Id`, `X-Time`, `X-Expires`, `X-Content-Type`, `X-Hops`,
+`X-Route-Mode`, `X-Max-Cost`, `X-Deny`, `X-Allow`, `X-Deadline`, `X-Dry-Run`. Other headers (`User-Agent`, `Accept`,
 `X-Forwarded-For`, …) may be added in transit.
 
 **SDK convention.** SDKs sign `x-device-id`, `x-device-time`, `x-device-nonce`, then every other
