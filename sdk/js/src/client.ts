@@ -24,8 +24,19 @@ export interface ClientOptions {
   /** E2EE keys by topic (spec §5). Messages to these topics are encrypted, and received ones decrypted. */
   topicKeys?: Record<string, { kid: string; key: Uint8Array }>;
   WebSocket?: typeof WebSocket;
-  /** Authenticate every request with a device signature (enrolled devices; see /v1/device/code). */
+  /** Authenticate every request with a device signature (a signing key attached with attachDeviceKey). */
   signRequests?: boolean;
+  /**
+   * Authenticate every request as a devicebasedauth.org device: anything with
+   * `headers(method, url)` returning its Authorization and DPoP headers, such as `new DBA()` from
+   * https://devicebasedauth.org/sdk/dba.js after `dba.enroll(…)`. Not with signRequests.
+   */
+  dba?: DbaHeaders;
+}
+
+/** A devicebasedauth.org device: the Authorization and DPoP headers for one request. */
+export interface DbaHeaders {
+  headers(method: string, url: string): Promise<Record<string, string>>;
 }
 
 /** Opens wrapped topic keys (spec §5.1) addressed to `deviceId`; null when it can't. */
@@ -123,7 +134,7 @@ function bodyBytes(body: RequestInit["body"]): Uint8Array {
   throw new Error("signed requests need a string or byte body");
 }
 
-/** Proof of key possession for POST /v1/device/code. */
+/** Proof of key possession for POST /v1/devices/dba (attaching a signing key). */
 export async function enrollmentProof(key: DeviceKey, nowSec = Math.floor(Date.now() / 1000)): Promise<{ device_id: string; time: number; proof: string }> {
   const sig = new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, key.privateKey, utf8.encode(`subetha-enroll-v1\n${key.deviceId}\n${nowSec}`) as BufferSource));
   return { device_id: key.deviceId, time: nowSec, proof: base64urlEncode(sig) };
@@ -165,6 +176,18 @@ export class SubEtha {
     this.WS = opts.WebSocket ?? (globalThis as { WebSocket?: typeof WebSocket }).WebSocket;
     this.signRequests = !!opts.signRequests;
     if (this.signRequests && !this.signer) throw new Error("signRequests needs a deviceKey or signer");
+    if (this.signRequests && opts.dba) throw new Error("use either signRequests or dba, not both");
+    if (opts.dba) {
+      const dba = opts.dba;
+      const inner = this.f;
+      this.f = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        const url = String(input instanceof Request ? input.url : input);
+        const headers = new Headers(init.headers);
+        headers.delete("authorization");
+        for (const [k, v] of Object.entries(await dba.headers(init.method ?? "GET", url))) headers.set(k, v);
+        return inner(input, { ...init, headers });
+      }) as typeof fetch;
+    }
     if (this.signRequests) {
       const inner = this.f;
       this.f = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -559,15 +582,19 @@ export class SubEtha {
     return this.request<Record<string, unknown>>("PATCH", `/v1/devices/${encodeURIComponent(id)}`, body);
   }
   revokeDevice(id: string) { return this.request<{ revoked: true }>("DELETE", `/v1/devices/${encodeURIComponent(id)}`); }
-  startDeviceCode(body: { device_id: string; time: number; proof: string; name?: string; capabilities?: string[] }) {
-    return this.request<{ device_code: string; user_code: string; verification_uri: string; verification_uri_complete?: string; expires_in?: number; interval?: number }>("POST", "/v1/device/code", body);
+  /**
+   * As a devicebasedauth.org device (the `dba` option), attach an Ed25519 signing key: topic keys
+   * can then be sealed to it, and it signs requests (signRequests) and messages.
+   */
+  async attachDeviceKey(key: DeviceKey, o: { name?: string; capabilities?: string[] } = {}) {
+    return this.request<{ id: string; enrolled: true; dba_device: string }>("POST", "/v1/devices/dba", { ...(await enrollmentProof(key)), ...o });
   }
-  approveDevice(userCode: string) { return this.request<Record<string, unknown>>("POST", "/v1/device/approve", { user_code: userCode }); }
-  async pollDeviceToken(deviceCode: string): Promise<{ ok: boolean; status: number; data: { device_id?: string; account_id?: string; error?: string } }> {
-    const r = await this.f(`${this.baseUrl}/v1/device/token`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ device_code: deviceCode }) });
-    const data = (await r.json().catch(() => ({}))) as { device_id?: string; account_id?: string; error?: string };
-    return { ok: r.ok, status: r.status, data };
-  }
+  /** The account's link to a devicebasedauth.org account. */
+  dbaLink() { return this.request<{ linked: boolean; dba_account: string | null; linked_at: number | null; issuer: string; audience: string }>("GET", "/v1/dba/link"); }
+  /** Start linking (signed-in console sessions only): open `url`; devicebasedauth.org returns to /auth/dba/callback. */
+  startDbaLink() { return this.request<{ url: string; expires_in: number }>("POST", "/v1/dba/link/start", {}); }
+  finishDbaLink(code: string, state: string) { return this.request<{ linked: true; dba_account: string }>("POST", "/v1/dba/link/finish", { code, state }); }
+  unlinkDba() { return this.request<{ linked: false }>("DELETE", "/v1/dba/link"); }
   listEndpoints() { return this.request<{ endpoints: Record<string, unknown>[] }>("GET", "/v1/endpoints"); }
   createEndpoint(body: { kind: string; address: string; config?: Record<string, unknown>; inbound_topic?: string | null }) {
     return this.request<Record<string, unknown>>("POST", "/v1/endpoints", body);

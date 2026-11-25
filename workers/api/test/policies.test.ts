@@ -1,4 +1,5 @@
 import { SELF } from "cloudflare:test";
+import { enrollDevice } from "./dba.ts";
 import { describe, expect, it } from "vitest";
 import { enrollmentProof, signRequest } from "@subetha/sdk";
 import { generateDeviceKey, utf8 } from "@subetha/sdk/protocol";
@@ -118,11 +119,7 @@ describe("account and topic policies", () => {
 
     const key = await generateDeviceKey();
     const proof = await enrollmentProof(key);
-    const enrolled = await SELF.fetch(`${BASE}/v1/devices`, {
-      method: "POST",
-      headers: auth(a.token),
-      body: JSON.stringify({ ...proof, name: "sensor-1", capabilities: ["ws"] }),
-    });
+    const enrolled = await enrollDevice(a.account_id, key, { name: "sensor-1", capabilities: ["ws"] });
     expect(enrolled.status).toBe(201);
 
     const devReq = async (path: string, body: string, extra: Record<string, string> = {}) => {

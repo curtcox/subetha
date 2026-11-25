@@ -46,6 +46,7 @@ security:
   - bearerAuth: []
   - basicAuth: []
   - authQuery: []
+  - dbaCredential: []
   - deviceSignature: []
   - {}
 tags:
@@ -1454,36 +1455,24 @@ paths:
     post:
       tags: [devices]
       operationId: enrollDevice
-      summary: Enroll a device directly by its id (admin)
+      summary: "Enroll a device directly by its id (retired: 410)"
+      deprecated: true
       description: >-
-        Needs the same proof of key possession as `/v1/device/code` (device ids are public), so
-        get `time` and `proof` from the device (`enrollmentProof` in the SDKs).
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [device_id, time, proof]
-              properties:
-                device_id: { type: string, pattern: "^dev_[a-z2-7]{52}$" }
-                time: { type: integer, description: Unix seconds (±300 s). }
-                proof: { type: string, description: 'base64url Ed25519 signature of "subetha-enroll-v1\n" + device_id + "\n" + time.' }
-                name: { type: string, maxLength: 64 }
-                capabilities: { type: array, maxItems: 32, items: { $ref: "#/components/schemas/Transport" } }
+        subetha's own device enrollment is retired. Devices enroll at devicebasedauth.org for the
+        audience `subetha.us`, and may then attach a signing key with `POST /v1/devices/dba`.
+      security: []
       responses:
-        "201":
-          description: Enrolled.
+        "410":
+          description: Retired; the body names the replacement and links the docs.
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  id: { type: string }
-                  enrolled: { const: true }
-        "400": { $ref: "#/components/responses/Error" }
-        "403": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
+                  error: { const: unsupported }
+                  http: { const: 410 }
+                  message: { type: string }
+                  docs: { type: string }
   /v1/devices/{id}:
     patch:
       tags: [devices]
@@ -1523,17 +1512,19 @@ paths:
             application/json:
               schema: { type: object, properties: { revoked: { const: true } } }
         "404": { $ref: "#/components/responses/Error" }
-  /v1/device/code:
+  /v1/devices/dba:
     post:
       tags: [devices]
-      operationId: deviceCode
-      summary: "Device flow, step 1: get a user code"
+      operationId: attachDeviceKey
+      summary: Attach a signing key to a devicebasedauth.org device
       description: |
-        The device proves it holds its key by signing
-        `"subetha-enroll-v1\n" + device_id + "\n" + time` (Ed25519, base64url) and gets a
-        `user_code` to show the owner. Codes last 10 minutes. The SDK's `enrollmentProof(key)`
-        builds `device_id`, `time`, and `proof`.
-      security: []
+        A device enrolled at devicebasedauth.org (credential for `subetha.us`) attaches an Ed25519
+        signing key, which E2EE topic keys can then be wrapped to and which signs requests
+        (`deviceSignature`) and messages. Needs grants for `subetha:publish` and
+        `subetha:subscribe` on every topic (the key signs for all of them). The device proves it
+        holds the key by signing `"subetha-enroll-v1\n" + device_id + "\n" + time` (SDK
+        `enrollmentProof(key)`). Revoking the devicebasedauth.org credential also stops the key.
+      security: [{ dbaCredential: [] }]
       requestBody:
         required: true
         content:
@@ -1542,90 +1533,193 @@ paths:
               type: object
               required: [device_id, time, proof]
               properties:
-                device_id: { type: string, pattern: "^dev_[a-z2-7]{52}$", description: The device's Ed25519 identity. }
+                device_id: { type: string, pattern: "^dev_[a-z2-7]{52}$", description: The key's Ed25519 identity. }
                 time: { type: integer, description: Unix seconds (±300 s). }
                 proof: { type: string, description: base64url Ed25519 signature. }
                 name: { type: string, maxLength: 64 }
-                capabilities: { type: array, items: { $ref: "#/components/schemas/Transport" } }
+                capabilities: { type: array, maxItems: 32, items: { $ref: "#/components/schemas/Transport" } }
       responses:
-        "200":
-          description: Device authorization.
+        "201":
+          description: Attached.
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  device_code: { type: string, description: Secret; the device polls with it. }
-                  user_code: { type: string, examples: [BCDF-GHJK] }
-                  verification_uri: { type: string, format: uri }
-                  verification_uri_complete: { type: string, format: uri }
-                  expires_in: { type: integer }
-                  interval: { type: integer }
+                  id: { type: string }
+                  enrolled: { const: true }
+                  dba_device: { type: string, description: "The devicebasedauth.org device, as `dba:<id>`." }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/device/code:
+    post:
+      tags: [devices]
+      operationId: deviceCode
+      summary: "Device flow, step 1 (retired: 410)"
+      deprecated: true
+      description: >-
+        subetha's own device enrollment is retired. Devices enroll at devicebasedauth.org for the
+        audience `subetha.us`, and may then attach a signing key with `POST /v1/devices/dba`.
+      security: []
+      responses:
+        "410":
+          description: Retired; the body names the replacement and links the docs.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { const: unsupported }
+                  http: { const: 410 }
+                  message: { type: string }
+                  docs: { type: string }
   /v1/device/approve:
     post:
       tags: [devices]
       operationId: deviceApprove
-      summary: "Device flow, step 2: the owner approves the code (admin)"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [user_code]
-              properties:
-                user_code: { type: string }
+      summary: "Device flow, step 2 (retired: 410)"
+      deprecated: true
+      description: >-
+        subetha's own device enrollment is retired. Devices enroll at devicebasedauth.org for the
+        audience `subetha.us`, and may then attach a signing key with `POST /v1/devices/dba`.
+      security: []
       responses:
-        "200":
-          description: Enrolled.
+        "410":
+          description: Retired; the body names the replacement and links the docs.
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  device_id: { type: string }
-                  name: { type: string }
-                  enrolled: { const: true }
-        "404": { $ref: "#/components/responses/Error" }
+                  error: { const: unsupported }
+                  http: { const: 410 }
+                  message: { type: string }
+                  docs: { type: string }
   /v1/device/token:
     post:
       tags: [devices]
       operationId: deviceToken
-      summary: "Device flow, step 3: poll until approved"
-      description: After approval the device authenticates every request with `X-Device-Id`, `X-Device-Time`, `X-Device-Nonce`, `X-Device-Signed-Headers`, and `X-Device-Signature` (see the `deviceSignature` security scheme). No bearer token is issued.
+      summary: "Device flow, step 3 (retired: 410)"
+      deprecated: true
+      description: >-
+        subetha's own device enrollment is retired. Devices enroll at devicebasedauth.org for the
+        audience `subetha.us`, and may then attach a signing key with `POST /v1/devices/dba`.
       security: []
+      responses:
+        "410":
+          description: Retired; the body names the replacement and links the docs.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { const: unsupported }
+                  http: { const: 410 }
+                  message: { type: string }
+                  docs: { type: string }
+  /v1/dba/link:
+    get:
+      tags: [devices]
+      operationId: dbaLink
+      summary: The account's devicebasedauth.org link (admin)
+      responses:
+        "200":
+          description: Link state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  linked: { type: boolean }
+                  dba_account: { type: [string, "null"] }
+                  linked_at: { type: [integer, "null"], description: Unix milliseconds. }
+                  issuer: { type: string, format: uri }
+                  audience: { const: subetha.us }
+    delete:
+      tags: [devices]
+      operationId: unlinkDba
+      summary: Unlink devicebasedauth.org (admin)
+      description: Its devices stop working here (within a minute everywhere).
+      responses:
+        "200":
+          description: Unlinked.
+          content:
+            application/json:
+              schema: { type: object, properties: { linked: { const: false } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/dba/link/start:
+    post:
+      tags: [devices]
+      operationId: startDbaLink
+      summary: Start linking a devicebasedauth.org account (admin)
+      description: >-
+        Returns the devicebasedauth.org sign-in URL (OpenID Connect, authorization code with PKCE).
+        After sign-in it returns to `/auth/dba/callback`. Attempts last 10 minutes; at most 10 at
+        once per account.
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Sign-in URL.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, format: uri }
+                  expires_in: { type: integer }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/dba/link/finish:
+    post:
+      tags: [devices]
+      operationId: finishDbaLink
+      summary: Finish linking with the callback's code and state (admin)
+      description: >-
+        Single use. One devicebasedauth.org account links to at most one subetha account; linking
+        another replaces this account's previous link.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [device_code]
+              required: [state]
               properties:
-                device_code: { type: string }
+                code: { type: string }
+                state: { type: string }
+                error: { type: string, description: The callback's error, when sign-in was not completed. }
       responses:
         "200":
-          description: Approved.
+          description: Linked.
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  device_id: { type: string }
-                  account_id: { type: string }
-                  auth: { type: string }
-        "400":
-          description: 'RFC 8628-style poll errors: `{"error": "authorization_pending"}` or `{"error": "expired_token"}`.'
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error: { enum: [authorization_pending, expired_token] }
-
-  # ------------------------------------------------------------------ MCP
+                  linked: { const: true }
+                  dba_account: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /auth/dba/callback:
+    get:
+      tags: [devices]
+      operationId: dbaCallback
+      summary: devicebasedauth.org sign-in returns here
+      description: Redirects to the console with `code` and `state` in the URL fragment, which the console posts to `/v1/dba/link/finish`.
+      security: []
+      parameters:
+        - { name: code, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: error, in: query, schema: { type: string } }
+      responses:
+        "302": { description: "To `/console/#dba-callback=1&code=…&state=…`." }
   /mcp:
     get:
       tags: [mcp]
@@ -1920,12 +2014,23 @@ components:
       type: http
       scheme: basic
       description: For ntfy clients. Empty username, the token as the password.
+    dbaCredential:
+      type: http
+      scheme: dba
+      description: |
+        A devicebasedauth.org device credential for the audience `subetha.us`:
+        `Authorization: DBA <credential>` plus `DPoP: <proof>` signed by the device's key for this
+        method and URL (the DBA SDKs and `dba headers`/`dba curl` make both), or
+        `Authorization: Bearer <dba-access+jwt>`. Verified offline (issuer signature, revocation
+        status list, proof). The device's devicebasedauth.org account must be linked
+        (`/v1/dba/link`). Grants: `subetha:publish` and `subetha:subscribe`, with topic names or
+        `@handle/*` as resources. Such a device is listed as `dba:<id>` and cannot manage the account.
     deviceSignature:
       type: apiKey
       in: header
       name: X-Device-Id
       description: |
-        Enrolled devices sign each request instead of sending a token. Headers:
+        Devices with a signing key (attached with `POST /v1/devices/dba`) sign each request instead of sending a token. Headers:
         `X-Device-Id: dev_…`, `X-Device-Time: <unix seconds, ±300 s>`,
         `X-Device-Nonce: <16–64 random base64url chars, single use>`,
         `X-Device-Signed-Headers: x-device-id,x-device-time,x-device-nonce,<content and routing headers>`, and

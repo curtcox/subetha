@@ -1,45 +1,62 @@
 # Devices
 
-A **device** is anything with its own Ed25519 key: a phone app, a browser, a Raspberry Pi, a CLI,
-an ESP32 bridge, an agent. Its id is `dev_` followed by its public key in base32, so anyone can
-verify its signatures without a lookup.
+A **device** is a phone app, a browser, a Raspberry Pi, a CLI, an ESP32 bridge, an agent: anything
+that holds its own key. Devices enroll at **[devicebasedauth.org](https://devicebasedauth.org)**
+(DBA): the key is made on the device and never leaves it, you approve the device there and choose
+what it may do, and you can revoke it there or here. subetha checks each request's DBA credential
+itself (offline: the issuer's signature, its revocation list, and a fresh proof of the device's key).
 
-An enrolled device:
+A device:
 
-- authenticates by **signing each request** with its key, so no bearer token has to be stored on it;
-- can **publish and subscribe** (subject to topic policies) but can't manage the account (tokens,
-  billing, endpoints);
-- can be listed and **revoked** at any time;
+- authenticates with its **DBA credential and a proof of its key** on each request, so no bearer
+  token is stored on it;
+- can **publish and subscribe** within its grants (subject to topic policies), but can't manage the
+  account (tokens, billing, endpoints);
+- can be listed, **paused**, limited to some transports, and **revoked** at any time, here or at
+  devicebasedauth.org;
 - costs a little rent per day while enrolled ([Pricing](pricing.md)).
 
-Devices can also sign *messages* (independently of enrollment) so receivers know who sent them:
-see [Signed messages](publishing.md#signed-messages).
+Devices can also sign *messages* so receivers know who sent them: see
+[Signed messages](publishing.md#signed-messages).
 
-## Enrolling with the device flow
+## Enrolling a device
 
-For devices with a screen or a log but no browser, an RFC 8628-style flow: the device shows a
-short code, you approve it in the console, the device is enrolled.
+1. **Link devicebasedauth.org once.** In the console, **Devices → Link devicebasedauth.org** signs
+   you in there and links that account to this one (`POST /v1/dba/link/start`, then `/finish`).
+   One devicebasedauth.org account links to one subetha account.
+2. **Enroll the device at devicebasedauth.org** for the audience `subetha.us`, with grants for
+   `subetha:publish` and `subetha:subscribe`. Resources limit them to topics: a topic name
+   (`@me/doorbell`) or a prefix (`@me/*`); none means every topic. You approve it there.
+   - CLI or server: `dba enroll --aud subetha.us --action subetha:publish --action subetha:subscribe --resource "@me/*"`,
+     then `dba curl …` (or `dba headers METHOD URL` for any HTTP client).
+   - Browser: `const dba = new DBA()` from `https://devicebasedauth.org/sdk/v1.4.0/dba.js`, then
+     `dba.enroll({ aud: ["subetha.us"], grants: [{ actions: ["subetha:publish", "subetha:subscribe"] }] })`;
+     pass it to the SDK as `new SubEtha({ dba })`.
+   - Android and iOS: devicebasedauth.org's Keystore and Secure Enclave samples.
+3. **Use it.** Requests carry `Authorization: DBA <credential>` and `DPoP: <proof>`. The device
+   shows up under **Devices** as `dba:<id>` on first use.
 
 <!-- include: samples/ts/devices.ts#snippet -->
 
-1. **`POST /v1/device/code`** (no credentials). The device sends its id, the current time, and a
-   proof: an Ed25519 signature over `"subetha-enroll-v1\n" + device_id + "\n" + time`
-   (`enrollmentProof(key)` in the SDK). It gets a `user_code` like `BCDF-GHJK`, valid for 10
-   minutes, and a `device_code` to poll with.
-2. **`POST /v1/device/approve`** by the owner: open `verification_uri_complete` (the console's **Devices** tab with the code filled in) and press Approve, or call it with an admin token.
-3. **`POST /v1/device/token`** by the device, every `interval` seconds, until it stops answering
-   `{"error": "authorization_pending"}`.
+<!-- include: samples/curl/devices-dba.sh -->
 
-The owner's side, and direct enrollment when the device can hand you its id and a fresh proof
-(the same `enrollmentProof` output; device ids are public, so the id alone isn't enough):
+### Signing keys (E2EE and signed messages)
 
-<!-- include: samples/curl/device-flow.sh -->
+E2EE topic keys are sealed to an Ed25519 key, and signed messages are signed by one. A DBA device
+attaches such a key with **`POST /v1/devices/dba`**, proving it holds it with
+`enrollmentProof(key)` (an Ed25519 signature over `"subetha-enroll-v1\n" + device_id + "\n" + time`).
+The device needs grants on every topic for this. The key, `dev_` followed by its public key in
+base32, is then listed beside its DBA device and signs requests as below; revoking the DBA
+credential stops it too. `attachDeviceKey(key)` in the TypeScript SDK does this, and so does
+**Devices → This browser → Enroll this browser** in the console and bare `subetha login` in the
+CLI (through the `dba` CLI).
 
-In the console, paste that JSON into **Devices → Enroll with a proof** within 5 minutes of making it. To give your current browser its own device identity (for signing messages and unwrapping E2EE topic keys directly in the console), use **Devices → This browser → Enroll this browser**.
+subetha's own device-code flow (`/v1/device/code`, `/approve`, `/token`) and direct registration
+(`POST /v1/devices`) are retired and answer `410`.
 
 ## Signed requests
 
-Every request from an enrolled device carries:
+Every request signed with an attached key carries:
 
 ```http
 X-Device-Id: dev_kxisxbay4mtidk6z454fh3jcjhf3wfpggcprvnuu42wa2fvbeiwa
@@ -76,8 +93,5 @@ requests that carry none of those headers. It's deprecated.
 Generate the key on the device and never move it: `generateDeviceKey()` (TypeScript),
 `generate_device_key()` (Python), or `DeviceKey::generate()` (Rust). Persist the 32-byte seed in
 the platform's secure storage (Keychain, Android Keystore, a file readable only by the service
-user) and restore it with `deviceKeyFromSeed` / `device_key_from_seed` / `DeviceKey::from_seed`. A lost key means enrolling again; a leaked key
-means revoking the device.
-
-> devicebasedauth.org integration (PLAN open question 1) may replace or extend this flow. The
-> request-signature format will stay.
+user) and restore it with `deviceKeyFromSeed` / `device_key_from_seed` / `DeviceKey::from_seed`. A lost key means attaching a new one; a leaked key
+means revoking the device (or its devicebasedauth.org credential).

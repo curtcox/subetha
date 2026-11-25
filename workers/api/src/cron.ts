@@ -56,12 +56,15 @@ export async function refreshVolumeTiers(env: Env, now: number) {
   for (const r of results) await recomputeAccountTopups12mo(env, r.account_id, now);
 }
 
-/** Daily rent for enrolled devices and verified endpoints, charged in arrears for one day. */
+/**
+ * Daily rent for enrolled devices and verified endpoints, charged in arrears for one day. A
+ * devicebasedauth.org device and the signing key it attached are one device.
+ */
 export async function meterRent(env: Env, now: number) {
   const day = new Date(now).toISOString().slice(0, 10);
   const { results } = await env.DB.prepare(
     `SELECT a.id, a.email, a.frozen_since, a.topups_12mo_micros,
-      (SELECT COUNT(*) FROM devices d WHERE d.account_id = a.id AND d.revoked_at IS NULL) AS devices,
+      (SELECT COUNT(DISTINCT COALESCE(d.dba_device, d.id)) FROM devices d WHERE d.account_id = a.id AND d.revoked_at IS NULL) AS devices,
       (SELECT COUNT(*) FROM endpoints e WHERE e.account_id = a.id AND e.verified_at IS NOT NULL) AS endpoints
      FROM accounts a`).all<{ id: string; email: string | null; frozen_since: number | null; topups_12mo_micros: number; devices: number; endpoints: number }>();
   for (const a of results) {

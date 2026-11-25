@@ -3,10 +3,11 @@
 import { SubEtha, enrollmentProof, generateDeviceKey } from "@subetha/sdk";
 import type { SampleContext } from "./_context.ts";
 
-export async function run({ baseUrl, token, topic, fetch = globalThis.fetch }: SampleContext) {
-  // A device enrolled into the account (see devices.ts for the device-code flow).
+export async function run({ baseUrl, token, topic, dba, fetch = globalThis.fetch }: SampleContext) {
+  // A devicebasedauth.org device of the account attaches its signing key (see devices.ts).
   const deviceKey = await generateDeviceKey();
-  await fetch(`${baseUrl}/v1/devices`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(await enrollmentProof(deviceKey)) });
+  const attachUrl = `${baseUrl}/v1/devices/dba`;
+  await fetch(attachUrl, { method: "POST", headers: { ...(await dba.headers("POST", attachUrl)), "content-type": "application/json" }, body: JSON.stringify(await enrollmentProof(deviceKey)) });
 
   // #region snippet
   // Owner (admin token): create the topic, then wrap a fresh key for each device that should read it.

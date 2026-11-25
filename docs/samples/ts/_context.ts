@@ -8,4 +8,10 @@ export interface SampleContext {
   /** A topic the token's account owns, e.g. "@me/demo". */
   topic: string;
   fetch?: typeof fetch;
+  /**
+   * A device enrolled at devicebasedauth.org for subetha.us: in a browser,
+   * `new DBA()` from https://devicebasedauth.org/sdk/dba.js after `dba.enroll(…)`; CI passes a
+   * stand-in. headers() returns its Authorization and DPoP headers for one request.
+   */
+  dba: { headers(method: string, url: string): Promise<Record<string, string>> };
 }

@@ -67,7 +67,7 @@ they're visible to anyone who views the page.
 
 <!-- include: samples/cli/cli.sh -->
 
-`SUBETHA_TOKEN` and `SUBETHA_URL` override the saved login. Running `subetha login` with no token starts the device-code flow and saves a device key so the CLI signs requests without storing a bearer token. `subetha pub --file PATH` uploads an attachment, and `subetha trace` / `subetha ack` inspect or acknowledge messages.
+`SUBETHA_TOKEN` and `SUBETHA_URL` override the saved login. Running `subetha login` with no token attaches a fresh signing key through this machine's devicebasedauth.org device (enroll it first with `dba enroll --aud subetha.us --action subetha:publish --action subetha:subscribe`) and saves it, so the CLI signs requests without storing a bearer token. `subetha pub --file PATH` uploads an attachment, and `subetha trace` / `subetha ack` inspect or acknowledge messages.
 
 ## Python
 

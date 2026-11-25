@@ -1,5 +1,6 @@
 // Regressions for the Phase 3 security review (spend caps, replay, idempotency, races).
 import { env, runInDurableObject, SELF } from "cloudflare:test";
+import { dbaDevice, dbaFetch, enrollDevice, linkDba } from "./dba.ts";
 import { enrollmentProof, signRequest } from "@subetha/sdk";
 import { base64urlEncode, COVERED_REQUEST_HEADERS, deviceKeyFromSeed, hexDecode, signEnvelope, ulid, utf8, type DeviceKey } from "@subetha/sdk/protocol";
 import { claimVerifySend } from "../src/control.ts";
@@ -85,35 +86,38 @@ describe("security review: devices", () => {
   const post = (path: string, body: unknown, token?: string) =>
     SELF.fetch(`${BASE}${path}`, { method: "POST", headers: token ? auth(token) : {}, body: JSON.stringify(body) });
 
-  it("needs proof of key possession to register a device directly", async () => {
+  it("needs proof of key possession to attach a signing key", async () => {
     const a = await bootstrap("devproof");
+    const device = await dbaDevice(await linkDba(a.account_id));
+    const attach = (body: unknown) => dbaFetch(device, "/v1/devices/dba", { method: "POST", body: JSON.stringify(body) });
     const key = await deviceKeyFromSeed(new Uint8Array(32).fill(21));
-    expect((await post("/v1/devices", { device_id: key.deviceId }, a.token)).status).toBe(400);
+    expect((await attach({ device_id: key.deviceId })).status).toBe(400);
     const other = await deviceKeyFromSeed(new Uint8Array(32).fill(22));
     const forged = { ...(await enrollmentProof(other)), device_id: key.deviceId };
-    expect((await post("/v1/devices", forged, a.token)).status).toBe(401);
-    expect((await post("/v1/devices", { ...(await enrollmentProof(key)), capabilities: Array(40).fill("ws") }, a.token)).status).toBe(400);
-    expect((await post("/v1/devices", await enrollmentProof(key), a.token)).status).toBe(201);
+    expect((await attach(forged)).status).toBe(401);
+    expect((await attach({ ...(await enrollmentProof(key)), capabilities: Array(40).fill("ws") })).status).toBe(400);
+    expect((await attach(await enrollmentProof(key))).status).toBe(201);
   });
 
-  it("refuses to approve a code for a device another account holds", async () => {
+  it("refuses to attach a key another account holds", async () => {
     const owner = await bootstrap("devown");
     const other = await bootstrap("devother");
     const key = await deviceKeyFromSeed(new Uint8Array(32).fill(23));
-    expect((await post("/v1/devices", await enrollmentProof(key), owner.token)).status).toBe(201);
-    const code = await json(await post("/v1/device/code", await enrollmentProof(key)));
-    const approve = await post("/v1/device/approve", { user_code: code.user_code }, other.token);
-    expect(approve.status).toBe(409);
-    const token = await json(await post("/v1/device/token", { device_code: code.device_code }));
-    expect(token.error).toBe("authorization_pending");
+    expect((await enrollDevice(owner.account_id, key)).status).toBe(201);
+    expect((await enrollDevice(other.account_id, key)).status).toBe(409);
+    const row = await E.DB.prepare("SELECT account_id FROM devices WHERE id = ?").bind(key.deviceId).first<{ account_id: string }>();
+    expect(row?.account_id).toBe(owner.account_id);
   });
 
-  it("keeps one pending code per device", async () => {
+  it("retires subetha's own enrollment (410), whoever asks", async () => {
+    const a = await bootstrap("devretired");
     const key = await deviceKeyFromSeed(new Uint8Array(32).fill(24));
-    await post("/v1/device/code", await enrollmentProof(key));
-    await post("/v1/device/code", await enrollmentProof(key));
-    const n = await E.DB.prepare("SELECT COUNT(*) AS n FROM device_codes WHERE device_id = ?").bind(key.deviceId).first<{ n: number }>();
-    expect(n?.n).toBe(1);
+    for (const path of ["/v1/devices", "/v1/device/code", "/v1/device/approve", "/v1/device/token"]) {
+      const r = await post(path, await enrollmentProof(key), a.token);
+      expect(r.status).toBe(410);
+      expect(((await r.json()) as { docs: string }).docs).toBe("/docs/devices.html");
+    }
+    expect(await E.DB.prepare("SELECT 1 FROM devices WHERE id = ?").bind(key.deviceId).first()).toBeNull();
   });
 });
 
@@ -122,7 +126,7 @@ describe("security review: signed request headers (subetha-req-v2)", () => {
   async function enrolled(handle: string, fill: number) {
     const a = await bootstrap(handle, 1);
     const key = await deviceKeyFromSeed(new Uint8Array(32).fill(fill));
-    expect((await SELF.fetch(`${BASE}/v1/devices`, { method: "POST", headers: auth(a.token), body: JSON.stringify(await enrollmentProof(key)) })).status).toBe(201);
+    expect((await enrollDevice(a.account_id, key)).status).toBe(201);
     return { a, key };
   }
   async function signV1(key: DeviceKey, method: string, url: string, body: Uint8Array) {

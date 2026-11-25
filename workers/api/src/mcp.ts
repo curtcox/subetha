@@ -163,7 +163,10 @@ async function runTool(name: string, a: Args, call: Call): Promise<unknown> {
 interface RpcRequest { jsonrpc: "2.0"; id?: string | number | null; method: string; params?: Record<string, unknown> }
 
 /** Per-isolate unspoofable marker so internal MCP sub-calls skip double rate-limiting and bill/check `mcp` transport. */
-export const MCP_INTERNAL_SECRET = crypto.randomUUID();
+// Made on first use: Workers refuse random values at module load ("Disallowed operation called
+// within global scope"), which kept the Worker from starting at all.
+let internalSecret: string | null = null;
+export const mcpInternalSecret = (): string => (internalSecret ??= crypto.randomUUID());
 const pendingMcpPrincipals = new Map<string, Principal>();
 
 export function takeMcpPrincipal(reqId: string | null): Principal | null {
@@ -208,7 +211,7 @@ export function registerMcp(app: App) {
     const origin = new URL(c.req.url).origin;
     const call: Call = async (path, init = {}) => {
       const headers = new Headers(init.headers);
-      headers.set("x-subetha-mcp-internal", MCP_INTERNAL_SECRET);
+      headers.set("x-subetha-mcp-internal", mcpInternalSecret());
       let reqId: string | null = null;
       if (preAuth && preAuth.kind !== "anonymous") {
         reqId = crypto.randomUUID();

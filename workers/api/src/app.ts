@@ -18,9 +18,10 @@ import { createCheckoutSession, verifyStripeSignature } from "./stripe.ts";
 import type { Env, Principal, TopicMeta } from "./types.ts";
 import { registerControlRoutes, syncAccountEndpoints } from "./control.ts";
 import { DEST_PRICES_KEY, INTL_COUNTRIES, parseCountries, type DestinationPrices } from "./delivery/destinations.ts";
-import { MCP_INTERNAL_SECRET, mcpChallenge, registerMcp, takeMcpPrincipal } from "./mcp.ts";
+import { mcpInternalSecret, mcpChallenge, registerMcp, takeMcpPrincipal } from "./mcp.ts";
 import { registerPaymentRoutes } from "./payments.ts";
 import { registerKeyRoutes } from "./keys.ts";
+import { registerDbaRoutes, requireDbaGrant } from "./dba.ts";
 import { USAGE_LABELS } from "./usage.ts";
 import { checkTelephonyCircuit, tripAccountTelephonyCircuit } from "./cron.ts";
 import { emitMetric } from "./telemetry.ts";
@@ -77,7 +78,7 @@ app.use("*", async (c, next) => {
 // Device-signed requests must be verified before anything consumes the body.
 // Internal MCP sub-requests reuse the outer request's verified principal without re-verifying nonces.
 app.use("*", async (c, next) => {
-  if (c.req.header("x-subetha-mcp-internal") === MCP_INTERNAL_SECRET) {
+  if (c.req.header("x-subetha-mcp-internal") === mcpInternalSecret()) {
     const p = takeMcpPrincipal(c.req.header("x-subetha-mcp-req") ?? null);
     if (p) c.set("principal", p);
   } else if (c.req.header("x-device-id")) {
@@ -91,7 +92,7 @@ app.use("*", async (c, next) => {
 // assets: one console page load is a dozen files, and serving one touches no DO, D1, or provider
 // (a 429 would cost the same Worker invocation).
 app.use("*", async (c, next) => {
-  if (c.req.header("x-subetha-mcp-internal") === MCP_INTERNAL_SECRET) return next();
+  if (c.req.header("x-subetha-mcp-internal") === mcpInternalSecret()) return next();
   const path = new URL(c.req.url).pathname;
   if (path.startsWith("/v1/hooks/") || path === "/v1/health" || path === "/v1/status") return next();
   if (isAssetRequest(c.req.method, path)) return next();
@@ -642,6 +643,7 @@ app.post("/v1/ack", async (c) => {
   const body = (await c.req.json()) as { topic?: string; id?: string; via?: string };
   if (!body.topic || !isTopic(body.topic) || !body.id) throw new ApiError("bad_request", "topic and id are required");
   if (p.kind === "token" && !scopeAllows(p.scopes, "subscribe", body.topic)) throw new ApiError("forbidden", "token lacks subscribe scope for this topic");
+  requireDbaGrant(p, "subscribe", body.topic);
   unwrap(await topicStub(c.env, body.topic).ackAs(body.id, String(body.via ?? "http").slice(0, 16), callerOf(p)));
   return c.json({ acked: true });
 });
@@ -649,6 +651,7 @@ app.post("/v1/ack", async (c) => {
 registerControlRoutes(app, principal);
 registerPaymentRoutes(app, principal);
 registerKeyRoutes(app, principal);
+registerDbaRoutes(app, principal);
 registerMcp(app);
 
 // ---------------- local development ----------------
@@ -670,6 +673,7 @@ async function doPublish(c: C, parsed: ParsedPublish): Promise<Response> {
   const env = parsed.envelope;
   if (!isTopic(env.topic)) throw new ApiError("invalid_topic");
   if (p.kind === "token" && !scopeAllows(p.scopes, "publish", env.topic)) throw new ApiError("forbidden", "token lacks publish scope for this topic");
+  requireDbaGrant(p, "publish", env.topic);
   const problems = validateEnvelope(env);
   if (problems.length) throw new ApiError("invalid_message", problems.join("; "));
   // If the message carries an enrolled device signature, ensure that device has not been revoked or paused.
@@ -781,9 +785,10 @@ function mergeStreams(responses: Response[], format: string): ReadableStream<Uin
 async function doSubscribe(c: C, topics: string[], format: string): Promise<Response> {
   const p = await principal(c);
   for (const t of topics) if (p.kind === "token" && !scopeAllows(p.scopes, "subscribe", t)) throw new ApiError("forbidden", `token lacks subscribe scope for ${t}`);
+  for (const t of topics) requireDbaGrant(p, "subscribe", t);
   const url = new URL(c.req.url);
   const poll = ["1", "true", "yes"].includes(url.searchParams.get("poll") ?? "");
-  const isMcp = c.req.header("x-subetha-mcp-internal") === MCP_INTERNAL_SECRET;
+  const isMcp = c.req.header("x-subetha-mcp-internal") === mcpInternalSecret();
   const params: SubscribeParams = { format: format as SubscribeParams["format"], since: url.searchParams.get("since"), filter: parseFilter(url), caller: callerOf(p), poll, ...(isMcp ? { transport: "mcp" as const } : {}) };
 
   if (format === "auth") {

@@ -36,6 +36,7 @@ instance, a separate Firebase project) for staging.
 | `ENVIRONMENT` | `local`, `staging`, `production` | Set per environment in `wrangler.jsonc`. |
 | `BASE_URL` | `http://localhost:8787`, `https://staging.subetha.us`, `https://subetha.us` | Used in links, OAuth redirects, attachment URLs, and Twilio signature checks. |
 | `BACKUP_RETENTION_DAYS` | integer (default `30`) | Days to retain nightly D1 backups in `BACKUPS`. |
+| `DBA_ISSUER` | default `https://devicebasedauth.org` | The devicebasedauth.org issuer whose credentials and sign-ins are accepted (`dba.ts`). The e2e tests point it at `e2e/mock-dba.mjs`. `DBA_JWKS` (inline JWKS) is honored only when `ENVIRONMENT=local` (tests); `DBA_STATUS_TTL` caps status-list caching in seconds (default 300). |
 | `DEV_BOOTSTRAP_SECRET` | `local-dev-only` | **Local only.** Enables `POST /v1/dev/bootstrap` when `ENVIRONMENT=local`. Never set it for staging or production. |
 
 ## Secrets
@@ -52,6 +53,16 @@ instance, a separate Firebase project) for staging.
 | `CLERK_JWKS` | Inline JWKS JSON. Tests and local development only. |
 | `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` | Optional. Credentials the relay uses to introspect **opaque** OAuth access tokens (RFC 7662) from MCP clients. Create them for the relay in Clerk (Configure → OAuth applications). Without them, only JWT access tokens are accepted. |
 | `OAUTH_INTROSPECTION_URL` | Optional. Defaults to `<CLERK_ISSUER>/oauth/token_info`. |
+
+**Sign in with devicebasedauth.org (optional).** Add devicebasedauth.org as a custom OpenID
+Connect provider in subetha's Clerk application (Clerk dashboard → SSO connections → custom
+provider): discovery URL `https://devicebasedauth.org/.well-known/openid-configuration`, client ID
+`subetha.us`, no client secret (public client, PKCE S256), scopes `openid profile`. The redirect URI
+Clerk shows must be `https://clerk.subetha.us/v1/oauth_callback`, which devicebasedauth.org
+already allows for `subetha.us`; if Clerk's frontend API is on another host, add that callback to
+the `subetha.us` entry in device-based-auth `src/services/first-party.js`. This is only for
+people signing in; devices need no Clerk setup (they link with **Devices → Link
+devicebasedauth.org**, whose callback `https://subetha.us/auth/dba/callback` is allowed too).
 
 For "Sign in with OAuth" in MCP clients, also enable dynamic client registration for OAuth
 applications in the Clerk dashboard, so clients can register themselves.

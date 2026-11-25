@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { SampleContext } from "../../../docs/samples/ts/_context.ts";
 import { signWebhook } from "../src/delivery/webhook.ts";
 import { BASE, bootstrap } from "./helpers.ts";
+import { dbaDevice, linkDba } from "./dba.ts";
 
 // Samples are imported dynamically so the Worker's typecheck doesn't follow them into the
 // browser/Node parts of the SDK (docs/samples typechecks them with DOM types).
@@ -45,7 +46,8 @@ let n = 0;
 async function context(): Promise<SampleContext> {
   const handle = `sample${++n}`;
   const b = await bootstrap(handle, 5);
-  return { baseUrl: BASE, token: b.token, topic: `@${handle}/demo`, fetch: selfFetch };
+  const device = await dbaDevice(await linkDba(b.account_id));
+  return { baseUrl: BASE, token: b.token, topic: `@${handle}/demo`, fetch: selfFetch, dba: { headers: device.headers } };
 }
 
 const run = async (name: string) => (await sample(name)).run(await context());
@@ -154,8 +156,8 @@ describe("docs samples (TypeScript)", () => {
 
   it("devices.ts", async () => {
     const r = await run("devices");
-    expect(r.enrolled).toBe(r.deviceId);
-    expect(r.msg.message).toBe("garage door closed");
+    expect(r.status).toBe(200);
+    expect(r.msg.message).toBe("garage door open");
   });
 
   it("mcp.ts", async () => {

@@ -1,4 +1,5 @@
 import { env, SELF } from "cloudflare:test";
+import { enrollDevice } from "./dba.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deviceKeyFromSeed, signEnvelope, ulid } from "@subetha/sdk/protocol";
 import { enrollmentProof } from "@subetha/sdk";
@@ -157,10 +158,7 @@ describe("P1 relay flows, MCP, delivery, and policy hardening", () => {
     const a = await bootstrap("revdev", 5);
     const kp = await deviceKeyFromSeed(crypto.getRandomValues(new Uint8Array(32)));
     const proof = await enrollmentProof(kp);
-    expect((await SELF.fetch(`${BASE}/v1/devices`, {
-      method: "POST", headers: auth(a.token),
-      body: JSON.stringify({ ...proof, name: "sensor" }),
-    })).status).toBe(201);
+    expect((await enrollDevice(a.account_id, kp, { name: "sensor" })).status).toBe(201);
     expect((await SELF.fetch(`${BASE}/v1/devices/${kp.deviceId}`, { method: "DELETE", headers: auth(a.token) })).status).toBe(200);
 
     const signed = await signEnvelope({ id: ulid(), time: Math.floor(Date.now() / 1000), topic: "@revdev/box", message: "after-revoke" }, kp);

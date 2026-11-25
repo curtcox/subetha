@@ -1,5 +1,6 @@
 import type { Envelope, RouteMode, Transport } from "@subetha/sdk/protocol";
 import type { AccountDO } from "./durable/account.ts";
+import type { DbaGrant } from "./dba.ts";
 import type { TopicDO } from "./durable/topic.ts";
 import type { PlannedDelivery, QueuedSubscription, SubscriptionFilter, TopicPolicy } from "./model.ts";
 
@@ -69,6 +70,11 @@ export interface Env {
   SLACK_CLIENT_ID?: string;
   SLACK_CLIENT_SECRET?: string;
   INBOUND_EMAIL_DOMAIN?: string; // in.subetha.us
+  // devicebasedauth.org (dba.ts): issuer (default https://devicebasedauth.org); DBA_JWKS stands in
+  // for its JWKS in local development and tests only; DBA_STATUS_TTL caps status-list caching (s).
+  DBA_ISSUER?: string;
+  DBA_JWKS?: string;
+  DBA_STATUS_TTL?: string;
 }
 
 export interface TopicMeta {
@@ -83,7 +89,7 @@ export type Principal =
   | { kind: "anonymous" }
   | { kind: "token"; accountId: string; tokenId: string; scopes: string[]; caps: { daily: number | null; total: number | null }; transports: Transport[] | null; denyTransports?: Transport[] | null; origins?: string[] | null; ips?: string[] | null; expiresAt?: number | null }
   | { kind: "user"; accountId: string | null; clerkId: string; orgId?: string; orgRole?: string }
-  | { kind: "device"; accountId: string; deviceId: string; transports: Transport[] | null; denyTransports: Transport[] | null };
+  | { kind: "device"; accountId: string; deviceId: string; transports: Transport[] | null; denyTransports: Transport[] | null; dba?: DbaGrant };
 
 /** The part of a principal that crosses into Durable Objects. */
 export interface Caller {

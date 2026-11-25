@@ -1,5 +1,7 @@
 import { createHmac } from "node:crypto";
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import { enrollmentProof, type DeviceKey } from "@subetha/sdk";
+import { createProof } from "../../workers/api/src/vendor/devicebasedauth/credential.js";
 
 export interface DevAccount { account_id: string; handle: string; token: string }
 
@@ -90,4 +92,36 @@ export async function verifiedPhone(request: APIRequestContext, token: string, k
   const v = await request.post(`/v1/endpoints/${ep.id}/verify`, { headers: auth(token), data: { code } });
   expect(v.ok()).toBe(true);
   return { id: ep.id, number };
+}
+
+// ---------- the mock devicebasedauth.org (mock-dba.mjs) ----------
+export const DBA = `http://localhost:${Number(process.env.E2E_PORT ?? 8788) + 3}`;
+
+/** Links the account to a fresh devicebasedauth.org account through the API (the console's Link button does the same). */
+export async function linkDba(request: APIRequestContext, token: string): Promise<string> {
+  const start = (await (await request.post("/v1/dba/link/start", { headers: auth(token), data: {} })).json()) as { url: string };
+  const back = new URL((await request.get(start.url, { maxRedirects: 0 })).headers()["location"]!);
+  const r = await request.post("/v1/dba/link/finish", { headers: auth(token), data: { code: back.searchParams.get("code"), state: back.searchParams.get("state") } });
+  expect(r.ok()).toBe(true);
+  return ((await r.json()) as { dba_account: string }).dba_account;
+}
+
+/** A device enrolled and approved at the mock devicebasedauth.org (a CLI, server or app). */
+export async function dbaDevice(request: APIRequestContext, account: string, grants: unknown[] = [{ actions: ["subetha:publish", "subetha:subscribe"] }], name = "dba device") {
+  const keys = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])) as CryptoKeyPair;
+  const { kty, crv, x, y } = await crypto.subtle.exportKey("jwk", keys.publicKey);
+  const publicJwk = { kty, crv, x, y };
+  const r = (await (await request.post(`${DBA}/test/enroll`, { data: { account, jwk: publicJwk, aud: ["subetha.us"], grants, device: { name } } })).json()) as { credential: string; revoke_id: string };
+  return {
+    headers: async (method: string, url: string) => ({ Authorization: `DBA ${r.credential}`, DPoP: await createProof({ privateKey: keys.privateKey, publicJwk, method, url, credential: r.credential }) }),
+    revoke: () => request.post(`${DBA}/test/revoke/${r.revoke_id}`),
+  };
+}
+
+/** Enrolls a signing key the way devices now do: a devicebasedauth.org device of the account attaches it. */
+export async function enrollDevice(request: APIRequestContext, token: string, key: DeviceKey, extra: { name?: string; capabilities?: string[] } = {}) {
+  const linked = (await (await request.get("/v1/dba/link", { headers: auth(token) })).json()) as { dba_account: string | null };
+  const device = await dbaDevice(request, linked.dba_account ?? (await linkDba(request, token)));
+  const url = `${BASE}/v1/devices/dba`;
+  return request.post(url, { headers: await device.headers("POST", url), data: { ...(await enrollmentProof(key)), ...extra } });
 }

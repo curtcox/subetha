@@ -19,7 +19,9 @@ const runId = Date.now().toString(36);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const run = async (name: string): Promise<any> => {
   const mod = (await import(`../ts/${name}.ts`)) as { run(ctx: SampleContext): Promise<unknown> };
-  return mod.run({ baseUrl: baseUrl!, token: token!, topic: `${topic}-${name}-${runId}` });
+  // Samples that need a devicebasedauth.org device run only in CI against the local Worker.
+  const dba = { headers: async (): Promise<Record<string, string>> => { throw new Error("needs a devicebasedauth.org device"); } };
+  return mod.run({ baseUrl: baseUrl!, token: token!, topic: `${topic}-${name}-${runId}`, dba });
 };
 
 describe.skipIf(!baseUrl || !token)(`docs samples against ${baseUrl ?? "(SUBETHA_URL unset)"}`, () => {

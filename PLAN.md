@@ -258,9 +258,9 @@ the route plan and cost estimate without charging.
 ## 9. Auth and access control
 
 - **Humans:** Clerk (email, passkeys, OAuth). Orgs map to shared accounts and balances.
-- **Devices:** devicebasedauth.org enrolls a device keypair and links it to an account (QR or code
-  from the console, or the device flow from a CLI or TV-style device). Requests are signed by the
-  device key. **(A — see open question 1)**
+- **Devices:** devicebasedauth.org enrolls a device keypair (the owner approves it there) and the
+  account links its devicebasedauth.org account; requests carry the device's DBA credential and a
+  DPoP proof of its key, or are signed by an Ed25519 key the DBA device attached (D5).
 - **API tokens:** scoped and revocable: `publish:@alice/*`, `subscribe:@alice/doorbell`, transport
   allow-lists, spend caps (per day / total), expiry, IP or origin restrictions. Browser-safe
   **publishable tokens** for web pages are tied to an origin and a single topic with a tight cap.
@@ -423,11 +423,10 @@ subetha.us.
 | D2 | Who pays for delivery | **Topic owner** pays for fan-out and delivery; the publisher pays for the publish. |
 | D3 | SDK architecture | **Rust core + bindings** (UniFFI, flutter_rust_bridge, uniffi-bindgen-react-native), plus a hand-written TS SDK for the web. |
 | D4 | Early transports | **All of:** email + Slack + MCP, Twilio SMS/voice (US), Reticulum gateway, BLE/audio/QR edge, run as parallel tracks (§14). |
+| D5 | Device auth (was open question 1) | **devicebasedauth.org replaces subetha's own enrollment** (2026-11-24). Devices enroll there for the first-party audience `subetha.us` (operator pays its online decisions and sign-ins); subetha verifies their device-bound credentials offline with the vendored `@devicebasedauth/verify` (`workers/api/src/dba.ts`). An account links one DBA account over OpenID Connect; that account's devices act as the account's devices within their grants (`subetha:publish`, `subetha:subscribe`, topics as resources). A DBA device may attach an Ed25519 key (E2EE, signed messages), stopped when its DBA credential is revoked. The device-code flow and direct registration answer 410. Humans still sign in with Clerk; "Sign in with devicebasedauth.org" for the console is DBA as a custom OIDC provider in subetha's Clerk app (`infra/secrets.md`). |
 
 ### Still open
-1. **devicebasedauth.org:** what is its exact flow and API? (I couldn't reach it from the build
-   sandbox.) Is it a device-keypair registry, an RFC 8628-style device-code flow, or both? Does it
-   replace Clerk for devices, or link devices to Clerk users?
+1. ~~devicebasedauth.org~~: decided, D5.
 2. **GitHub Pages domain:** `curtcox.github.io/subetha`, or a subdomain such as `dev.subetha.us`?
 3. **Refunds:** can unused balance be refunded (minus processing fees), or is it non-refundable
    credit? This affects how Stripe fees are passed through.

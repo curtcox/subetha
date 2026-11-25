@@ -42,32 +42,27 @@ describe("CLI", () => {
     vi.unstubAllGlobals();
   });
 
-  it("enrolls via device-code flow on bare `subetha login` and signs subsequent publishes", async () => {
-    let polls = 0;
+  it("attaches a signing key through the dba CLI on bare `subetha login` and signs subsequent publishes", async () => {
     let enrolledId = "";
     const seenHeaders: Headers[] = [];
     vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
-      if (url.endsWith("/v1/device/code")) {
+      if (url.endsWith("/v1/devices/dba")) {
+        const h = new Headers(init.headers);
+        expect(h.get("authorization")).toBe("DBA cred");
+        expect(h.get("dpop")).toBe("proof:POST https://x.test/v1/devices/dba");
         const b = JSON.parse(init.body as string) as { device_id: string; name: string; proof: string };
         enrolledId = b.device_id;
         expect(b.name).toBe("my-laptop");
         expect(b.proof).toBeTruthy();
-        return new Response(JSON.stringify({ device_code: "dc_1", user_code: "BCDF-GHJK", verification_uri: "https://x.test/console/#device", verification_uri_complete: "https://x.test/console/#device=BCDF-GHJK", interval: 1, expires_in: 600 }));
-      }
-      if (url.endsWith("/v1/device/token")) {
-        polls++;
-        if (polls === 1) return new Response(JSON.stringify({ error: "authorization_pending" }), { status: 400 });
-        return new Response(JSON.stringify({ device_id: enrolledId, account_id: "acct_1" }));
+        return new Response(JSON.stringify({ id: b.device_id, enrolled: true, dba_device: "dba:dev_abc12345" }), { status: 201 });
       }
       seenHeaders.push(new Headers(init.headers));
       return new Response(JSON.stringify({ ...JSON.parse(init.body as string), id: "01JD0000000000000000000009" }));
     });
     const t = io();
-    const richIo = { ...t.io, sleep: async () => {} };
+    const richIo = { ...t.io, dbaHeaders: async (method: string, url: string) => ({ Authorization: "DBA cred", DPoP: `proof:${method} ${url}` }) };
     expect(await main(["login", "--url", "https://x.test", "--name", "my-laptop"], richIo, async () => "")).toBe(0);
-    expect(polls).toBe(2);
-    expect(t.out[0]).toContain("BCDF-GHJK");
-    expect(t.out[1]).toContain(`enrolled device ${enrolledId}`);
+    expect(t.out[0]).toBe(`enrolled device ${enrolledId} through devicebasedauth.org device dev_abc12345`);
     expect(t.cfg.deviceId).toBe(enrolledId);
     expect(t.cfg.deviceSeed).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
@@ -77,6 +72,12 @@ describe("CLI", () => {
     expect(seenHeaders[0]!.get("x-device-signature")).toBeTruthy();
     expect(seenHeaders[0]!.get("authorization")).toBeNull();
     vi.unstubAllGlobals();
+  });
+
+  it("explains that bare `subetha login` needs the dba CLI", async () => {
+    const t = io();
+    expect(await main(["login", "--url", "https://x.test"], t.io, async () => "")).not.toBe(0);
+    expect(t.err.join("\n")).toContain("dba CLI");
   });
 
   it("uploads a file with --file and supports trace and ack", async () => {

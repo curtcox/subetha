@@ -5,6 +5,7 @@ import { rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startMockTwilio } from "./mock-twilio.mjs";
+import { startMockDba } from "./mock-dba.mjs";
 
 const port = process.argv[2] ?? "8788";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,6 +24,9 @@ run(["exec", "wrangler", "d1", "migrations", "apply", "DB", "--local", "--persis
 // Twilio is a local mock (mock-twilio.mjs) so SMS/voice escalation runs end to end.
 const twilioPort = Number(port) + 2;
 const twilio = startMockTwilio(twilioPort);
+// devicebasedauth.org is a local mock too (mock-dba.mjs): linking, credentials, status lists.
+const dbaPort = Number(port) + 3;
+const dba = startMockDba(dbaPort);
 const vars = {
   BASE_URL: `http://localhost:${port}`,
   TWILIO_API_BASE: `http://localhost:${twilioPort}`,
@@ -31,9 +35,11 @@ const vars = {
   TWILIO_FROM: "+15005550006",
   // Lets tests post signed Stripe webhooks (payments.spec.ts).
   STRIPE_WEBHOOK_SECRET: "whsec_e2e",
+  DBA_ISSUER: `http://localhost:${dbaPort}`,
+  DBA_STATUS_TTL: "0",
 };
 const dev = spawn("pnpm", ["exec", "wrangler", "dev", "--port", port, "--persist-to", state, ...Object.entries(vars).flatMap(([k, v]) => ["--var", `${k}:${v}`])], { cwd: api, env, stdio: "inherit" });
-const stop = () => { twilio.close(); dev.kill("SIGTERM"); };
+const stop = () => { twilio.close(); dba.close(); dev.kill("SIGTERM"); };
 process.on("SIGTERM", stop);
 process.on("SIGINT", stop);
 dev.on("exit", (code) => process.exit(code ?? 0));

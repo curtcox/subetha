@@ -252,9 +252,23 @@
     </section>
 
     <section data-panel="devices" hidden>
+      <div class="card" id="dbaCard">
+        <h3>devicebasedauth.org</h3>
+        <p class="muted">Devices enroll at <a href="https://devicebasedauth.org" rel="noopener">devicebasedauth.org</a>: you approve each one there, choose which topics it may publish and subscribe to, and can revoke it there or here. Link your devicebasedauth.org account once; its devices for <code>subetha.us</code> then act as this account's devices.</p>
+        <p id="dbaStatus" class="muted">Checking…</p>
+        <p class="row"><button id="dbaLink">Link devicebasedauth.org</button><button id="dbaUnlink" class="secondary" hidden>Unlink</button></p>
+        <p id="dbaMsg" class="muted"></p>
+        <details>
+          <summary>Enroll a CLI, server or app</summary>
+          <pre><code>dba enroll --aud subetha.us --action subetha:publish --action subetha:subscribe
+dba curl -d "Backup done" https://subetha.us/@me/backups   # publish with the device credential
+subetha login                                                # or: give the subetha CLI its own signing key</code></pre>
+          <p class="muted">Limit a device to some topics with <code>--resource "@me/*"</code>. Browsers and apps use the devicebasedauth.org SDKs (<code>new DBA().enroll(…)</code>, Android, iOS); see <a href="/docs/devices.html">Devices</a>.</p>
+        </details>
+      </div>
       <div class="card" id="thisBrowserCard">
         <h3>This browser</h3>
-        <p class="muted">Give this browser its own Ed25519 device key (stored in local storage) so it can sign messages and unwrap E2EE topic keys addressed to it.</p>
+        <p class="muted">Enroll this browser as a devicebasedauth.org device, then give it an Ed25519 signing key (stored in local storage) so it can sign messages and unwrap E2EE topic keys addressed to it.</p>
         <p id="thisDevStatus" class="muted">Checking…</p>
         <div id="thisDevSetup" class="row" hidden>
           <div><label for="thisDevName">Device name</label><input id="thisDevName" value="This browser"></div>
@@ -266,25 +280,9 @@
         </p>
         <p id="thisDevMsg" class="muted"></p>
       </div>
-      <div class="grid">
-        <div class="card">
-          <h3>Approve a device</h3>
-          <p class="muted">Enter the code a device, CLI, or app is showing (<code>subetha login</code>, a sample app, a TV-style screen).</p>
-          <div class="row"><input id="devCode" placeholder="BCDF-GHJK" autocomplete="off" aria-label="Device code"><button id="devApprove">Approve</button><button id="devQrBtn" type="button" class="secondary">QR</button></div>
-          <div id="devQr" hidden style="margin:.75rem 0;max-width:200px"></div>
-          <p id="devMsg" class="muted"></p>
-        </div>
-        <div class="card">
-          <h3>Enroll with a proof</h3>
-          <p class="muted">For devices you provision yourself: paste the JSON the device makes with <code>enrollmentProof(key)</code> in any SDK. It proves the device holds its key and is valid for 5 minutes.</p>
-          <label for="devId">Enrollment proof</label><textarea id="devId" rows="3" placeholder='{"device_id":"dev_…","time":1763750000,"proof":"…"}' autocomplete="off" spellcheck="false"></textarea>
-          <label for="devName">Name</label><input id="devName">
-          <p><button id="devEnroll" class="secondary">Enroll</button> <span id="devEnrollMsg" class="muted"></span></p>
-        </div>
-      </div>
       <div class="card">
         <h3>Devices</h3>
-        <p class="muted">Enrolled devices sign their own requests; each active device is billed per day. Revoking takes effect immediately.</p>
+        <p class="muted">devicebasedauth.org devices (<code>dba:…</code>) and the signing keys they attached (<code>dev_…</code>); each active device is billed per day. Revoking takes effect immediately.</p>
         <div class="scroll"><table><thead><tr><th>Name</th><th>Id</th><th>Capabilities</th><th>Last seen</th><th>Status</th><th></th></tr></thead><tbody id="devRows"></tbody></table></div>
       </div>
     </section>

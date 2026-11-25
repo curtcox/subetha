@@ -4,6 +4,13 @@ All notable changes to SubEtha are tracked here.
 
 ## Unreleased (v0.1.0-dev)
 
+### Devices through devicebasedauth.org (PLAN D5)
+- Devices enroll at devicebasedauth.org for the audience `subetha.us`; their device-bound credentials (`Authorization: DBA …` + `DPoP`, or DBA access tokens) are verified offline with the vendored `@devicebasedauth/verify` and act as the linked account's devices within their grants (`subetha:publish`, `subetha:subscribe`, topics as resources), listed as `dba:<id>`, pausable and revocable here or there.
+- Accounts link one devicebasedauth.org account over OpenID Connect (`/v1/dba/link`, `/start`, `/finish`, `/auth/dba/callback`; console **Devices → Link devicebasedauth.org**).
+- `POST /v1/devices/dba` attaches an Ed25519 signing key to a DBA device (E2EE keys, signed requests and messages); revoking the DBA credential also stops the key. The console's "Enroll this browser" and bare `subetha login` (through the `dba` CLI) use it; TS SDK `dba` option, `attachDeviceKey`, `dbaLink`/`startDbaLink`/`finishDbaLink`/`unlinkDba`.
+- Retired (410): the device-code flow (`/v1/device/code`, `/approve`, `/token`) and `POST /v1/devices`; SDK `startDeviceCode`/`approveDevice`/`pollDeviceToken` and `subetha devices approve` removed.
+- Fixed: the Worker could not start (`crypto.randomUUID()` at module load in `mcp.ts`, refused by workerd), which failed CI's e2e job and would have failed every deploy.
+
 ### Relay & Control Plane
 - **Core relay MVP**: ntfy-compatible publish/subscribe (HTTP, JSON, SSE, WebSocket, poll, `since`, filters, multi-topic, `/{topics}/auth` permission checks), `TopicDO`, `AccountDO` single-threaded prepaid ledger with credit leases and atomic alarm scheduling, D1 migrations, KV caches, R2 attachments (`X-Filename`, with canonical IDs, proper `X-Attach` precedence, and cleanup on topic deletion and frozen-account expiry), and daily cron metering/reconciliation/backups.
 - **Routing & policies**: intersection of account, topic, device, token, subscription, and message policies (`allow_transports`, `deny_transports`, `min_priority`, `max_cost_usd_micros`, `deadline_s`, timezone-aware quiet hours, rate/burst limits, kill switches). Enforced on queued deliveries (with pre-delivery re-checks on retries), live (`ws`/`sse`/`poll`) connections, and `/mcp` (`deliver_mcp`); prevents capped/restricted admin tokens from minting less-restricted tokens; closes live connections on device pause/revoke or Clerk user/org deletion; deterministic `any` (cheapest-first) and `fast` (fastest-first) sorting; `mode: "all"` parallel delivery unaffected by acks.

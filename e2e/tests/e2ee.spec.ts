@@ -2,15 +2,15 @@
 // which is wrapped to an enrolled device; the console encrypts what it sends and decrypts its
 // inbox; the relay stores only ciphertext; the device opens its wrapped key and reads the message.
 import { expect, test } from "@playwright/test";
-import { SubEtha, enrollmentProof, generateDeviceKey } from "@subetha/sdk";
-import { auth, bootstrap, signIn } from "./helpers.ts";
+import { SubEtha, generateDeviceKey } from "@subetha/sdk";
+import { auth, bootstrap, enrollDevice, signIn } from "./helpers.ts";
 
 test("a topic key made in the console encrypts messages that only the console and the device can read", async ({ page, request, baseURL }) => {
   const acct = await bootstrap(request, 1);
   const topic = `@${acct.handle}/vault`;
   expect((await request.post(`/${topic}`, { headers: auth(acct.token), data: "init" })).ok()).toBe(true);
   const key = await generateDeviceKey();
-  expect((await request.post("/v1/devices", { headers: auth(acct.token), data: { ...(await enrollmentProof(key)), name: "vault-pi" } })).ok()).toBe(true);
+  expect((await enrollDevice(request, acct.token, key, { name: "vault-pi" })).ok()).toBe(true);
 
   await signIn(page, acct.token);
   await page.locator('#tabs button[data-tab="topics"]').click();

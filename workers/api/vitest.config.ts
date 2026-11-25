@@ -7,6 +7,9 @@ export default defineConfig(async () => {
   // A throwaway RSA key standing in for Clerk's signing key.
   const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   const pub = { ...publicKey.export({ format: "jwk" }), kid: "test-kid", alg: "RS256", use: "sig" };
+  // A throwaway P-256 key standing in for devicebasedauth.org's issuer key (test/dba.ts).
+  const dba = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const dbaPublic = { ...dba.publicKey.export({ format: "jwk" }), kid: "dba-test", alg: "ES256", use: "sig" };
   return {
     plugins: [
       cloudflareTest({
@@ -34,6 +37,10 @@ export default defineConfig(async () => {
             TWILIO_WHATSAPP_FROM: "whatsapp:+14155238886",
             SLACK_SIGNING_SECRET: "slack-secret",
             TEST_CLERK_PRIVATE_JWK: JSON.stringify(privateKey.export({ format: "jwk" })),
+            DBA_ISSUER: "https://dba.test",
+            DBA_JWKS: JSON.stringify({ keys: [dbaPublic] }),
+            DBA_STATUS_TTL: "0",
+            TEST_DBA_PRIVATE_JWK: JSON.stringify(dba.privateKey.export({ format: "jwk" })),
           },
         },
       }),

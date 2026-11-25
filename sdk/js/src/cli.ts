@@ -1,5 +1,5 @@
 // `subetha` CLI: pub | sub | tail | poll | cost | route | trace | ack | login | logout | whoami | lan | balance | prices | token | topics | devices
-import { enrollmentProof, SubEtha, SubEthaError, type PublishOptions } from "./client.ts";
+import { SubEtha, SubEthaError, type PublishOptions } from "./client.ts";
 import { GossipNode } from "./edge/gossip.ts";
 import type { LanHandle, LanOptions } from "./edge/lan-node.ts";
 import { base64urlDecode, base64urlEncode, deviceKeyFromSeed, generateDeviceKey, isTopic, signEnvelope, ulid, type Envelope, type Transport } from "./protocol/index.ts";
@@ -14,10 +14,13 @@ interface Io {
   fetch?: typeof fetch;
   /** Read a local file for `pub --file` / `cost --file`. */
   readFile?: (path: string) => Promise<{ name: string; bytes: Uint8Array }>;
-  /** Default device name for `subetha login` (device-code flow). */
+  /** Default device name for `subetha login` (attaching a signing key). */
   hostname?: string;
-  /** Override sleep between device-code polls (for tests). */
-  sleep?: (ms: number) => Promise<void>;
+  /**
+   * Authorization and DPoP headers for one request from this machine's devicebasedauth.org device
+   * (Node: `dba headers METHOD URL`). Used once, by bare `subetha login`, to attach the CLI's key.
+   */
+  dbaHeaders?: (method: string, url: string) => Promise<Record<string, string>>;
   /** LAN shim (Node only): see edge/lan-node.ts. */
   startLan?: (node: GossipNode, onMessage: (e: Envelope) => void, opts?: LanOptions) => Promise<LanHandle>;
 }
@@ -41,14 +44,16 @@ Usage:
   subetha trace <topic> <id>     show delivery plan, events, ack, and cost for a message
   subetha ack <topic> <id>       acknowledge a message (stops escalation)
   subetha login [token] [--url https://subetha.us] [--name DEVICE_NAME]
-                                 with a token: save it; without one: enroll this CLI via device code
+                                 with a token: save it; without one: attach this CLI's signing key
+                                 through its devicebasedauth.org device (run first:
+                                 dba enroll --aud subetha.us --action subetha:publish --action subetha:subscribe)
   subetha logout                 clear saved token and device credentials
   subetha whoami                 show current account / device login
   subetha lan <topic>[,<topic>…] [--send MESSAGE] [--hops 2] [--relay t1,t2] [--for SECONDS] [--json]
                                  offline: gossip with SubEtha peers on the local network (no relay, free)
   subetha balance | prices
   subetha topics list | topics delete <topic>
-  subetha devices list | devices approve <USER-CODE> | devices revoke <device_id>
+  subetha devices list | devices revoke <device_id>
   subetha token create --scopes publish:@me/* [--daily-cap USD] [--total-cap USD] [--expires-hours H]
                        [--transports a,b] [--deny-transports a,b] [--origins URL] [--ips CIDR] [--name NAME]
   subetha token list | token revoke <id>
@@ -140,7 +145,6 @@ export async function main(argv: string[], io: Io, readStdin: () => Promise<stri
   const token = io.env.SUBETHA_TOKEN ?? cfg.token;
   const deviceKey = !token && cfg.deviceSeed ? await deviceKeyFromSeed(base64urlDecode(cfg.deviceSeed)) : undefined;
   const client = new SubEtha({ baseUrl, token, deviceKey, signRequests: !!deviceKey, fetch: io.fetch });
-  const sleep = io.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   try {
     switch (cmd) {
       case "pub":
@@ -265,27 +269,17 @@ export async function main(argv: string[], io: Io, readStdin: () => Promise<stri
           io.out(`logged in as ${acct.handle ? "@" + acct.handle : acct.id} (balance ${usd(acct.balance_usd_micros)})`);
           return 0;
         }
-        // Device-code enrollment (PLAN §9): no bearer token stored on disk; the CLI signs requests.
-        const anon = new SubEtha({ baseUrl: url, fetch: io.fetch });
+        // Enrollment through devicebasedauth.org (PLAN §9): the `dba` CLI's device, which the owner
+        // approved there, attaches a fresh signing key; no bearer token is stored on disk and the
+        // CLI signs its requests with that key.
+        if (!io.dbaHeaders) throw new Error("bare `subetha login` needs the dba CLI (https://devicebasedauth.org); or pass an API token: subetha login <token>");
         const key = await generateDeviceKey();
-        const proof = await enrollmentProof(key);
         const name = typeof flags.name === "string" ? flags.name : io.hostname ? `cli (${io.hostname})` : "subetha-cli";
-        const started = await anon.startDeviceCode({ ...proof, name, capabilities: ["ws", "lan"] });
-        io.out(`Open ${started.verification_uri_complete ?? started.verification_uri} and enter code: ${started.user_code}`);
-        const intervalMs = Math.max(1, started.interval ?? 5) * 1000;
-        const deadline = Date.now() + (started.expires_in ?? 600) * 1000;
-        for (;;) {
-          if (Date.now() > deadline) throw new Error("device code expired before approval");
-          await sleep(intervalMs);
-          const { ok, status, data } = await anon.pollDeviceToken(started.device_code);
-          if (ok && data.device_id) {
-            await io.writeConfig({ baseUrl: url, deviceSeed: base64urlEncode(key.seed!), deviceId: data.device_id });
-            io.out(`enrolled device ${data.device_id} (account ${data.account_id})`);
-            return 0;
-          }
-          if (data.error === "authorization_pending") continue;
-          throw new Error(data.error ?? `device login failed (HTTP ${status})`);
-        }
+        const viaDba = new SubEtha({ baseUrl: url, fetch: io.fetch, dba: { headers: io.dbaHeaders } });
+        const attached = await viaDba.attachDeviceKey(key, { name, capabilities: ["ws", "lan"] });
+        await io.writeConfig({ baseUrl: url, deviceSeed: base64urlEncode(key.seed!), deviceId: attached.id });
+        io.out(`enrolled device ${attached.id} through devicebasedauth.org device ${attached.dba_device.replace(/^dba:/, "")}`);
+        return 0;
       }
       case "logout": {
         await io.writeConfig({ baseUrl: cfg.baseUrl });
@@ -310,9 +304,8 @@ export async function main(argv: string[], io: Io, readStdin: () => Promise<stri
       case "devices": {
         const sub = pos.shift();
         if (!sub || sub === "list") { io.out(JSON.stringify((await client.listDevices()).devices, null, 2)); return 0; }
-        if (sub === "approve" && pos[0]) { io.out(JSON.stringify(await client.approveDevice(pos[0]), null, 2)); return 0; }
         if (sub === "revoke" && pos[0]) { await client.revokeDevice(pos[0]); io.out(`revoked ${pos[0]}`); return 0; }
-        throw new Error("usage: subetha devices list|approve <USER-CODE>|revoke <device_id>");
+        throw new Error("usage: subetha devices list|revoke <device_id> (enroll devices at devicebasedauth.org)");
       }
       case "balance": {
         const b = await client.balance();

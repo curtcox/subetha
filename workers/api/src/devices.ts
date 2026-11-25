@@ -1,6 +1,9 @@
-// Device enrollment and device-signed requests (PLAN §9). Until the devicebasedauth.org flow is
-// settled (open question 1), devices enroll with a device-code flow (RFC 8628-style) approved
-// from the console, or are registered directly by an admin token.
+// Devices and device-signed requests (PLAN §9). Devices enroll at devicebasedauth.org (dba.ts):
+// the owner approves them there, and their DBA credentials for subetha.us act as the account's
+// devices. A DBA device may also attach an Ed25519 signing key (POST /v1/devices/dba), which E2EE
+// topic keys are wrapped to and which signs requests and messages as below; revoking the DBA
+// credential at devicebasedauth.org stops the key too. subetha's own device-code flow and direct
+// registration are retired (410).
 //
 // Signed requests (spec §8.1) carry:
 //   X-Device-Id: dev_…            (Ed25519 public key, spec §1.3)
@@ -18,8 +21,9 @@
 import type { Context, Hono } from "hono";
 import { base64urlDecode, COVERED_REQUEST_HEADERS, DEVICE_ID_RE, parseSignedHeaders, publicKeyFromDeviceId, requestSigningInputV2, utf8, type Transport } from "@subetha/sdk/protocol";
 import { audit } from "./accounts.ts";
-import { actorOf, requireAdmin, validateTransports } from "./auth.ts";
-import { randomBase32, sha256Hex } from "./crypto.ts";
+import { actorOf, requireAccount, requireAdmin, validateTransports } from "./auth.ts";
+import { attachedCredentialRevoked } from "./dba.ts";
+import { sha256Hex } from "./crypto.ts";
 import { ApiError } from "./errors.ts";
 import { accountStub } from "./durable/account.ts";
 import { topicStub } from "./durable/topic.ts";
@@ -31,8 +35,6 @@ type PrincipalFn = (c: Context<Vars>) => Promise<Principal>;
 export const REQ_DOMAIN = "subetha-req-v1\n";
 export const ENROLL_DOMAIN = "subetha-enroll-v1\n";
 const SKEW_S = 300;
-const CODE_TTL_MS = 10 * 60_000;
-const USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ"; // no vowels: no accidental words
 
 async function ed25519Verify(deviceId: string, sigB64: string, data: string): Promise<boolean> {
   try {
@@ -85,9 +87,18 @@ export async function authenticateDevice(req: Request, env: Env, nowSec = Math.f
   if (!DEVICE_ID_RE.test(id) || !/^\d+$/.test(time) || Math.abs(nowSec - Number(time)) > SKEW_S || !/^[A-Za-z0-9_-]{16,64}$/.test(nonce)) throw new ApiError("unauthorized", "bad device signature headers");
   const body = new Uint8Array(await req.clone().arrayBuffer());
   if (!(await ed25519Verify(id, sig, await signingInput(req, time, nonce, body)))) throw new ApiError("unauthorized", "bad device signature");
-  const row = await env.DB.prepare("SELECT account_id, paused, allow_transports, deny_transports FROM devices WHERE id = ? AND revoked_at IS NULL").bind(id).first<{ account_id: string; paused: number; allow_transports: string | null; deny_transports: string | null }>();
+  const row = await env.DB.prepare("SELECT account_id, paused, allow_transports, deny_transports, dba_status_uri, dba_status_idx FROM devices WHERE id = ? AND revoked_at IS NULL").bind(id).first<{ account_id: string; paused: number; allow_transports: string | null; deny_transports: string | null; dba_status_uri: string | null; dba_status_idx: number | null }>();
   if (!row) throw new ApiError("unauthorized", "device not enrolled");
   if (row.paused) throw new ApiError("topic_paused", "device is paused");
+  if (row.dba_status_uri !== null && row.dba_status_idx !== null) {
+    let revoked: boolean;
+    try { revoked = await attachedCredentialRevoked(env, row.dba_status_uri, row.dba_status_idx); } catch { throw new ApiError("provider_unavailable", "devicebasedauth.org status list is unavailable; try again shortly"); }
+    if (revoked) {
+      await env.DB.prepare("UPDATE devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(Date.now(), id).run();
+      await audit(env, row.account_id, `device:${id}`, "device.revoke", { id, via: "devicebasedauth.org" });
+      throw new ApiError("unauthorized", "device credential was revoked at devicebasedauth.org");
+    }
+  }
   if (!(await accountStub(env, row.account_id).claimNonce(`sig:${await sha256Hex(sig)}`, 2 * SKEW_S * 1000))) throw new ApiError("unauthorized", "replayed device signature");
   env.DB.prepare("UPDATE devices SET last_seen_at = ? WHERE id = ?").bind(Date.now(), id).run().catch(() => {});
   return {
@@ -119,12 +130,6 @@ async function checkProof(body: { device_id?: string; time?: number; proof?: str
   try { publicKeyFromDeviceId(id); } catch { throw new ApiError("bad_request", "non-canonical device id"); }
   if (!(await ed25519Verify(id, body.proof, `${ENROLL_DOMAIN}${id}\n${body.time}`))) throw new ApiError("unauthorized", "bad proof");
   return id;
-}
-
-function userCode(): string {
-  const b = crypto.getRandomValues(new Uint8Array(8));
-  const s = Array.from(b, (x) => USER_CODE_ALPHABET[x % USER_CODE_ALPHABET.length]).join("");
-  return `${s.slice(0, 4)}-${s.slice(4)}`;
 }
 
 function publicDevice(d: Record<string, unknown>) {
@@ -188,20 +193,31 @@ export function registerDeviceRoutes(app: Hono<Vars>, principal: PrincipalFn) {
     return c.json(publicDevice(updated!));
   });
 
-  app.post("/v1/devices", async (c) => {
+  // A DBA device attaches its Ed25519 signing key (proving it holds it). The device must be free
+  // to publish and subscribe on every topic: the key it attaches signs for all of them.
+  app.post("/v1/devices/dba", async (c) => {
     const p = await principal(c);
-    const accountId = requireAdmin(p);
-    // Device ids are public (every signed message carries one), so registering one directly
-    // needs the same proof of key possession as the code flow.
+    const accountId = requireAccount(p);
+    if (p.kind !== "device" || !p.dba) throw new ApiError("unauthorized", "attach a signing key with a devicebasedauth.org device credential (Authorization: DBA …, DPoP: …)");
+    if (!p.dba.allows("publish") || !p.dba.allows("subscribe")) throw new ApiError("forbidden", "attaching a signing key needs grants for subetha:publish and subetha:subscribe on every topic");
     const body = (await c.req.json()) as { device_id?: string; name?: string; capabilities?: string[]; time?: number; proof?: string };
     const id = await checkProof(body);
     const f = deviceFields(body);
-    await c.env.DB.prepare("INSERT INTO devices (id, account_id, name, capabilities, created_at) VALUES (?, ?, ?, ?, ?)")
-      .bind(id, accountId, f.name, f.capabilities, Date.now()).run()
-      .catch((e) => { throw String(e).includes("UNIQUE") ? new ApiError("conflict", "device already enrolled") : e; });
-    await audit(c.env, accountId, actorOf(p), "device.enroll", { id });
-    return c.json({ id, enrolled: true }, 201);
+    const { uri, idx } = p.dba.status;
+    // Re-attaching (a renewed or new credential) is fine; taking over another account's active key is not.
+    const r = await c.env.DB.prepare("INSERT INTO devices (id, account_id, name, capabilities, created_at, dba_device, dba_credential, dba_status_uri, dba_status_idx) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, revoked_at = NULL, name = excluded.name, capabilities = excluded.capabilities, dba_device = excluded.dba_device, dba_credential = excluded.dba_credential, dba_status_uri = excluded.dba_status_uri, dba_status_idx = excluded.dba_status_idx WHERE devices.revoked_at IS NOT NULL OR devices.account_id = excluded.account_id")
+      .bind(id, accountId, f.name, f.capabilities, Date.now(), p.deviceId, p.dba.credentialId, uri, idx).run();
+    if (!r.meta.changes) throw new ApiError("conflict", "this signing key is enrolled in another account; revoke it there first");
+    await audit(c.env, accountId, actorOf(p), "device.enroll", { id, via: "devicebasedauth.org", dba_device: p.deviceId, credential: p.dba.credentialId });
+    return c.json({ id, enrolled: true, dba_device: p.deviceId }, 201);
   });
+
+  // subetha's own enrollment is retired: devices enroll at devicebasedauth.org.
+  const retired = (c: Context<Vars>) => c.json({ error: "unsupported", http: 410, message: "subetha's own device enrollment is retired: enroll the device at devicebasedauth.org for audience subetha.us, then attach its signing key with POST /v1/devices/dba", docs: "/docs/devices.html" }, 410);
+  app.post("/v1/devices", retired);
+  app.post("/v1/device/code", retired);
+  app.post("/v1/device/approve", retired);
+  app.post("/v1/device/token", retired);
 
   app.delete("/v1/devices/:id", async (c) => {
     const p = await principal(c);
@@ -212,47 +228,5 @@ export function registerDeviceRoutes(app: Hono<Vars>, principal: PrincipalFn) {
     await closeDeviceStreams(c.env, accountId, id, "device revoked");
     await audit(c.env, accountId, actorOf(p), "device.revoke", { id });
     return c.json({ revoked: true });
-  });
-
-  // Device-code flow, step 1: the device asks for a code, proving it holds its key.
-  app.post("/v1/device/code", async (c) => {
-    const body = (await c.req.json()) as { device_id?: string; name?: string; capabilities?: string[]; time?: number; proof?: string };
-    const id = await checkProof(body);
-    const f = deviceFields(body);
-    const deviceCode = randomBase32(20);
-    const code = userCode();
-    await c.env.DB.batch([
-      // One pending code per device: a new request replaces the old one.
-      c.env.DB.prepare("DELETE FROM device_codes WHERE device_id = ? AND account_id IS NULL").bind(id),
-      c.env.DB.prepare("INSERT INTO device_codes (device_code_hash, user_code, device_id, name, capabilities, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .bind(await sha256Hex(deviceCode), code, id, f.name, f.capabilities, Date.now(), Date.now() + CODE_TTL_MS),
-    ]);
-    return c.json({ device_code: deviceCode, user_code: code, verification_uri: `${c.env.BASE_URL}/console/#device`, verification_uri_complete: `${c.env.BASE_URL}/console/#device=${code}`, expires_in: CODE_TTL_MS / 1000, interval: 5 });
-  });
-
-  // Step 2: a signed-in user approves the code in the console.
-  app.post("/v1/device/approve", async (c) => {
-    const p = await principal(c);
-    const accountId = requireAdmin(p);
-    const { user_code } = (await c.req.json()) as { user_code?: string };
-    const row = await c.env.DB.prepare("SELECT * FROM device_codes WHERE user_code = ?").bind((user_code ?? "").toUpperCase()).first<{ device_code_hash: string; device_id: string; name: string; capabilities: string; account_id: string | null; expires_at: number }>();
-    if (!row || row.expires_at < Date.now() || row.account_id) throw new ApiError("not_found", "unknown or expired code");
-    // Re-enrolling a revoked device (or one already ours) is fine; taking over another account's
-    // active device is not, and then the approval must fail rather than report success.
-    const r = await c.env.DB.prepare("INSERT INTO devices (id, account_id, name, capabilities, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET account_id = excluded.account_id, revoked_at = NULL WHERE devices.revoked_at IS NOT NULL OR devices.account_id = excluded.account_id")
-      .bind(row.device_id, accountId, row.name, row.capabilities, Date.now()).run();
-    if (!r.meta.changes) throw new ApiError("conflict", "this device is enrolled in another account; revoke it there first");
-    await c.env.DB.prepare("UPDATE device_codes SET account_id = ? WHERE device_code_hash = ?").bind(accountId, row.device_code_hash).run();
-    await audit(c.env, accountId, actorOf(p), "device.enroll", { id: row.device_id, via: "code" });
-    return c.json({ device_id: row.device_id, name: row.name, enrolled: true });
-  });
-
-  // Step 3: the device polls until approved.
-  app.post("/v1/device/token", async (c) => {
-    const { device_code } = (await c.req.json()) as { device_code?: string };
-    const row = await c.env.DB.prepare("SELECT device_id, account_id, expires_at FROM device_codes WHERE device_code_hash = ?").bind(await sha256Hex(device_code ?? "")).first<{ device_id: string; account_id: string | null; expires_at: number }>();
-    if (!row || (row.expires_at < Date.now() && !row.account_id)) return c.json({ error: "expired_token" }, 400);
-    if (!row.account_id) return c.json({ error: "authorization_pending" }, 400);
-    return c.json({ device_id: row.device_id, account_id: row.account_id, auth: "Sign requests with X-Device-Id / X-Device-Time / X-Device-Nonce / X-Device-Signed-Headers / X-Device-Signature" });
   });
 }

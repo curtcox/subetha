@@ -2,6 +2,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { basename, join } from "node:path";
+import { execFile } from "node:child_process";
 import { main, type Config } from "./cli.ts";
 import { startLan } from "./edge/lan-node.ts";
 
@@ -13,6 +14,15 @@ const code = await main(process.argv.slice(2), {
   err: (s) => process.stderr.write(s + "\n"),
   env: process.env,
   hostname: hostname(),
+  // `dba headers METHOD URL` prints "Name: value" lines (devicebasedauth.org CLI).
+  dbaHeaders: (method, url) => new Promise((resolve, reject) => {
+    execFile(process.env.DBA_CLI ?? "dba", ["headers", method, url], (error, stdout, stderr) => {
+      if (error) return reject(new Error((error as NodeJS.ErrnoException).code === "ENOENT" ? "the dba CLI is not installed (https://devicebasedauth.org)" : `dba headers failed: ${stderr.trim() || error.message}`));
+      const headers: Record<string, string> = {};
+      for (const line of stdout.split("\n")) { const i = line.indexOf(": "); if (i > 0) headers[line.slice(0, i)] = line.slice(i + 2).trim(); }
+      resolve(headers);
+    });
+  }),
   readFile: async (p) => ({ name: basename(p), bytes: new Uint8Array(await readFile(p)) }),
   readConfig: async () => { try { return JSON.parse(await readFile(file, "utf8")) as Config; } catch { return {}; } },
   writeConfig: async (c) => { await mkdir(dir, { recursive: true }); await writeFile(file, JSON.stringify(c, null, 2), { mode: 0o600 }); },

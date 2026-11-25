@@ -1,4 +1,5 @@
 import { env, SELF } from "cloudflare:test";
+import { enrollDevice } from "./dba.ts";
 import { describe, expect, it } from "vitest";
 import { generateDeviceKey } from "@subetha/sdk/protocol";
 import { enrollmentProof } from "@subetha/sdk";
@@ -77,11 +78,7 @@ describe("Clerk webhooks and organization roles", () => {
     // Enroll a device on this account.
     const key = await generateDeviceKey();
     const proof = await enrollmentProof(key);
-    expect((await SELF.fetch(`${BASE}/v1/devices`, {
-      method: "POST",
-      headers: auth(a.token, { "content-type": "application/json" }),
-      body: JSON.stringify({ ...proof, name: "laptop" }),
-    })).status).toBe(201);
+    expect((await enrollDevice(a.account_id, key, { name: "laptop" })).status).toBe(201);
 
     // Trigger user.deleted webhook.
     const r = await postClerkHook({ type: "user.deleted", data: { id: "user_to_delete" } });

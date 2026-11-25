@@ -1,4 +1,5 @@
 import { SELF } from "cloudflare:test";
+import { enrollDevice } from "./dba.ts";
 import { describe, expect, it } from "vitest";
 import { deviceKeyFromSeed, wrapTopicKey, type DeviceKey } from "@subetha/sdk/protocol";
 import { enrollmentProof, SubEtha } from "@subetha/sdk";
@@ -6,9 +7,9 @@ import { auth, balance, BASE, bootstrap } from "./helpers.ts";
 
 const f = SELF.fetch.bind(SELF) as typeof fetch;
 
-async function enroll(token: string, seedByte: number): Promise<DeviceKey> {
+async function enroll(accountId: string, seedByte: number): Promise<DeviceKey> {
   const key = await deviceKeyFromSeed(new Uint8Array(32).fill(seedByte));
-  const r = await SELF.fetch(`${BASE}/v1/devices`, { method: "POST", headers: auth(token), body: JSON.stringify(await enrollmentProof(key)) });
+  const r = await enrollDevice(accountId, key);
   expect(r.status).toBe(201);
   return key;
 }
@@ -17,9 +18,9 @@ describe("wrapped topic keys", () => {
   it("an owner shares a topic key with devices, which load it and read encrypted messages", async () => {
     const a = await bootstrap("keyowner", 1);
     expect((await SELF.fetch(`${BASE}/v1/topics/@keyowner/vault`, { method: "PUT", headers: auth(a.token), body: "{}" })).status).toBe(201);
-    const d1 = await enroll(a.token, 41);
-    const d2 = await enroll(a.token, 42);
-    const outsider = await enroll(a.token, 43);
+    const d1 = await enroll(a.account_id, 41);
+    const d2 = await enroll(a.account_id, 42);
+    const outsider = await enroll(a.account_id, 43);
 
     const owner = new SubEtha({ baseUrl: BASE, fetch: f, token: a.token });
     const topicKey = crypto.getRandomValues(new Uint8Array(32));
@@ -62,7 +63,7 @@ describe("wrapped topic keys", () => {
     const b = await bootstrap("keyother", 1);
     await SELF.fetch(`${BASE}/v1/topics/@keyother/t`, { method: "PUT", headers: auth(b.token), body: "{}" });
     await SELF.fetch(`${BASE}/v1/topics/@keyguard/t`, { method: "PUT", headers: auth(a.token), body: "{}" });
-    const d = await enroll(a.token, 44);
+    const d = await enroll(a.account_id, 44);
     const key = new Uint8Array(32).fill(1);
     const put = (token: string, keys: unknown) => SELF.fetch(`${BASE}/v1/keys`, { method: "PUT", headers: auth(token), body: JSON.stringify({ keys }) });
 

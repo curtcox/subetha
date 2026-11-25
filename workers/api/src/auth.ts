@@ -1,8 +1,10 @@
-// Request authentication: API tokens, Clerk session JWTs, anonymous (PLAN §9).
+// Request authentication: device signatures, devicebasedauth.org credentials (dba.ts), API tokens,
+// Clerk session JWTs, anonymous (PLAN §9).
 import { TRANSPORTS, type Transport } from "@subetha/sdk/protocol";
 import { isOrgAdminRole, orgContext, verifyClerkJwt } from "./clerk.ts";
 import { fromJwt, introspect, introspectionConfigured, oauthPrincipal } from "./oauth.ts";
 import { authenticateDevice } from "./devices.ts";
+import { authenticateDba } from "./dba.ts";
 import { randomBase32, sha256Hex, timingSafeEqual } from "./crypto.ts";
 import { ApiError } from "./errors.ts";
 import { ipAllowed } from "./ip.ts";
@@ -76,6 +78,8 @@ export async function invalidateToken(env: Env, id: string) {
 export async function authenticate(req: Request, env: Env): Promise<Principal> {
   const device = await authenticateDevice(req, env);
   if (device) return device;
+  const dba = await authenticateDba(req, env);
+  if (dba) return dba;
   const cred = extractCredential(req);
   if (!cred) {
     // An Authorization header we can't parse is an error, not an anonymous request.

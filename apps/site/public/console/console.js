@@ -125,14 +125,16 @@ $("createBtn").onclick = async () => {
   refresh();
 };
 
-/** Deep links: #tab=…, #topic=…, #device[=CODE] (device flow), #slack=installed (Slack OAuth), #topup=ok (Stripe). */
+/** Deep links: #tab=…, #topic=…, #dba-callback (devicebasedauth.org linking), #device, #slack=installed (Slack OAuth), #topup=ok (Stripe). */
 function routeHash(hash) {
-  if (hash.has("device")) {
+  if (hash.has("dba-callback")) {
     showTab("devices");
-    if (hash.get("device")) $("devCode").value = hash.get("device");
-    $("devCode").focus();
+    // The one-time code leaves the address bar (and history) before anything else happens.
+    history.replaceState(null, "", "#tab=devices");
+    finishDbaLink(hash.get("code"), hash.get("state"), hash.get("error"));
     return;
   }
+  if (hash.has("device")) { showTab("devices"); return; }
   if (hash.get("slack") === "installed") {
     $("epNotice").hidden = false;
     $("epNotice").textContent = `Slack is installed in ${hash.get("team") || "your workspace"}. Bind a channel below.`;
@@ -459,8 +461,9 @@ async function loadKeys(topics) {
   sel.innerHTML = topics.map((t) => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join("") || `<option value="">No topics yet</option>`;
   if (topics.some((t) => t.name === current)) sel.value = current;
   const { devices } = await client.request("GET", "/v1/devices");
-  keyDevices = devices.filter((d) => !d.revoked_at);
-  $("keyDevices").innerHTML = `<legend>Wrap new keys for these devices</legend>` + (keyDevices.map((d) => `<label class="check"><input type="checkbox" data-keydev="${esc(d.id)}" checked> ${esc(d.name || d.id.slice(0, 14) + "…")}</label>`).join("") || `<span class="muted">No enrolled devices: the key can only be shared by hand.</span>`);
+  // Only signing keys (dev_…) can receive wrapped keys; devicebasedauth.org devices (dba:…) attach one first.
+  keyDevices = devices.filter((d) => !d.revoked_at && d.id.startsWith("dev_"));
+  $("keyDevices").innerHTML = `<legend>Wrap new keys for these devices</legend>` + (keyDevices.map((d) => `<label class="check"><input type="checkbox" data-keydev="${esc(d.id)}" checked> ${esc(d.name || d.id.slice(0, 14) + "…")}</label>`).join("") || `<span class="muted">No devices with a signing key: the key can only be shared by hand.</span>`);
   await loadKeyRows();
   renderLocalKeys();
 }
@@ -948,13 +951,59 @@ async function loadWrappedKeysForBrowser(say) {
     say(topics.length ? `Loaded ${topics.length} topic key${topics.length > 1 ? "s" : ""}: ${topics.join(", ")}.` : "No wrapped keys are addressed to this browser.");
   } catch (e) { say(`${e.code ?? "error"}: ${e.message}`); }
 }
+// ---------- devicebasedauth.org ----------
+const BROWSER_DBA = "subetha.browserDbaDevice";
+const DBA_SDK_VERSION = "v1.4.0";
+let dbaLinkState = null;
+async function loadDbaLink() {
+  try { dbaLinkState = await client.dbaLink(); } catch (e) { $("dbaStatus").textContent = `${e.code ?? "error"}: ${e.message}`; return null; }
+  $("dbaStatus").textContent = dbaLinkState.linked
+    ? `Linked to devicebasedauth.org account ${dbaLinkState.dba_account} since ${when(dbaLinkState.linked_at)}.`
+    : "Not linked yet. Devices enrolled at devicebasedauth.org can't use this account until you link it.";
+  $("dbaLink").textContent = dbaLinkState.linked ? "Link another devicebasedauth.org account" : "Link devicebasedauth.org";
+  $("dbaUnlink").hidden = !dbaLinkState.linked;
+  return dbaLinkState;
+}
+async function finishDbaLink(code, state, error) {
+  const say = (t) => { $("dbaMsg").textContent = t; };
+  try {
+    if (!client) client = await makeClient();
+    const r = error ? await client.request("POST", "/v1/dba/link/finish", { state, error }) : await client.finishDbaLink(code ?? "", state ?? "");
+    say(`Linked devicebasedauth.org account ${r.dba_account}.`);
+  } catch (e) { say(`${e.code ?? "error"}: ${e.message}`); }
+  loadDevices();
+}
+$("dbaLink").onclick = async () => {
+  try { location.assign((await client.startDbaLink()).url); } catch (e) { $("dbaMsg").textContent = `${e.code ?? "error"}: ${e.message}`; }
+};
+$("dbaUnlink").onclick = async () => {
+  if (!confirm("Unlink devicebasedauth.org? Its devices stop working here until you link it again.")) return;
+  try { await client.unlinkDba(); $("dbaMsg").textContent = "Unlinked."; } catch (e) { $("dbaMsg").textContent = `${e.code ?? "error"}: ${e.message}`; }
+  loadDevices();
+};
+/** This browser's devicebasedauth.org device (the DBA browser SDK, loaded from the issuer). */
+async function browserDba() {
+  const link = dbaLinkState ?? (await loadDbaLink());
+  if (!link?.linked) throw { code: "not_linked", message: "Link devicebasedauth.org first (above)." };
+  const { DBA } = await import(`${link.issuer}/sdk/${DBA_SDK_VERSION}/dba.js`);
+  const dba = new DBA({ origin: link.issuer, name: "subetha" });
+  await dba.ready();
+  return { dba, link };
+}
+
 $("thisDevEnroll").onclick = async () => {
   const say = (t) => { $("thisDevMsg").textContent = t; };
   try {
+    const name = $("thisDevName").value.trim() || "This browser";
+    const { dba, link } = await browserDba();
+    if (!dba.credential || dba.expiresIn() <= 0) {
+      say("Approve this browser in the devicebasedauth.org window…");
+      await dba.enroll({ aud: [link.audience], grants: [{ actions: ["subetha:publish", "subetha:subscribe"] }], device: { name } });
+    }
     const key = await SubEtha.protocol.generateDeviceKey();
-    const proof = await SubEtha.enrollmentProof(key);
-    await client.request("POST", "/v1/devices", { ...proof, name: $("thisDevName").value.trim() || "This browser", capabilities: browserCapabilities() });
+    const r = await new SubEtha({ baseUrl: location.origin, dba }).attachDeviceKey(key, { name, capabilities: browserCapabilities() });
     store(BROWSER_SEED, SubEtha.protocol.base64urlEncode(key.seed));
+    store(BROWSER_DBA, r.dba_device);
     client = await makeClient();
     say(`Enrolled ${key.deviceId}.`);
     loadDevices();
@@ -967,13 +1016,19 @@ $("thisDevRevoke").onclick = async () => {
   if (!confirm("Revoke and forget this browser's device key?")) return;
   const id = browserDeviceKey.deviceId;
   await client.request("DELETE", `/v1/devices/${encodeURIComponent(id)}`).catch(() => {});
+  const dbaId = load(BROWSER_DBA);
+  if (dbaId) await client.request("DELETE", `/v1/devices/${encodeURIComponent(dbaId)}`).catch(() => {});
+  // Revoke the browser's devicebasedauth.org credential too (free), then forget its key.
+  await browserDba().then(({ dba }) => dba.revoke()).catch(() => {});
   store(BROWSER_SEED, null);
+  store(BROWSER_DBA, null);
   client = await makeClient();
   $("thisDevMsg").textContent = "Revoked and forgotten.";
   loadDevices();
 };
 
 async function loadDevices() {
+  loadDbaLink();
   const { devices } = await client.listDevices();
   renderThisBrowser(devices);
   const devPolicy = (d) => [
@@ -1016,34 +1071,6 @@ async function loadDevices() {
     loadDevices();
   });
 }
-$("devQrBtn").onclick = () => {
-  const box = $("devQr");
-  const code = $("devCode").value.trim().toUpperCase();
-  const url = code ? `${location.origin}/console/#device=${encodeURIComponent(code)}` : `${location.origin}/console/#device`;
-  if (!box.hidden && box.dataset.url === url) { box.hidden = true; return; }
-  box.dataset.url = url;
-  renderQrInto(box, url, `Scan to open ${url}`);
-};
-$("devApprove").onclick = async () => {
-  const say = (t) => { $("devMsg").textContent = t; };
-  try {
-    const r = await client.request("POST", "/v1/device/approve", { user_code: $("devCode").value.trim() });
-    say(`Enrolled ${r.name || r.device_id}. The device will finish signing in by itself.`);
-    $("devCode").value = "";
-    if (new URLSearchParams(location.hash.slice(1)).has("device")) history.replaceState(null, "", "#tab=devices");
-    loadDevices();
-  } catch (e) { say(e.code === "not_found" ? "That code is unknown or expired. Ask the device for a new one." : `${e.code}: ${e.message}`); }
-};
-$("devEnroll").onclick = async () => {
-  try {
-    let proof;
-    try { proof = JSON.parse($("devId").value); } catch { throw { code: "bad_request", message: "paste the JSON from enrollmentProof(key): device_id, time, and proof" }; }
-    const { device_id, time, proof: sig } = proof ?? {};
-    await client.request("POST", "/v1/devices", { device_id, time, proof: sig, name: $("devName").value.trim() || undefined });
-    $("devEnrollMsg").textContent = "Enrolled."; $("devId").value = ""; loadDevices();
-  } catch (e) { $("devEnrollMsg").textContent = `${e.code}: ${e.message}`; }
-};
-
 // ---------- audit log ----------
 let auditBefore = null;
 async function loadAudit(reset) {

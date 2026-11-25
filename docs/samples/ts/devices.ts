@@ -1,32 +1,27 @@
-// Enroll a device with the device-code flow, then authenticate with request signatures
-// instead of a bearer token.
+// A device enrolled at devicebasedauth.org publishes and subscribes with its DBA credential, and
+// can attach an Ed25519 signing key for E2EE topic keys and signed requests.
 import { SubEtha, enrollmentProof, generateDeviceKey } from "@subetha/sdk";
 import type { SampleContext } from "./_context.ts";
 
-export async function run({ baseUrl, token, topic, fetch = globalThis.fetch }: SampleContext) {
-  const post = async (path: string, body: unknown, auth?: string) => {
-    const r = await fetch(`${baseUrl}${path}`, { method: "POST", headers: { "content-type": "application/json", ...(auth ? { authorization: `Bearer ${auth}` } : {}) }, body: JSON.stringify(body) });
-    return { status: r.status, json: (await r.json()) as Record<string, string> };
-  };
+export async function run({ baseUrl, topic, dba, fetch = globalThis.fetch }: SampleContext) {
   // #region snippet
-  // On the device: create a key (persist key.seed), prove possession, and get a code.
+  // On the device, once: enroll at devicebasedauth.org and have the owner approve it there.
+  //   Browser: const dba = new DBA(); await dba.enroll({ aud: ["subetha.us"], grants: [{ actions: ["subetha:publish", "subetha:subscribe"], resources: [topic] }] });
+  //   CLI:     dba enroll --aud subetha.us --action subetha:publish --action subetha:subscribe
+  // (The owner links that devicebasedauth.org account to their subetha account in the console first.)
+
+  // Every request then carries the device's credential and a fresh proof of its key.
+  const url = `${baseUrl}/${topic}`;
+  const sent = await fetch(url, { method: "POST", headers: await dba.headers("POST", url), body: "garage door closed" });
+  console.log(sent.status); // 200
+
+  // Optional: attach an Ed25519 key, so topic keys can be sealed to the device and it can sign
+  // requests and messages. Persist key.seed on the device.
   const key = await generateDeviceKey();
-  const { json: start } = await post("/v1/device/code", { ...(await enrollmentProof(key)), name: "garage-pi", capabilities: ["ws", "lan"] });
-  console.log(`Open ${start.verification_uri} and enter ${start.user_code}`);
-
-  // The owner approves the code in the console (or with an admin token):
-  await post("/v1/device/approve", { user_code: start.user_code }, token);
-
-  // The device polls every `interval` seconds until it's approved…
-  let done = await post("/v1/device/token", { device_code: start.device_code });
-  while (done.json.error === "authorization_pending") {
-    await new Promise((r) => setTimeout(r, Number(start.interval) * 1000));
-    done = await post("/v1/device/token", { device_code: start.device_code });
-  }
-
-  // …then signs every request with its key. No bearer token is stored on the device.
+  const attachUrl = `${baseUrl}/v1/devices/dba`;
+  await fetch(attachUrl, { method: "POST", headers: { ...(await dba.headers("POST", attachUrl)), "content-type": "application/json" }, body: JSON.stringify({ ...(await enrollmentProof(key)), name: "garage-pi", capabilities: ["ws", "lan"] }) });
   const device = new SubEtha({ baseUrl, fetch, deviceKey: key, signRequests: true });
-  const msg = await device.publish(topic, "garage door closed");
+  const msg = await device.publish(topic, "garage door open");
   // #endregion snippet
-  return { enrolled: done.json.device_id, deviceId: key.deviceId, msg };
+  return { status: sent.status, deviceId: key.deviceId, msg };
 }

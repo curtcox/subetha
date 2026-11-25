@@ -23,7 +23,7 @@ in test mode), `http://localhost:8787` (`wrangler dev`).
 | Endpoints | `GET`/`POST /v1/endpoints`, `POST /v1/endpoints/{id}/verify`, `DELETE /v1/endpoints/{id}` |
 | Subscriptions | `GET`/`POST /v1/subscriptions`, `DELETE /v1/subscriptions/{id}` |
 | Slack | `GET /v1/slack/install`, `GET /v1/slack/oauth`, `POST /v1/slack/bindings` |
-| Devices | `GET`/`POST /v1/devices`, `PATCH`/`DELETE /v1/devices/{id}`, `POST /v1/device/code`, `/v1/device/approve`, `/v1/device/token` |
+| Devices | `GET /v1/devices`, `PATCH`/`DELETE /v1/devices/{id}`, `POST /v1/devices/dba` (attach a signing key), `GET`/`DELETE /v1/dba/link`, `POST /v1/dba/link/start`, `/v1/dba/link/finish` (devicebasedauth.org). Retired (410): `POST /v1/devices`, `/v1/device/code`, `/approve`, `/token` |
 | Agents | `POST /mcp`, `GET /.well-known/oauth-protected-resource` |
 | Provider hooks | `POST /v1/hooks/stripe`, `/v1/hooks/twilio/sms`, `/v1/hooks/twilio/voice-ack`, `/v1/hooks/slack/events` |
 | Local only | `POST /v1/dev/bootstrap` |

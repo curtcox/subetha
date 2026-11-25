@@ -1,4 +1,5 @@
 import { env, SELF } from "cloudflare:test";
+import { enrollDevice } from "./dba.ts";
 import { describe, expect, it } from "vitest";
 import { deviceKeyFromSeed, hexDecode } from "@subetha/sdk/protocol";
 import { enrollmentProof, SubEtha } from "@subetha/sdk";
@@ -100,16 +101,12 @@ describe("inbound email", () => {
 });
 
 describe("devices", () => {
-  it("enrolls via device code and authenticates signed requests", async () => {
+  it("enrolls through devicebasedauth.org and authenticates signed requests", async () => {
     const a = await bootstrap("devowner", 1);
     const key = await deviceKeyFromSeed(hexDecode("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb"));
-    const code = (await (await SELF.fetch(`${BASE}/v1/device/code`, { method: "POST", body: JSON.stringify({ ...(await enrollmentProof(key)), name: "kitchen esp32", capabilities: ["ble"] }) })).json()) as { device_code: string; user_code: string };
-    expect(code.user_code).toMatch(/^[A-Z]{4}-[A-Z]{4}$/);
-    const pending = await SELF.fetch(`${BASE}/v1/device/token`, { method: "POST", body: JSON.stringify({ device_code: code.device_code }) });
-    expect(((await pending.json()) as { error: string }).error).toBe("authorization_pending");
-    expect((await SELF.fetch(`${BASE}/v1/device/approve`, { method: "POST", headers: auth(a.token), body: JSON.stringify({ user_code: code.user_code }) })).status).toBe(200);
-    const done = (await (await SELF.fetch(`${BASE}/v1/device/token`, { method: "POST", body: JSON.stringify({ device_code: code.device_code }) })).json()) as { device_id: string };
-    expect(done.device_id).toBe(key.deviceId);
+    const enrolled = await enrollDevice(a.account_id, key, { name: "kitchen esp32", capabilities: ["ble"] });
+    expect(enrolled.status).toBe(201);
+    expect(((await enrolled.json()) as { id: string }).id).toBe(key.deviceId);
 
     const dev = new SubEtha({ baseUrl: BASE, fetch: SELF.fetch.bind(SELF) as typeof fetch, deviceKey: key, signRequests: true });
     const m = await dev.publish("@devowner/kitchen", "temp 21C", { sign: false });
@@ -137,7 +134,7 @@ describe("cron rent metering", () => {
   it("charges device/endpoint rent daily and freezes accounts that can't pay", async () => {
     const a = await bootstrap("renter", 1);
     const k1 = await deviceKeyFromSeed(new Uint8Array(32).fill(11));
-    expect((await SELF.fetch(`${BASE}/v1/devices`, { method: "POST", headers: auth(a.token), body: JSON.stringify(await enrollmentProof(k1)) })).status).toBe(201);
+    expect((await enrollDevice(a.account_id, k1)).status).toBe(201);
     const before = await balance(a.token);
     await meterRent(E, Date.UTC(2026, 5, 1));
     expect(await balance(a.token)).toBe(before - 2);
@@ -146,7 +143,7 @@ describe("cron rent metering", () => {
 
     const b = await bootstrap("deadbeat", 0);
     const k2 = await deviceKeyFromSeed(new Uint8Array(32).fill(12));
-    expect((await SELF.fetch(`${BASE}/v1/devices`, { method: "POST", headers: auth(b.token), body: JSON.stringify(await enrollmentProof(k2)) })).status).toBe(201);
+    expect((await enrollDevice(b.account_id, k2)).status).toBe(201);
     await meterRent(E, Date.UTC(2026, 5, 2));
     const row = await E.DB.prepare("SELECT frozen_since FROM accounts WHERE id = ?").bind(b.account_id).first<{ frozen_since: number }>();
     expect(row?.frozen_since).toBe(Date.UTC(2026, 5, 2));
