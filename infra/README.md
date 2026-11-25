@@ -60,7 +60,7 @@ Other bindings need no creation step:
 
 - **Durable Objects** (`TopicDO`, `AccountDO`) are created by the first deploy (migration tag `v1`).
 - **Rate limits** (`RL_AUTH` 600/min per credential, `RL_ANON` 60/min per IP) use
-  `namespace_id`s `1001`/`1002`; these must be unique among rate-limit bindings in the account,
+  `namespace_id`s `3001`/`3002` (cronly already uses `1001`); these must be unique among rate-limit bindings in the account,
   so change them if another Worker already uses them.
 - **Cron**: `17 3 * * *` (daily rent metering, freeze/cleanup, Stripe reconciliation, Twilio price
   check, expired-attachment cleanup).

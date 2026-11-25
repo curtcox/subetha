@@ -26,7 +26,7 @@
     "producers": [{ "binding": "DELIVERY", "queue": "subetha-delivery-local" }],
     "consumers": [{ "queue": "subetha-delivery-local", "max_batch_size": 20, "max_retries": 5, "dead_letter_queue": "subetha-delivery-dlq-local" }]
   },
-  "ratelimits": [{ "name": "RL_AUTH", "namespace_id": "1001", "simple": { "limit": 600, "period": 60 } }, { "name": "RL_ANON", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } }],
+  "ratelimits": [{ "name": "RL_AUTH", "namespace_id": "3001", "simple": { "limit": 600, "period": 60 } }, { "name": "RL_ANON", "namespace_id": "3002", "simple": { "limit": 60, "period": 60 } }],
   "triggers": { "crons": ["17 3 * * *"] },
   "observability": { "enabled": true },
   "env": {
@@ -42,7 +42,7 @@
         "producers": [{ "binding": "DELIVERY", "queue": "subetha-delivery-staging" }],
         "consumers": [{ "queue": "subetha-delivery-staging", "max_batch_size": 20, "max_retries": 5, "dead_letter_queue": "subetha-delivery-dlq-staging" }]
       },
-      "ratelimits": [{ "name": "RL_AUTH", "namespace_id": "1001", "simple": { "limit": 600, "period": 60 } }, { "name": "RL_ANON", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } }],
+      "ratelimits": [{ "name": "RL_AUTH", "namespace_id": "3001", "simple": { "limit": 600, "period": 60 } }, { "name": "RL_ANON", "namespace_id": "3002", "simple": { "limit": 60, "period": 60 } }],
       "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "subetha_usage_staging" }],
       "triggers": { "crons": ["17 3 * * *"] }
     },
@@ -51,14 +51,14 @@
       "routes": [{ "pattern": "subetha.us", "custom_domain": true }, { "pattern": "mcp.subetha.us", "custom_domain": true }],
       "vars": { "ENVIRONMENT": "production", "BASE_URL": "https://subetha.us" },
       "durable_objects": { "bindings": [{ "name": "TOPIC", "class_name": "TopicDO" }, { "name": "ACCOUNT", "class_name": "AccountDO" }] },
-      "d1_databases": [{ "binding": "DB", "database_name": "subetha-production", "database_id": "REPLACE_WITH_PRODUCTION_D1_ID", "migrations_dir": "migrations" }],
-      "kv_namespaces": [{ "binding": "CACHE", "id": "REPLACE_WITH_PRODUCTION_KV_ID" }],
+      "d1_databases": [{ "binding": "DB", "database_name": "subetha-production", "database_id": "6576a7c7-5581-433e-9133-73df33a22651", "migrations_dir": "migrations" }],
+      "kv_namespaces": [{ "binding": "CACHE", "id": "8e8841e9c1ce4ceaa43330a093827809" }],
       "r2_buckets": [{ "binding": "FILES", "bucket_name": "subetha-files-production" }, { "binding": "BACKUPS", "bucket_name": "subetha-backups-production" }],
       "queues": {
         "producers": [{ "binding": "DELIVERY", "queue": "subetha-delivery-production" }],
         "consumers": [{ "queue": "subetha-delivery-production", "max_batch_size": 20, "max_retries": 5, "dead_letter_queue": "subetha-delivery-dlq-production" }]
       },
-      "ratelimits": [{ "name": "RL_AUTH", "namespace_id": "1001", "simple": { "limit": 600, "period": 60 } }, { "name": "RL_ANON", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } }],
+      "ratelimits": [{ "name": "RL_AUTH", "namespace_id": "3001", "simple": { "limit": 600, "period": 60 } }, { "name": "RL_ANON", "namespace_id": "3002", "simple": { "limit": 60, "period": 60 } }],
       "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "subetha_usage_production" }],
       "triggers": { "crons": ["17 3 * * *"] }
     }
