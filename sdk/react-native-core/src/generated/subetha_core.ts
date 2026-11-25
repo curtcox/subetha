@@ -681,7 +681,7 @@ const FfiConverterTypeEdgeQrProgress = (() => {
 
 
 /**
- * Proof of key possession for `POST /v1/device/code`.
+ * Proof of key possession for `POST /v1/devices/dba`.
  */
 export type EnrollmentProofRecord = {
     deviceId: string,

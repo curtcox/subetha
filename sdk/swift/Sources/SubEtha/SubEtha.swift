@@ -19,6 +19,7 @@ public final class SubEtha: @unchecked Sendable {
     private let token: String?
     private let deviceSigner: DeviceSigner?
     private let signRequests: Bool
+    private let dba: DBAHeaders?
     private let crypto: EnvelopeCrypto?
     private let topicKeys: [String: TopicKey]
     private let transport: HTTPTransport
@@ -26,18 +27,22 @@ public final class SubEtha: @unchecked Sendable {
 
     /// - Parameters:
     ///   - signRequests: authenticate with the device signature instead of the bearer token
-    ///     (enrolled devices; see `startEnrollment`).
+    ///     (a signing key attached with `attachDeviceKey`).
+    ///   - dba: authenticate every request as a devicebasedauth.org device (its Authorization and
+    ///     DPoP headers). Not with `signRequests`.
     ///   - crypto: signature checks and E2EE, from `SubEthaCore`.
     ///   - clock: unix seconds; replaceable in tests.
     public init(baseURL: URL = SubEtha.defaultBaseURL,
                 token: String? = nil,
                 deviceSigner: DeviceSigner? = nil,
                 signRequests: Bool = false,
+                dba: DBAHeaders? = nil,
                 crypto: EnvelopeCrypto? = nil,
                 topicKeys: [String: TopicKey] = [:],
                 transport: HTTPTransport = URLSessionTransport(),
                 clock: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970) }) {
         precondition(!signRequests || deviceSigner != nil, "signRequests needs a deviceSigner")
+        precondition(!(signRequests && dba != nil), "use either signRequests or dba, not both")
         precondition(topicKeys.isEmpty || crypto != nil, "topicKeys need an EnvelopeCrypto (SubEthaCore)")
         var s = baseURL.absoluteString
         while s.hasSuffix("/") { s.removeLast() }
@@ -45,6 +50,7 @@ public final class SubEtha: @unchecked Sendable {
         self.token = token
         self.deviceSigner = deviceSigner
         self.signRequests = signRequests
+        self.dba = dba
         self.crypto = crypto
         self.topicKeys = topicKeys
         self.transport = transport
@@ -53,7 +59,7 @@ public final class SubEtha: @unchecked Sendable {
 
     // MARK: - HTTP
 
-    private func makeRequest(_ method: String, _ url: URL, body: Data? = nil, headers: [String: String] = [:], streaming: Bool = false) throws -> URLRequest {
+    private func makeRequest(_ method: String, _ url: URL, body: Data? = nil, headers: [String: String] = [:], streaming: Bool = false) async throws -> URLRequest {
         var r = URLRequest(url: url)
         r.httpMethod = method
         r.httpBody = body
@@ -61,7 +67,9 @@ public final class SubEtha: @unchecked Sendable {
         r.setValue("subetha-swift/\(SubEtha.version)", forHTTPHeaderField: "User-Agent")
         r.setValue("application/json", forHTTPHeaderField: "Accept")
         for (k, v) in headers { r.setValue(v, forHTTPHeaderField: k) }
-        if signRequests, let signer = deviceSigner {
+        if let dba {
+            for (k, v) in try await dba.headers(method: method, url: url) { r.setValue(v, forHTTPHeaderField: k) }
+        } else if signRequests, let signer = deviceSigner {
             let sent = r.allHTTPHeaderFields ?? [:]
             for (k, v) in try RequestSigning.headers(signer: signer, method: method, url: url, body: body ?? Data(), time: clock(), headers: sent) {
                 r.setValue(v, forHTTPHeaderField: k)
@@ -90,7 +98,7 @@ public final class SubEtha: @unchecked Sendable {
             h["Content-Type"] = "application/json"
         }
         let url = URL(string: baseURL.absoluteString + path)!
-        let out = try await send(try makeRequest(method, url, body: data, headers: h))
+        let out = try await send(try await makeRequest(method, url, body: data, headers: h))
         if out.isEmpty || String(decoding: out, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .object([:]) }
         return try JSONValue.parse(out)
     }
@@ -200,7 +208,7 @@ public final class SubEtha: @unchecked Sendable {
     public func publishFile(_ topic: String, filename: String, data: Data, contentType: String = "application/octet-stream", message: String? = nil, options: PublishOptions = PublishOptions()) async throws -> Message {
         let url = URL(string: baseURL.absoluteString + "/" + Self.topicPath([topic]))!
         let h = fileHeaders(filename: filename, contentType: contentType, message: message, options: options)
-        let out = try await send(try makeRequest("PUT", url, body: data, headers: h))
+        let out = try await send(try await makeRequest("PUT", url, body: data, headers: h))
         guard let obj = try JSONValue.parse(out).objectValue else { throw SubEthaClientError.invalidResponse("expected a JSON object") }
         return Message(json: obj)
     }
@@ -209,7 +217,7 @@ public final class SubEtha: @unchecked Sendable {
     public func estimateFile(_ topic: String, filename: String, data: Data, contentType: String = "application/octet-stream", message: String? = nil, options: PublishOptions = PublishOptions()) async throws -> Estimate {
         let url = URL(string: baseURL.absoluteString + "/" + Self.topicPath([topic]))!
         let h = fileHeaders(filename: filename, contentType: contentType, message: message, options: options, extra: ["X-Dry-Run": "1"])
-        let out = try await send(try makeRequest("PUT", url, body: data, headers: h))
+        let out = try await send(try await makeRequest("PUT", url, body: data, headers: h))
         guard let obj = try JSONValue.parse(out).objectValue else { throw SubEthaClientError.invalidResponse("expected a JSON object") }
         return Estimate(json: obj)
     }
@@ -246,7 +254,7 @@ public final class SubEtha: @unchecked Sendable {
 
     private func pollRaw(_ topics: [String], since: String, priority: [Int], tags: [String]) async throws -> [[String: JSONValue]] {
         let url = subscribeURL(topics, since: since, priority: priority, tags: tags, poll: true)
-        let data = try await send(try makeRequest("GET", url))
+        let data = try await send(try await makeRequest("GET", url))
         return String(decoding: data, as: UTF8.self)
             .split(whereSeparator: \.isNewline)
             .compactMap { try? JSONValue.parse(String($0)).objectValue }
@@ -314,7 +322,7 @@ public final class SubEtha: @unchecked Sendable {
                     continue
                 }
                 let url = subscribeURL(topics, since: since, priority: options.priority, tags: options.tags, poll: false)
-                let (lines, resp) = try await transport.lines(for: try makeRequest("GET", url, streaming: true))
+                let (lines, resp) = try await transport.lines(for: try await makeRequest("GET", url, streaming: true))
                 guard (200..<300).contains(resp.statusCode) else {
                     var body = ""
                     for try await l in lines { body += l + "\n" }
@@ -361,32 +369,28 @@ public final class SubEtha: @unchecked Sendable {
 
     // MARK: - Devices
 
-    /// Step 1 of device enrollment: registers this device's key and returns a code the user
-    /// approves in the console (`verificationURIComplete`).
-    public func startEnrollment(name: String? = nil, capabilities: [String] = []) async throws -> DeviceCode {
+    /// As a devicebasedauth.org device (the `dba` option), attach this client's Ed25519 signing key
+    /// (`deviceSigner`): topic keys can then be sealed to it, and it can sign requests and messages.
+    /// The DBA device needs grants for `subetha:publish` and `subetha:subscribe` on every topic.
+    @discardableResult
+    public func attachDeviceKey(name: String? = nil, capabilities: [String] = []) async throws -> [String: JSONValue] {
         guard let signer = deviceSigner else { throw SubEthaClientError.missingDeviceSigner }
         let p = try RequestSigning.enrollmentProof(signer: signer, time: clock())
         var body: [String: JSONValue] = ["device_id": .string(p.deviceId), "time": .int(p.time), "proof": .string(p.proof)]
         if let name { body["name"] = .string(name) }
         if !capabilities.isEmpty { body["capabilities"] = .array(capabilities.map(JSONValue.string)) }
-        let r = try await requestObject("POST", "/v1/device/code", body: .object(body))
-        return DeviceCode(deviceCode: r["device_code"]?.stringValue ?? "", userCode: r["user_code"]?.stringValue ?? "",
-                          verificationURI: r["verification_uri"]?.stringValue ?? "",
-                          verificationURIComplete: r["verification_uri_complete"]?.stringValue ?? "",
-                          expiresIn: r["expires_in"]?.intValue ?? 0, interval: r["interval"]?.intValue ?? 5)
+        return try await requestObject("POST", "/v1/devices/dba", body: .object(body))
     }
 
-    /// Step 2: polls until the user approves (returns the account id) or the code expires (throws).
-    public func awaitEnrollment(_ code: DeviceCode) async throws -> String {
-        while true {
-            do {
-                let r = try await requestObject("POST", "/v1/device/token", body: ["device_code": .string(code.deviceCode)])
-                return r["account_id"]?.stringValue ?? ""
-            } catch let e as SubEthaError where e.code == "authorization_pending" {
-                try await Task.sleep(nanoseconds: UInt64(max(code.interval, 1)) * 1_000_000_000)
-            }
-        }
+    /// The account's devicebasedauth.org link: `linked`, `dba_account`, `issuer`, `audience`.
+    public func dbaLink() async throws -> [String: JSONValue] { try await requestObject("GET", "/v1/dba/link") }
+    /// Start linking (signed-in console sessions): open `url`; devicebasedauth.org returns to /auth/dba/callback.
+    public func startDbaLink() async throws -> [String: JSONValue] { try await requestObject("POST", "/v1/dba/link/start", body: .object([:])) }
+    public func finishDbaLink(code: String, state: String) async throws -> [String: JSONValue] {
+        try await requestObject("POST", "/v1/dba/link/finish", body: ["code": .string(code), "state": .string(state)])
     }
+    @discardableResult
+    public func unlinkDba() async throws -> [String: JSONValue] { try await requestObject("DELETE", "/v1/dba/link") }
 
     // MARK: - Control plane
 

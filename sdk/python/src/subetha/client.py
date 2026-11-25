@@ -19,6 +19,7 @@ from .protocol import (
     DeviceKey,
     decrypt_envelope,
     encrypt_envelope,
+    enrollment_proof,
     is_topic,
     parse_priority,
     sign_envelope,
@@ -49,6 +50,22 @@ class DeviceAuth(httpx.Auth):
         signed = sign_request(self.key, request.method, str(request.url), request.content, request.headers.multi_items(), self.clock())
         request.headers.update(signed)
         yield request
+
+class DbaAuth(httpx.Auth):
+    """Authenticates every request as a devicebasedauth.org device: ``dba`` is anything with
+    ``headers(method, url)`` (or a callable ``(method, url)``) returning that request's
+    ``Authorization: DBA …`` and ``DPoP`` headers, such as a wrapper around ``dba headers METHOD URL``.
+    """
+
+    def __init__(self, dba: Any) -> None:
+        self.dba = dba
+
+    def auth_flow(self, request: httpx.Request) -> Iterator[httpx.Request]:
+        request.headers.pop("authorization", None)
+        get = getattr(self.dba, "headers", self.dba)
+        request.headers.update(dict(get(request.method, str(request.url))))
+        yield request
+
 
 #: Read timeout for streaming subscriptions. ntfy-style servers send a keepalive at least every
 #: 45-55 seconds, so a silent connection beyond this is treated as dead and reconnected.
@@ -128,11 +145,15 @@ class Client:
         device_key: DeviceKey | None = None,
         sign_requests: bool = False,
         topic_keys: Mapping[str, tuple[str, bytes]] | None = None,
+        dba: Any = None,
     ) -> None:
-        """``sign_requests=True`` authenticates every request with ``device_key`` (an enrolled
-        device, spec §8.1) instead of ``token``."""
+        """``sign_requests=True`` authenticates every request with ``device_key`` (a signing key
+        attached with ``attach_device_key``, spec §8.1) instead of ``token``. ``dba`` authenticates
+        every request as a devicebasedauth.org device instead (see ``DbaAuth``)."""
         if sign_requests and device_key is None:
             raise ValueError("sign_requests needs a device_key")
+        if sign_requests and dba is not None:
+            raise ValueError("use either sign_requests or dba, not both")
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.device_key = device_key
@@ -141,9 +162,9 @@ class Client:
             for t, kv in topic_keys.items():
                 self.set_topic_key(t, kv)
         headers = {"User-Agent": user_agent or f"subetha-python/{__version__}"}
-        if token and not sign_requests:
+        if token and not sign_requests and dba is None:
             headers["Authorization"] = f"Bearer {token}"
-        auth = DeviceAuth(device_key) if sign_requests and device_key is not None else None
+        auth: httpx.Auth | None = DeviceAuth(device_key) if sign_requests and device_key is not None else DbaAuth(dba) if dba is not None else None
         if http_client is not None:
             self._http = http_client
             self._http.headers.update(headers)
@@ -634,8 +655,33 @@ class Client:
     def revoke_device(self, device_id: str) -> dict[str, Any]:
         return self._json(self._http.delete(f"/v1/devices/{device_id}"))
 
-    def approve_device(self, user_code: str) -> dict[str, Any]:
-        return self._json(self._http.post("/v1/device/approve", json={"user_code": user_code}))
+    def attach_device_key(self, name: str | None = None, capabilities: Sequence[str] = (), key: DeviceKey | None = None) -> dict[str, Any]:
+        """As a devicebasedauth.org device (``dba=``), attaches an Ed25519 signing key (``key`` or
+        ``device_key``): topic keys can then be sealed to it, and it can sign requests and messages.
+        The DBA device needs grants for ``subetha:publish`` and ``subetha:subscribe`` on every topic."""
+        k = key or self.device_key
+        if k is None:
+            raise ValueError("attach_device_key needs a device_key")
+        body: dict[str, Any] = dict(enrollment_proof(k))
+        if name is not None:
+            body["name"] = name
+        if capabilities:
+            body["capabilities"] = list(capabilities)
+        return self._json(self._http.post("/v1/devices/dba", json=body))
+
+    def dba_link(self) -> dict[str, Any]:
+        """The account's devicebasedauth.org link: ``linked``, ``dba_account``, ``issuer``, ``audience``."""
+        return self._json(self._http.get("/v1/dba/link"))
+
+    def start_dba_link(self) -> dict[str, Any]:
+        """Starts linking (signed-in console sessions): open ``url``; devicebasedauth.org returns to /auth/dba/callback."""
+        return self._json(self._http.post("/v1/dba/link/start", json={}))
+
+    def finish_dba_link(self, code: str, state: str) -> dict[str, Any]:
+        return self._json(self._http.post("/v1/dba/link/finish", json={"code": code, "state": state}))
+
+    def unlink_dba(self) -> dict[str, Any]:
+        return self._json(self._http.delete("/v1/dba/link"))
 
     def list_endpoints(self) -> list[dict[str, Any]]:
         return list(self._json(self._http.get("/v1/endpoints")).get("endpoints", []))

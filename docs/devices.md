@@ -47,7 +47,10 @@ attaches such a key with **`POST /v1/devices/dba`**, proving it holds it with
 `enrollmentProof(key)` (an Ed25519 signature over `"subetha-enroll-v1\n" + device_id + "\n" + time`).
 The device needs grants on every topic for this. The key, `dev_` followed by its public key in
 base32, is then listed beside its DBA device and signs requests as below; revoking the DBA
-credential stops it too. `attachDeviceKey(key)` in the TypeScript SDK does this, and so does
+credential stops it too. Every SDK does this for a client built with the device's DBA headers:
+`attachDeviceKey(key)` in TypeScript, `attachDeviceKey(name:)` in Swift (`SubEtha(deviceSigner:, dba:)`),
+`attachDeviceKey()` in Kotlin and Dart (`dba =` / `dba:`, a `DbaHeaders`), and
+`attach_device_key()` in Python (`Client(device_key=…, dba=…)`). So do
 **Devices → This browser → Enroll this browser** in the console and bare `subetha login` in the
 CLI (through the `dba` CLI).
 

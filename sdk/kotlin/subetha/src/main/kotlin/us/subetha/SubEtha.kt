@@ -37,7 +37,9 @@ import kotlinx.serialization.json.put
  * ```
  *
  * @param signRequests authenticate every request with the device signature instead of the
- *   bearer token (enrolled devices; see [startEnrollment]).
+ *   bearer token (a signing key attached with [attachDeviceKey]).
+ * @param dba authenticate every request as a devicebasedauth.org device (its Authorization and
+ *   DPoP headers). Not with [signRequests].
  * @param crypto signature checks and E2EE, from `us.subetha:subetha-core`.
  * @param clock unix seconds; replaceable in tests.
  */
@@ -46,6 +48,7 @@ public class SubEtha @JvmOverloads constructor(
     private val token: String? = null,
     private val deviceSigner: DeviceSigner? = null,
     private val signRequests: Boolean = false,
+    private val dba: DbaHeaders? = null,
     private val crypto: EnvelopeCrypto? = null,
     topicKeys: Map<String, TopicKey> = emptyMap(),
     private val transport: HttpTransport = UrlConnectionTransport(),
@@ -56,6 +59,7 @@ public class SubEtha @JvmOverloads constructor(
 
     init {
         require(!signRequests || deviceSigner != null) { "signRequests needs a deviceSigner" }
+        require(!(signRequests && dba != null)) { "use either signRequests or dba, not both" }
         require(topicKeys.isEmpty() || crypto != null) { "topicKeys need an EnvelopeCrypto (us.subetha:subetha-core)" }
     }
 
@@ -71,12 +75,13 @@ public class SubEtha @JvmOverloads constructor(
 
     // ---------------------------------------------------------------- HTTP
 
-    private fun headersFor(method: String, url: String, body: ByteArray?, extra: Map<String, String>): Map<String, String> {
+    private suspend fun headersFor(method: String, url: String, body: ByteArray?, extra: Map<String, String>): Map<String, String> {
         val h = LinkedHashMap<String, String>()
         h["User-Agent"] = USER_AGENT
         h["Accept"] = "application/json"
         h.putAll(extra)
-        if (signRequests) h.putAll(signRequest(deviceSigner!!, method, url, body ?: ByteArray(0), clock(), headers = h.toMap()))
+        if (dba != null) h.putAll(dba.headers(method, url))
+        else if (signRequests) h.putAll(signRequest(deviceSigner!!, method, url, body ?: ByteArray(0), clock(), headers = h.toMap()))
         else if (token != null) h["Authorization"] = "Bearer $token"
         return h
     }
@@ -392,11 +397,12 @@ public class SubEtha @JvmOverloads constructor(
     // ---------------------------------------------------------------- devices
 
     /**
-     * Step 1 of device enrollment: registers this device's key and returns a code the user
-     * approves in the console ([DeviceCode.verificationUriComplete]).
+     * As a devicebasedauth.org device (the [dba] option), attach this client's Ed25519 signing key
+     * ([deviceSigner]): topic keys can then be sealed to it, and it can sign requests and messages.
+     * The DBA device needs grants for `subetha:publish` and `subetha:subscribe` on every topic.
      */
-    public suspend fun startEnrollment(name: String? = null, capabilities: List<String> = emptyList()): DeviceCode {
-        val signer = deviceSigner ?: throw IllegalStateException("enrollment needs a deviceSigner")
+    public suspend fun attachDeviceKey(name: String? = null, capabilities: List<String> = emptyList()): JsonObject {
+        val signer = deviceSigner ?: throw IllegalStateException("attachDeviceKey needs a deviceSigner")
         val p = enrollmentProof(signer, clock())
         val body = buildJsonObject {
             put("device_id", p.deviceId)
@@ -405,24 +411,16 @@ public class SubEtha @JvmOverloads constructor(
             name?.let { put("name", it) }
             if (capabilities.isNotEmpty()) put("capabilities", JsonArray(capabilities.map(::JsonPrimitive)))
         }
-        val r = requestObject("POST", "/v1/device/code", body)
-        fun s(k: String) = (r[k] as? JsonPrimitive)?.content ?: ""
-        fun l(k: String) = (r[k] as? JsonPrimitive)?.longOrNull ?: 0
-        return DeviceCode(s("device_code"), s("user_code"), s("verification_uri"), s("verification_uri_complete"), l("expires_in"), l("interval"))
+        return requestObject("POST", "/v1/devices/dba", body)
     }
 
-    /** Step 2: polls until the user approves (returns the account id) or the code expires (throws). */
-    public suspend fun awaitEnrollment(code: DeviceCode): String {
-        while (true) {
-            try {
-                val r = requestObject("POST", "/v1/device/token", buildJsonObject { put("device_code", code.deviceCode) })
-                return (r["account_id"] as? JsonPrimitive)?.content ?: ""
-            } catch (e: SubEthaException) {
-                if (e.code != "authorization_pending") throw e
-            }
-            delay(maxOf(code.intervalS, 1) * 1000)
-        }
-    }
+    /** The account's devicebasedauth.org link: `linked`, `dba_account`, `issuer`, `audience`. */
+    public suspend fun dbaLink(): JsonObject = requestObject("GET", "/v1/dba/link")
+    /** Start linking (signed-in console sessions): open `url`; devicebasedauth.org returns to /auth/dba/callback. */
+    public suspend fun startDbaLink(): JsonObject = requestObject("POST", "/v1/dba/link/start", JsonObject(emptyMap()))
+    public suspend fun finishDbaLink(code: String, state: String): JsonObject =
+        requestObject("POST", "/v1/dba/link/finish", buildJsonObject { put("code", code); put("state", state) })
+    public suspend fun unlinkDba(): JsonObject = requestObject("DELETE", "/v1/dba/link")
 
     // ---------------------------------------------------------------- control plane
 

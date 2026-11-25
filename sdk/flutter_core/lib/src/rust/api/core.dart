@@ -106,7 +106,7 @@ class DeviceKey {
           deviceId == other.deviceId;
 }
 
-/// Proof of key possession for `POST /v1/device/code`.
+/// Proof of key possession for `POST /v1/devices/dba`.
 class EnrollmentProof {
   final String deviceId;
   final BigInt time;

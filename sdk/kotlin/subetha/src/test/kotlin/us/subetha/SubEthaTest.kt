@@ -271,23 +271,30 @@ class SubEthaTest {
     }
 
     @Test
-    fun enrollmentFlow() = runBlocking {
-        val polls = AtomicInteger()
+    fun dbaDeviceAttachesKeyAndLinks() = runBlocking {
+        val dba = object : DbaHeaders {
+            override suspend fun headers(method: String, url: String) = mapOf("Authorization" to "DBA cred", "DPoP" to "proof:$method:$url")
+        }
         MockServer { r, ex ->
-            when (r.pathAndQuery) {
-                "/v1/device/code" -> MockServer.respond(ex, 200, """{"device_code":"dc","user_code":"BCDF-GHJK","verification_uri":"https://x/console/#device","verification_uri_complete":"https://x/console/#device=BCDF-GHJK","expires_in":600,"interval":0}""")
-                else -> if (polls.incrementAndGet() == 1) MockServer.respond(ex, 400, """{"error":"authorization_pending"}""")
-                else MockServer.respond(ex, 200, """{"device_id":"$DEVICE_ID","account_id":"acct_1"}""")
+            when {
+                r.pathAndQuery == "/v1/devices/dba" -> MockServer.respond(ex, 201, """{"id":"$DEVICE_ID","enrolled":true,"dba_device":"dba:d1"}""")
+                r.method == "GET" -> MockServer.respond(ex, 200, """{"linked":true,"dba_account":"a1","linked_at":1,"issuer":"https://devicebasedauth.org","audience":"subetha.us"}""")
+                else -> MockServer.respond(ex, 200, """{"linked":false}""")
             }
         }.use { s ->
-            val c = SubEtha(baseUrl = s.url, deviceSigner = JdkDeviceSigner(Encoding.hexDecode(SEED)), clock = { 1763750000 })
-            val code = c.startEnrollment(name = "Pixel")
-            assertEquals("BCDF-GHJK", code.userCode)
-            val body = obj(s.requests[0].body)
+            val c = SubEtha(baseUrl = s.url, token = "se_ignored", deviceSigner = JdkDeviceSigner(Encoding.hexDecode(SEED)), dba = dba, clock = { 1763750000 })
+            assertEquals("dba:d1", c.attachDeviceKey(name = "Pixel")["dba_device"]!!.jsonPrimitive.content)
+            val r = s.requests[0]
+            assertEquals("DBA cred", r.headers["authorization"])
+            assertEquals("proof:POST:${s.url}/v1/devices/dba", r.headers["dpop"])
+            val body = obj(r.body)
             assertEquals(ENROLL_SIG, body["proof"]!!.jsonPrimitive.content)
             assertEquals(1763750000, body["time"]!!.jsonPrimitive.content.toLong())
             assertEquals("Pixel", body["name"]!!.jsonPrimitive.content)
-            assertEquals("acct_1", c.awaitEnrollment(code))
+            assertEquals("a1", c.dbaLink()["dba_account"]!!.jsonPrimitive.content)
+            c.unlinkDba()
+            assertEquals("DELETE", s.requests.last().method)
+            assertEquals("/v1/dba/link", s.requests.last().pathAndQuery)
         }
     }
 

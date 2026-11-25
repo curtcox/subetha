@@ -284,3 +284,44 @@ def test_auto_e2ee_ack_file_and_control_plane():
     assert files[0][1]["x-filename"] == "snap.jpg"
     assert c.balance()["available_usd_micros"] == 5_000_000
     assert c.delete_wrapped_keys(TOPIC, kid="k42") == 1
+
+
+def test_dba_device_attaches_a_signing_key_and_manages_the_link():
+    from subetha import device_key_from_seed
+    from subetha.protocol import base64url_decode
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    key = device_key_from_seed(bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"))
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        if req.url.path == "/v1/devices/dba":
+            return httpx.Response(201, json={"id": key.device_id, "enrolled": True, "dba_device": "dba:d1"})
+        if req.method == "GET":
+            return httpx.Response(200, json={"linked": True, "dba_account": "a1", "issuer": "https://devicebasedauth.org", "audience": "subetha.us"})
+        return httpx.Response(200, json={"linked": False})
+
+    class FakeDba:
+        def headers(self, method: str, url: str) -> dict[str, str]:
+            return {"Authorization": "DBA cred", "DPoP": f"proof:{method}:{url}"}
+
+    c = Client("https://relay.test", token="tk_ignored", device_key=key, dba=FakeDba(), transport=httpx.MockTransport(handler))
+    assert c.attach_device_key(name="pi", capabilities=["ws"])["dba_device"] == "dba:d1"
+    r = seen[0]
+    assert r.headers["authorization"] == "DBA cred"
+    assert r.headers["dpop"] == "proof:POST:https://relay.test/v1/devices/dba"
+    body = json.loads(r.content)
+    assert body["device_id"] == key.device_id and body["name"] == "pi" and body["capabilities"] == ["ws"]
+    Ed25519PublicKey.from_public_bytes(key.public_key).verify(
+        base64url_decode(body["proof"]), f"subetha-enroll-v1\n{key.device_id}\n{body['time']}".encode()
+    )
+    assert c.dba_link()["dba_account"] == "a1"
+    c.unlink_dba()
+    assert seen[-1].method == "DELETE" and seen[-1].url.path == "/v1/dba/link"
+    # A callable works too, and dba can't be combined with sign_requests.
+    c2 = Client("https://relay.test", dba=lambda m, u: {"Authorization": "DBA x", "DPoP": "p"}, transport=httpx.MockTransport(handler))
+    c2.dba_link()
+    assert seen[-1].headers["authorization"] == "DBA x"
+    with pytest.raises(ValueError):
+        Client(device_key=key, sign_requests=True, dba=FakeDba())

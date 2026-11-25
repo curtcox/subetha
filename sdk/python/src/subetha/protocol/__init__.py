@@ -34,6 +34,7 @@ from .sign import (
 from .request import (
     COVERED_REQUEST_HEADERS,
     UNSIGNED_BY_CONVENTION,
+    enrollment_proof,
     headers_to_sign,
     new_request_nonce,
     request_signing_input,
@@ -53,7 +54,7 @@ from .keywrap import (
 )
 
 __all__ = [
-    "COVERED_REQUEST_HEADERS", "UNSIGNED_BY_CONVENTION", "headers_to_sign", "new_request_nonce",
+    "COVERED_REQUEST_HEADERS", "UNSIGNED_BY_CONVENTION", "enrollment_proof", "headers_to_sign", "new_request_nonce",
     "request_signing_input", "sign_request",
     "CONTENT_TYPES", "DEVICE_ID_RE", "EDGE_TRANSPORTS", "HANDLE_RE", "MAX_MESSAGE_BYTES", "MAX_SAFE_INTEGER",
     "PRIORITY_NAMES", "PROTECTED_FIELDS", "ROUTE_MODES", "SIG_DOMAIN", "TOPIC_RE", "TRANSPORTS", "ULID_RE",

@@ -202,7 +202,7 @@ pub fn sign_request(
     Ok(SignedRequestRecord { device_id: r.device_id, time: r.time, nonce: r.nonce, signed_headers: r.signed_headers, signature: r.signature })
 }
 
-/// Proof of key possession for `POST /v1/device/code`.
+/// Proof of key possession for `POST /v1/devices/dba`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct EnrollmentProofRecord {

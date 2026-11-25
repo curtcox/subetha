@@ -257,25 +257,37 @@ final class SubEthaTests: XCTestCase {
         XCTAssertThrowsError(try signer.signEnvelope("{}"))
     }
 
-    func testEnrollmentFlow() async throws {
-        let t = MockTransport { r, n in
-            if r.url!.path == "/v1/device/code" {
-                return .init(body: #"{"device_code":"dc","user_code":"BCDF-GHJK","verification_uri":"https://x/console/#device","verification_uri_complete":"https://x/console/#device=BCDF-GHJK","expires_in":600,"interval":0}"#)
+    func testDBADeviceAttachesKeyAndLinks() async throws {
+        struct FakeDBA: DBAHeaders {
+            func headers(method: String, url: URL) async throws -> [String: String] {
+                ["Authorization": "DBA cred", "DPoP": "proof:\(method):\(url.absoluteString)"]
             }
-            return n == 2 ? .init(status: 400, body: #"{"error":"authorization_pending"}"#) : .init(body: #"{"account_id":"acct_1"}"#)
+        }
+        let t = MockTransport { r, _ in
+            if r.url!.path == "/v1/devices/dba" { return .init(status: 201, body: #"{"id":"\#(deviceID)","enrolled":true,"dba_device":"dba:d1"}"#) }
+            if r.url!.path == "/v1/dba/link", r.httpMethod == "GET" { return .init(body: #"{"linked":true,"dba_account":"a1","linked_at":1,"issuer":"https://devicebasedauth.org","audience":"subetha.us"}"#) }
+            return .init(body: #"{"linked":false}"#)
         }
         let signer = try CryptoKitDeviceSigner(seed: Encoding.hexDecode(seedHex)!)
-        let c = SubEtha(baseURL: base, deviceSigner: signer, transport: t, clock: { 1763750000 })
-        let code = try await c.startEnrollment(name: "iPhone")
-        XCTAssertEqual(code.userCode, "BCDF-GHJK")
-        let body = bodyJSON(t.requests[0])
+        let c = SubEtha(baseURL: base, token: "se_ignored", deviceSigner: signer, dba: FakeDBA(), transport: t, clock: { 1763750000 })
+        let r = try await c.attachDeviceKey(name: "iPhone", capabilities: ["ws"])
+        XCTAssertEqual(r["dba_device"], .string("dba:d1"))
+        let req = t.requests[0]
+        XCTAssertEqual(req.value(forHTTPHeaderField: "Authorization"), "DBA cred")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "DPoP"), "proof:POST:https://x.test/v1/devices/dba")
+        XCTAssertNil(req.value(forHTTPHeaderField: "X-Device-Signature"))
+        let body = bodyJSON(req)
         XCTAssertEqual(body["device_id"], .string(deviceID))
         XCTAssertEqual(body["time"], 1763750000)
+        XCTAssertEqual(body["name"], .string("iPhone"))
         let proof = Encoding.base64urlDecode(body["proof"]!.stringValue!)!
         let pub = try Curve25519.Signing.PublicKey(rawRepresentation: signer.publicKey)
         XCTAssertTrue(pub.isValidSignature(proof, for: Data("subetha-enroll-v1\n\(deviceID)\n1763750000".utf8)))
-        let account = try await c.awaitEnrollment(code)
-        XCTAssertEqual(account, "acct_1")
+        let link = try await c.dbaLink()
+        XCTAssertEqual(link["dba_account"], .string("a1"))
+        _ = try await c.unlinkDba()
+        XCTAssertEqual(t.requests.last?.httpMethod, "DELETE")
+        XCTAssertEqual(t.requests.last?.url?.path, "/v1/dba/link")
     }
     #endif
 

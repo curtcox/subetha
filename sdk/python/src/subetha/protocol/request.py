@@ -112,3 +112,12 @@ def sign_request(
         "X-Device-Signed-Headers": ",".join(n for n, _ in signed),
         "X-Device-Signature": base64url_encode(sig),
     }
+
+
+def enrollment_proof(key: DeviceKey, time: int | None = None) -> dict[str, object]:
+    """Proof of key possession for ``POST /v1/devices/dba`` (attaching a signing key):
+    ``{"device_id", "time", "proof"}``, an Ed25519 signature over
+    ``"subetha-enroll-v1\n" + device_id + "\n" + time``."""
+    t = int(_time.time()) if time is None else time
+    sig = key.sign(f"subetha-enroll-v1\n{key.device_id}\n{t}".encode("utf-8"))
+    return {"device_id": key.device_id, "time": t, "proof": base64url_encode(sig)}

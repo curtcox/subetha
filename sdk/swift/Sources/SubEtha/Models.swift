@@ -152,14 +152,10 @@ public struct SubscribeOptions: Sendable {
     }
 }
 
-/// Device-code enrollment (RFC 8628-style), from `POST /v1/device/code`.
-public struct DeviceCode: Equatable, Sendable {
-    public let deviceCode: String
-    public let userCode: String
-    public let verificationURI: String
-    public let verificationURIComplete: String
-    public let expiresIn: Int64
-    public let interval: Int64
+/// A devicebasedauth.org device: the `Authorization: DBA …` and `DPoP` headers for one request,
+/// from devicebasedauth.org's iOS SDK (Secure Enclave) or anything that holds a DBA credential.
+public protocol DBAHeaders: Sendable {
+    func headers(method: String, url: URL) async throws -> [String: String]
 }
 
 /// An E2EE topic key (spec §5): 32 bytes plus its key id.

@@ -36,9 +36,14 @@ key = generate_device_key()           # or device_key_from_seed(seed32)
 c.publish("@alice/doorbell", "Opened", sign_with=key)
 ```
 
-An enrolled device can authenticate with signed requests instead of a token (spec §8.1):
+Devices enroll at [devicebasedauth.org](https://devicebasedauth.org) for the audience
+`subetha.us`. `dba=` is anything with `headers(method, url)` (or a callable) returning each
+request's `Authorization: DBA …` and `DPoP` headers, e.g. a wrapper around `dba headers METHOD URL`.
+Such a device can attach a signing key, then authenticate with signed requests (spec §8.1):
 
 ```python
+dev = Client(dba=my_dba_device)                        # publishes/subscribes within its grants
+Client(device_key=key, dba=my_dba_device).attach_device_key(name="garage-pi")
 device = Client(device_key=key, sign_requests=True)   # X-Device-* headers, no token
 ```
 
@@ -48,5 +53,5 @@ device = Client(device_key=key, sign_requests=True)   # X-Device-* headers, no t
 validation, device keys, Ed25519 sign/verify, device-signed requests (`sign_request`), XChaCha20-Poly1305 E2EE (`encrypt_envelope`,
 `decrypt_envelope`), wrapped topic keys (`wrap_topic_key`, `unwrap_topic_key`; spec §5.1), and the
 `Deduper`. The client's `share_topic_key`, `list_wrapped_keys`, and `load_topic_keys` hand topic keys
-to enrolled devices through the relay. Names mirror the TypeScript reference in
+to devices with attached keys through the relay. Names mirror the TypeScript reference in
 `sdk/js/src/protocol` in snake_case.

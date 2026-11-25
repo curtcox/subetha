@@ -133,7 +133,7 @@ class RequestSigning {
     };
   }
 
-  /// Proof of key possession for `POST /v1/device/code`.
+  /// Proof of key possession for `POST /v1/devices/dba`.
   static Future<({String deviceId, int time, String proof})> enrollmentProof(DeviceSigner signer, int time) async {
     final sig = await signer.sign(utf8.encode('subetha-enroll-v1\n${signer.deviceId}\n$time'));
     return (deviceId: signer.deviceId, time: time, proof: Encoding.base64url(sig));

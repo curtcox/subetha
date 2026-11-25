@@ -116,7 +116,7 @@ pub fn sign_request(
     Ok(SignedRequest { device_id: r.device_id, time: r.time, nonce: r.nonce, signed_headers: r.signed_headers, signature: r.signature })
 }
 
-/// Proof of key possession for `POST /v1/device/code`.
+/// Proof of key possession for `POST /v1/devices/dba`.
 pub struct EnrollmentProof {
     pub device_id: String,
     pub time: u64,

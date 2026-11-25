@@ -6,7 +6,7 @@
 
 | Product | What | Native code |
 |---|---|---|
-| `SubEtha` | async/await client: publish, dry-run estimates, poll, subscribe (`AsyncThrowingStream` or handler) with reconnect from the last id, dedupe and acks; device-signed requests and enrollment; `SubEthaError` | none (URLSession, CryptoKit) |
+| `SubEtha` | async/await client: publish, dry-run estimates, poll, subscribe (`AsyncThrowingStream` or handler) with reconnect from the last id, dedupe and acks; devicebasedauth.org devices (`dba:`), attached signing keys and device-signed requests; `SubEthaError` | none (URLSession, CryptoKit) |
 | `SubEthaCore` | Rust core through UniFFI: `CoreDeviceSigner` (requests + envelope signatures), `CoreEnvelopeCrypto` (verify, E2EE), canonical JSON, validation | `subetha_coreFFI.xcframework` |
 
 ```swift
@@ -30,12 +30,14 @@ the `for try await` loop) closes the connection.
 
 ### Device keys
 
+Devices enroll at [devicebasedauth.org](https://devicebasedauth.org) for the audience
+`subetha.us` (its iOS SDK keeps the key in the Secure Enclave). Pass anything conforming to
+`DBAHeaders` (the `Authorization: DBA …` and `DPoP` headers for each request) as `dba:`:
+
 ```swift
+let client = SubEtha(dba: myDBADevice)                // publishes and subscribes within its grants
 let signer = CryptoKitDeviceSigner.generate()       // or SubEthaCore.CoreDeviceSigner.generate()
-let client = SubEtha(deviceSigner: signer)
-let code = try await client.startEnrollment(name: UIDevice.current.name)
-// show code.userCode, or open code.verificationURIComplete
-_ = try await client.awaitEnrollment(code)
+try await SubEtha(deviceSigner: signer, dba: myDBADevice).attachDeviceKey(name: UIDevice.current.name)
 let device = SubEtha(deviceSigner: signer, signRequests: true) // X-Device-* headers, no token
 ```
 

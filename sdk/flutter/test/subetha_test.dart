@@ -257,20 +257,26 @@ void main() {
     expect(await Ed25519DeviceSigner.verify(utf8.encode(input), Encoding.base64urlDecode(h['X-Device-Signature']!), signer.publicKey), isTrue);
   });
 
-  test('enrollment flow', () async {
-    final relay = Relay((r, n) {
-      if (r.request.url.path == '/v1/device/code') {
-        return Relay.json(
-            '{"device_code":"dc","user_code":"BCDF-GHJK","verification_uri":"https://x/console/#device","verification_uri_complete":"https://x/console/#device=BCDF-GHJK","expires_in":600,"interval":0}');
+  test('DBA device attaches a signing key and manages the link', () async {
+    final relay = Relay((r, _) {
+      if (r.request.url.path == '/v1/devices/dba') return Relay.json('{"id":"$deviceId","enrolled":true,"dba_device":"dba:d1"}', status: 201);
+      if (r.request.method == 'GET') {
+        return Relay.json('{"linked":true,"dba_account":"a1","linked_at":1,"issuer":"https://devicebasedauth.org","audience":"subetha.us"}');
       }
-      return n == 2 ? Relay.json('{"error":"authorization_pending"}', status: 400) : Relay.json('{"account_id":"acct_1"}');
+      return Relay.json('{"linked":false}');
     });
     final signer = await Ed25519DeviceSigner.fromSeed(Encoding.hexDecode(seedHex));
-    final c = SubEtha(deviceSigner: signer, httpClient: relay.client, clock: () => 1763750000);
-    final code = await c.startEnrollment(name: 'Pixel');
-    expect(code.userCode, 'BCDF-GHJK');
+    final c = SubEtha(token: 'se_ignored', deviceSigner: signer, dba: _FakeDba(), httpClient: relay.client, clock: () => 1763750000);
+    expect((await c.attachDeviceKey(name: 'Pixel'))['dba_device'], 'dba:d1');
+    final h = relay.requests[0].request.headers;
+    expect(h['Authorization'], 'DBA cred');
+    expect(h['DPoP'], 'proof:POST:https://subetha.us/v1/devices/dba');
     expect(relay.requests[0].json, {'device_id': deviceId, 'time': 1763750000, 'proof': enrollSig, 'name': 'Pixel'});
-    expect(await c.awaitEnrollment(code), 'acct_1');
+    expect((await c.dbaLink())['dba_account'], 'a1');
+    await c.unlinkDba();
+    expect(relay.requests.last.request.method, 'DELETE');
+    expect(relay.requests.last.request.url.path, '/v1/dba/link');
+    expect(() => SubEtha(deviceSigner: signer, signRequests: true, dba: _FakeDba()), throwsArgumentError);
   });
 
   test('encoding, ULID and topic paths', () {
@@ -341,4 +347,9 @@ void main() {
     expect(relay.requests.last.request.method, 'DELETE');
     expect(relay.requests.last.pathAndQuery, '/v1/keys?topic=%40a%2Fb&kid=k1');
   });
+}
+
+class _FakeDba implements DbaHeaders {
+  @override
+  Future<Map<String, String>> headers(String method, Uri url) async => {'Authorization': 'DBA cred', 'DPoP': 'proof:$method:$url'};
 }

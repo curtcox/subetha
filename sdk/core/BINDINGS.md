@@ -33,7 +33,7 @@ without custom type mapping. Envelopes cross the boundary as JSON text.
 | `new_request_nonce() -> String` | base64url(16 random bytes), for `X-Device-Nonce` |
 | `request_signing_input(method, host, path_and_query, body, signed_headers) -> String` | `subetha-req-v2\nMETHOD\nhost\npath?query\nhex(sha256(body))` + `\nname:value` per signed header (spec §8.1) |
 | `sign_request(seed, method, host, path_and_query, time, nonce?, body, headers) -> SignedRequestRecord` | `device_id`, `time`, `nonce`, `signed_headers`, `signature` for the `X-Device-*` headers. `headers` are the ones the request carries (content and routing headers must be signed). `None` draws a nonce |
-| `enrollment_proof(seed, time) -> EnrollmentProofRecord` | Proof for `POST /v1/device/code` |
+| `enrollment_proof(seed, time) -> EnrollmentProofRecord` | Proof for `POST /v1/devices/dba` |
 
 ### Edge transports (`src/ffi_edge.rs`)
 

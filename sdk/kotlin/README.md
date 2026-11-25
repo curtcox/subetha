@@ -4,7 +4,7 @@ Two artifacts:
 
 | Artifact | What | Native code |
 |---|---|---|
-| `us.subetha:subetha` | Client: publish, dry-run estimates, poll, subscribe (Flow or callback) with reconnect from the last id, dedupe and acks; device-signed requests and enrollment; `SubEthaException` | none (`HttpURLConnection`, kotlinx-coroutines, kotlinx-serialization-json) |
+| `us.subetha:subetha` | Client: publish, dry-run estimates, poll, subscribe (Flow or callback) with reconnect from the last id, dedupe and acks; devicebasedauth.org devices (`dba =`), attached signing keys and device-signed requests; `SubEthaException` | none (`HttpURLConnection`, kotlinx-coroutines, kotlinx-serialization-json) |
 | `us.subetha:subetha-core` | UniFFI bindings to the Rust core (`sdk/core`): `CoreDeviceSigner` (requests + envelope signatures), `CoreEnvelopeCrypto` (verify, E2EE) | `libsubetha_core` via JNA |
 
 ```kotlin
@@ -42,10 +42,11 @@ sub.close();
 ### Device keys
 
 ```kotlin
+// Enrolled at devicebasedauth.org for audience subetha.us (its Android SDK keeps the key in the Keystore).
+// myDbaDevice implements DbaHeaders: the Authorization: DBA … and DPoP headers for each request.
+val client = SubEtha(dba = myDbaDevice)            // publishes and subscribes within its grants
 val signer = CoreDeviceSigner.generate()          // or JdkDeviceSigner on a Java 15+ JVM
-val client = SubEtha(deviceSigner = signer)
-val code = client.startEnrollment(name = "Pixel 9") // show code.userCode / open code.verificationUriComplete
-client.awaitEnrollment(code)                        // after the user approves in the console
+SubEtha(deviceSigner = signer, dba = myDbaDevice).attachDeviceKey(name = "Pixel 9")
 
 val device = SubEtha(deviceSigner = signer, signRequests = true) // X-Device-* headers (spec §8.1), no token
 ```

@@ -23,8 +23,13 @@ class SubEtha {
   final String? token;
   final DeviceSigner? deviceSigner;
 
-  /// Authenticate with the device signature instead of the bearer token (enrolled devices).
+  /// Authenticate with the device signature instead of the bearer token (a signing key
+  /// attached with [attachDeviceKey]).
   final bool signRequests;
+
+  /// Authenticate every request as a devicebasedauth.org device (its Authorization and DPoP
+  /// headers). Not with [signRequests].
+  final DbaHeaders? dba;
 
   /// Signature checks and E2EE, from the Rust core binding.
   final EnvelopeCrypto? crypto;
@@ -40,6 +45,7 @@ class SubEtha {
     this.token,
     this.deviceSigner,
     this.signRequests = false,
+    this.dba,
     this.crypto,
     Map<String, TopicKey> topicKeys = const {},
     http.Client? httpClient,
@@ -50,6 +56,7 @@ class SubEtha {
         _ownsHttp = httpClient == null,
         clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch ~/ 1000) {
     if (signRequests && deviceSigner == null) throw ArgumentError('signRequests needs a deviceSigner');
+    if (signRequests && dba != null) throw ArgumentError('use either signRequests or dba, not both');
     if (this.topicKeys.isNotEmpty && crypto == null) throw ArgumentError('topicKeys need an EnvelopeCrypto (core binding)');
   }
 
@@ -72,7 +79,10 @@ class SubEtha {
 
   Future<Map<String, String>> _headers(String method, Uri url, List<int>? body, [Map<String, String> extra = const {}]) async {
     final h = <String, String>{'User-Agent': 'subetha-dart/$version', 'Accept': 'application/json', ...extra};
-    if (signRequests) {
+    final dba = this.dba;
+    if (dba != null) {
+      h.addAll(await dba.headers(method, url));
+    } else if (signRequests) {
       h.addAll(await RequestSigning.headers(deviceSigner!, method, url, body ?? const [], clock(), headers: Map.of(h)));
     } else if (token != null) {
       h['Authorization'] = 'Bearer $token';
@@ -418,41 +428,32 @@ class SubEtha {
 
   // ---------------------------------------------------------------- devices
 
-  /// Step 1 of device enrollment: registers this device's key and returns a code the user
-  /// approves in the console ([DeviceCode.verificationUriComplete]).
-  Future<DeviceCode> startEnrollment({String? name, List<String> capabilities = const []}) async {
+  /// As a devicebasedauth.org device (the [dba] option), attaches this client's Ed25519 signing
+  /// key ([deviceSigner]): topic keys can then be sealed to it, and it can sign requests and
+  /// messages. The DBA device needs grants for `subetha:publish` and `subetha:subscribe` on every
+  /// topic.
+  Future<Map<String, dynamic>> attachDeviceKey({String? name, List<String> capabilities = const []}) async {
     final signer = deviceSigner;
-    if (signer == null) throw StateError('enrollment needs a deviceSigner');
+    if (signer == null) throw StateError('attachDeviceKey needs a deviceSigner');
     final p = await RequestSigning.enrollmentProof(signer, clock());
-    final r = await _requestObject('POST', '/v1/device/code', body: {
+    return _requestObject('POST', '/v1/devices/dba', body: {
       'device_id': p.deviceId,
       'time': p.time,
       'proof': p.proof,
       if (name != null) 'name': name,
       if (capabilities.isNotEmpty) 'capabilities': capabilities,
     });
-    return DeviceCode(
-      deviceCode: '${r['device_code'] ?? ''}',
-      userCode: '${r['user_code'] ?? ''}',
-      verificationUri: '${r['verification_uri'] ?? ''}',
-      verificationUriComplete: '${r['verification_uri_complete'] ?? ''}',
-      expiresIn: (r['expires_in'] as num?)?.toInt() ?? 0,
-      interval: (r['interval'] as num?)?.toInt() ?? 5,
-    );
   }
 
-  /// Step 2: polls until the user approves (returns the account id) or the code expires (throws).
-  Future<String> awaitEnrollment(DeviceCode code) async {
-    while (true) {
-      try {
-        final r = await _requestObject('POST', '/v1/device/token', body: {'device_code': code.deviceCode});
-        return '${r['account_id'] ?? ''}';
-      } on SubEthaException catch (e) {
-        if (e.code != 'authorization_pending') rethrow;
-      }
-      await Future<void>.delayed(Duration(seconds: code.interval < 1 ? 1 : code.interval));
-    }
-  }
+  /// The account's devicebasedauth.org link: `linked`, `dba_account`, `issuer`, `audience`.
+  Future<Map<String, dynamic>> dbaLink() => _requestObject('GET', '/v1/dba/link');
+
+  /// Starts linking (signed-in console sessions): open `url`; devicebasedauth.org returns to
+  /// /auth/dba/callback.
+  Future<Map<String, dynamic>> startDbaLink() => _requestObject('POST', '/v1/dba/link/start', body: <String, dynamic>{});
+  Future<Map<String, dynamic>> finishDbaLink(String code, String state) =>
+      _requestObject('POST', '/v1/dba/link/finish', body: {'code': code, 'state': state});
+  Future<Map<String, dynamic>> unlinkDba() => _requestObject('DELETE', '/v1/dba/link');
 
   // ---------------------------------------------------------------- control plane
 

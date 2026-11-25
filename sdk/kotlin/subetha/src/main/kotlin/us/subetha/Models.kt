@@ -125,15 +125,13 @@ public data class SubscribeOptions(
     val onError: ((Throwable) -> Unit)? = null,
 )
 
-/** Device-code enrollment (RFC 8628-style), from `POST /v1/device/code`. */
-public data class DeviceCode(
-    val deviceCode: String,
-    val userCode: String,
-    val verificationUri: String,
-    val verificationUriComplete: String,
-    val expiresInS: Long,
-    val intervalS: Long,
-)
+/**
+ * A devicebasedauth.org device: the `Authorization: DBA …` and `DPoP` headers for one request,
+ * from devicebasedauth.org's Android SDK (Keystore) or anything that holds a DBA credential.
+ */
+public interface DbaHeaders {
+    public suspend fun headers(method: String, url: String): Map<String, String>
+}
 
 /** A running callback subscription. */
 public interface Subscription {

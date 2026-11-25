@@ -34,10 +34,11 @@ verify; together they let a gateway forward messages (`EdgeBridge` in `subetha_c
 ### Device keys
 
 ```dart
+// Enrolled at devicebasedauth.org for audience subetha.us; myDbaDevice implements DbaHeaders
+// (the Authorization: DBA … and DPoP headers for each request).
+final client = SubEtha(dba: myDbaDevice);               // publishes and subscribes within its grants
 final signer = await Ed25519DeviceSigner.generate();   // persist signer.seed in secure storage
-final client = SubEtha(deviceSigner: signer);
-final code = await client.startEnrollment(name: 'Pixel 9'); // show code.userCode
-await client.awaitEnrollment(code);                         // after approval in the console
+await SubEtha(deviceSigner: signer, dba: myDbaDevice).attachDeviceKey(name: 'Pixel 9');
 final device = SubEtha(deviceSigner: signer, signRequests: true); // X-Device-* headers (spec §8.1)
 ```
 
@@ -52,7 +53,7 @@ cd sdk/flutter && dart pub get && dart test
 
 The tests use `package:http/testing.dart`'s `MockClient.streaming` as a mock relay (publish,
 estimate, errors, poll, stream subscribe with dedupe/resume/acks, retry and terminal errors, poll
-transport, request signing, enrollment).
+transport, request signing, devicebasedauth.org devices).
 
 ## Core and edge features: `subetha_core`
 
@@ -63,4 +64,4 @@ defines the seams: `DeviceSigner.signEnvelope` and `EnvelopeCrypto` (`verify` / 
 
 The [`subetha_core`](../flutter_core) Flutter plugin supplies them through flutter_rust_bridge:
 `CoreDeviceSigner`, `CoreEnvelopeCrypto`, and the edge drivers. Everything else (publish,
-estimate, subscribe, acks, device-signed requests and enrollment) works here without it.
+estimate, subscribe, acks, devicebasedauth.org devices and device-signed requests) works here without it.

@@ -153,7 +153,7 @@ public fun signRequest(
     )
 }
 
-/** Proof of key possession for `POST /v1/device/code`. */
+/** Proof of key possession for `POST /v1/devices/dba`. */
 public data class EnrollmentProof(val deviceId: String, val time: Long, val proof: String)
 
 public fun enrollmentProof(signer: DeviceSigner, timeSec: Long): EnrollmentProof {

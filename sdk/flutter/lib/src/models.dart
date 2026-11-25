@@ -172,23 +172,10 @@ class SubscribeOptions {
   });
 }
 
-/// Device-code enrollment (RFC 8628-style), from `POST /v1/device/code`.
-class DeviceCode {
-  final String deviceCode;
-  final String userCode;
-  final String verificationUri;
-  final String verificationUriComplete;
-  final int expiresIn;
-  final int interval;
-
-  const DeviceCode({
-    required this.deviceCode,
-    required this.userCode,
-    required this.verificationUri,
-    required this.verificationUriComplete,
-    required this.expiresIn,
-    required this.interval,
-  });
+/// A devicebasedauth.org device: the `Authorization: DBA …` and `DPoP` headers for one request,
+/// from devicebasedauth.org's mobile SDKs or anything that holds a DBA credential.
+abstract interface class DbaHeaders {
+  Future<Map<String, String>> headers(String method, Uri url);
 }
 
 /// An E2EE topic key (spec §5).

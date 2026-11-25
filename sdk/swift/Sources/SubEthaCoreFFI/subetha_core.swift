@@ -2131,7 +2131,7 @@ public func FfiConverterTypeEdgeQrProgress_lower(_ value: EdgeQrProgress) -> Rus
 
 
 /**
- * Proof of key possession for `POST /v1/device/code`.
+ * Proof of key possession for `POST /v1/devices/dba`.
  */
 public struct EnrollmentProofRecord {
     public var deviceId: String

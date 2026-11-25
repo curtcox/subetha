@@ -4146,7 +4146,7 @@ public object FfiConverterTypeEdgeQrProgress: FfiConverterRustBuffer<EdgeQrProgr
 
 
 /**
- * Proof of key possession for `POST /v1/device/code`.
+ * Proof of key possession for `POST /v1/devices/dba`.
  */
 data class EnrollmentProofRecord (
     var `deviceId`: kotlin.String, 

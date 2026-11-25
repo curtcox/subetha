@@ -124,7 +124,7 @@ public enum RequestSigning {
                 "X-Device-Signature": Encoding.base64url(sig)]
     }
 
-    /// Proof of key possession for `POST /v1/device/code`.
+    /// Proof of key possession for `POST /v1/devices/dba`.
     public static func enrollmentProof(signer: DeviceSigner, time: Int64) throws -> (deviceId: String, time: Int64, proof: String) {
         let sig = try signer.sign(Data("subetha-enroll-v1\n\(signer.deviceId)\n\(time)".utf8))
         return (signer.deviceId, time, Encoding.base64url(sig))
