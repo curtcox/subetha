@@ -19,8 +19,10 @@ describe("rate limits", () => {
   });
 
   it("still limits anonymous API calls and subscriptions", async () => {
+    // The limiter counts in fixed one-minute windows, so 70 requests that straddle a window
+    // boundary can stay under 60 in each. 130 puts more than 60 in one window whatever the split.
     const statuses: number[] = [];
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < 130; i++) {
       const r = await SELF.fetch(`${BASE}/v1/prices`, { headers: from("203.0.113.11") });
       statuses.push(r.status);
       await r.body?.cancel();
