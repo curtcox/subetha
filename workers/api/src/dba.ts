@@ -171,22 +171,26 @@ export async function attachedCredentialRevoked(env: Env, uri: string, idx: numb
   return siteAuth(env).verifier.isRevoked({ status: { status_list: { uri, idx } } });
 }
 
-function oidcClient(env: Env) {
+export function oidcClient(env: Env) {
   return createOidcClient({ clientId: DBA_AUDIENCE, redirectUri: `${env.BASE_URL}/auth/dba/callback`, issuer: dbaIssuer(env), fetch: dbaFetch(env) });
 }
 
-async function dropLinkCache(env: Env, dbaAccount: string) {
+export async function dropLinkCache(env: Env, dbaAccount: string) {
   await env.CACHE.delete(`dba-link:${dbaAccount}`);
 }
 
 export function registerDbaRoutes(app: Hono<Vars>, principal: PrincipalFn) {
   // devicebasedauth.org redirects here after the owner approves; the code moves into the fragment
   // (never sent to a server again) and the signed-in console finishes the link.
-  app.get("/auth/dba/callback", (c) => {
+  // The state says which flow it was: signing in (dba-signin.ts) or linking a signed-in account.
+  app.get("/auth/dba/callback", async (c) => {
     const u = new URL(c.req.url);
     const keep = new URLSearchParams();
     for (const k of ["code", "state", "error", "error_description"]) { const v = u.searchParams.get(k); if (v !== null) keep.set(k, v); }
-    return new Response(null, { status: 302, headers: { location: `/console/#dba-callback=1&${keep.toString()}`, "cache-control": "no-store", "referrer-policy": "no-referrer" } });
+    const state = u.searchParams.get("state");
+    const signin = state ? await c.env.DB.prepare("SELECT 1 AS x FROM dba_signin_states WHERE state = ?").bind(state).first() : null;
+    const flow = signin ? "dba-signin" : "dba-callback";
+    return new Response(null, { status: 302, headers: { location: `/console/#${flow}=1&${keep.toString()}`, "cache-control": "no-store", "referrer-policy": "no-referrer" } });
   });
 
   app.get("/v1/dba/link", async (c) => {

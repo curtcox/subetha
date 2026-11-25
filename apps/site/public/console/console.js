@@ -80,8 +80,35 @@ async function init() {
       await clerk.load();
     }
   }
+  const hash = new URLSearchParams(location.hash.slice(1));
+  if (hash.has("dba-signin")) await finishDbaSignin(hash);
   await refresh();
 }
+
+// ---------- Sign in with devicebasedauth.org ----------
+// The session is an admin API token that expires in 30 days. The state is kept in this tab, so a
+// link carrying someone else's code and state can't sign this browser in to their account.
+const DBA_SIGNIN_STATE = "subetha.dbaSigninState";
+function session(k, v) { try { v === undefined ? null : v === null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); return sessionStorage.getItem(k); } catch { return null; } }
+async function finishDbaSignin(hash) {
+  history.replaceState(null, "", location.pathname);
+  const say = (t) => { $("dbaSigninMsg").textContent = t; };
+  const expected = session(DBA_SIGNIN_STATE);
+  session(DBA_SIGNIN_STATE, null);
+  if (!expected || expected !== hash.get("state")) { say("That sign-in didn't start in this tab. Sign in again."); return; }
+  const body = hash.get("error") ? { state: hash.get("state"), error: hash.get("error") } : { state: hash.get("state"), code: hash.get("code") };
+  const r = await fetch("/v1/dba/signin/finish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { say(`${j.error ?? "error"}: ${j.message ?? r.status}`); return; }
+  store("subetha.token", j.token);
+}
+$("dbaSignin").onclick = async () => {
+  const r = await fetch("/v1/dba/signin/start", { method: "POST" });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $("dbaSigninMsg").textContent = `${j.error ?? "error"}: ${j.message ?? r.status}`; return; }
+  session(DBA_SIGNIN_STATE, new URL(j.url).searchParams.get("state"));
+  location.assign(j.url);
+};
 
 async function refresh() {
   client = await makeClient();
@@ -98,7 +125,8 @@ async function refresh() {
     if (e.code === "unauthorized") { store("subetha.token", null); return refresh(); }
     throw e;
   }
-  $("create").hidden = true;
+  // Accounts made by signing in with devicebasedauth.org start without a handle.
+  $("create").hidden = !!me.handle;
   $("app").hidden = false;
   $("who").textContent = me.handle ? `@${me.handle}` : me.id;
   showBalance(me);
@@ -121,7 +149,8 @@ function showBalance(a) {
 $("tokenBtn").onclick = () => { store("subetha.token", $("tokenInput").value.trim()); refresh(); };
 $("signout").onclick = async () => { store("subetha.token", null); if (clerk) await clerk.signOut(); location.reload(); };
 $("createBtn").onclick = async () => {
-  await client.request("POST", "/v1/account", { handle: $("handleInput").value.trim() || undefined }).catch((e) => alert(e.message));
+  const handle = $("handleInput").value.trim() || undefined;
+  await (me ? client.request("PATCH", "/v1/account", { handle }) : client.request("POST", "/v1/account", { handle })).catch((e) => alert(e.message));
   refresh();
 };
 

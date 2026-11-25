@@ -22,6 +22,7 @@ import { mcpInternalSecret, mcpChallenge, registerMcp, takeMcpPrincipal } from "
 import { registerPaymentRoutes } from "./payments.ts";
 import { registerKeyRoutes } from "./keys.ts";
 import { registerDbaRoutes, requireDbaGrant } from "./dba.ts";
+import { registerDbaSigninRoutes } from "./dba-signin.ts";
 import { USAGE_LABELS } from "./usage.ts";
 import { checkTelephonyCircuit, tripAccountTelephonyCircuit } from "./cron.ts";
 import { emitMetric } from "./telemetry.ts";
@@ -652,6 +653,7 @@ registerControlRoutes(app, principal);
 registerPaymentRoutes(app, principal);
 registerKeyRoutes(app, principal);
 registerDbaRoutes(app, principal);
+registerDbaSigninRoutes(app, principal);
 registerMcp(app);
 
 // ---------------- local development ----------------

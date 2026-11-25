@@ -54,15 +54,10 @@ instance, a separate Firebase project) for staging.
 | `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` | Optional. Credentials the relay uses to introspect **opaque** OAuth access tokens (RFC 7662) from MCP clients. Create them for the relay in Clerk (Configure → OAuth applications). Without them, only JWT access tokens are accepted. |
 | `OAUTH_INTROSPECTION_URL` | Optional. Defaults to `<CLERK_ISSUER>/oauth/token_info`. |
 
-**Sign in with devicebasedauth.org (optional).** Add devicebasedauth.org as a custom OpenID
-Connect provider in subetha's Clerk application (Clerk dashboard → SSO connections → custom
-provider): discovery URL `https://devicebasedauth.org/.well-known/openid-configuration`, client ID
-`subetha.us`, no client secret (public client, PKCE S256), scopes `openid profile`. The redirect URI
-Clerk shows must be `https://clerk.subetha.us/v1/oauth_callback`, which devicebasedauth.org
-already allows for `subetha.us`; if Clerk's frontend API is on another host, add that callback to
-the `subetha.us` entry in device-based-auth `src/services/first-party.js`. This is only for
-people signing in; devices need no Clerk setup (they link with **Devices → Link
-devicebasedauth.org**, whose callback `https://subetha.us/auth/dba/callback` is allowed too).
+**Clerk is optional.** The console signs people in with devicebasedauth.org directly
+(`/v1/dba/signin/*`, through the callback `https://<host>/auth/dba/callback` that devicebasedauth.org
+allows for `subetha.us`), and that needs no secrets. Set the Clerk secrets only to offer Clerk
+sign-in as well. Production `subetha.us` runs without Clerk.
 
 For "Sign in with OAuth" in MCP clients, also enable dynamic client registration for OAuth
 applications in the Clerk dashboard, so clients can register themselves.

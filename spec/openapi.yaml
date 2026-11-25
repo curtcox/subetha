@@ -1707,12 +1707,72 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /v1/dba/signin/start:
+    post:
+      tags: [account]
+      operationId: startDbaSignin
+      summary: Start signing in with devicebasedauth.org
+      description: >-
+        Returns the devicebasedauth.org authorization URL (OpenID Connect, PKCE S256) to send the
+        browser to. It comes back through `/auth/dba/callback`. Keep the URL's `state` and finish
+        only a sign-in that this browser started.
+      security: []
+      responses:
+        "200":
+          description: Where to send the browser.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, format: uri }
+                  expires_in: { type: integer, description: Seconds this attempt stays valid. }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/dba/signin/finish:
+    post:
+      tags: [account]
+      operationId: finishDbaSignin
+      summary: Finish signing in with devicebasedauth.org
+      description: >-
+        Single use. Signs in to the subetha account that the devicebasedauth.org account is linked
+        to. A devicebasedauth.org account seen for the first time gets a new linked account with
+        no handle; set one with `PATCH /v1/account`. Returns an API token with the `admin` scope
+        that expires in 30 days. It is listed under tokens and can be revoked there.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                code: { type: string }
+                state: { type: string }
+                error: { type: string, description: The callback's error, when sign-in was not completed. }
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  expires_at: { type: integer, description: Unix milliseconds. }
+                  account_id: { type: string }
+                  dba_account: { type: string }
+                  created: { type: boolean, description: True when this sign-in created the account. }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /auth/dba/callback:
     get:
       tags: [devices]
       operationId: dbaCallback
       summary: devicebasedauth.org sign-in returns here
-      description: Redirects to the console with `code` and `state` in the URL fragment, which the console posts to `/v1/dba/link/finish`.
+      description: Redirects to the console with `code` and `state` in the URL fragment. The console posts them to `/v1/dba/signin/finish` when the state belongs to a sign-in, and otherwise to `/v1/dba/link/finish`.
       security: []
       parameters:
         - { name: code, in: query, schema: { type: string } }
