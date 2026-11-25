@@ -4,8 +4,9 @@ You need an account with a little credit, and a token. Then publishing is one HT
 
 ## 1. Get a token
 
-1. Sign in at [subetha.us/console](https://subetha.us/console/) and pick a **handle**. Your
-   topics live under `@handle/…`.
+1. Sign in at [subetha.us/console](https://subetha.us/console/) with
+   [devicebasedauth.org](https://devicebasedauth.org) and pick a **handle**. Your topics live
+   under `@handle/…`.
 2. Top up your balance (minimum $5). See [Pricing & billing](pricing.md).
 3. Create a token under **Tokens**. For scripts, scope it narrowly and give it a daily cap (see
    [Tokens & policies](tokens.md)).
@@ -47,7 +48,7 @@ encryption. It runs in browsers, Node 18+, Deno, Bun, and Workers.
 
 <!-- include: samples/ts/subscribe.ts#snippet -->
 
-There are also a [Python SDK, a Rust core, a CLI, and drop-in web components](sdks.md).
+There are also [Python, Swift, Kotlin, Dart, and React Native SDKs, a Rust core, a CLI, and drop-in web components](sdks.md).
 
 ## Built-in tools
 

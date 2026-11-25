@@ -179,7 +179,7 @@ for everyone:
   unverifies the number for SMS and voice on every account. `HELP` gets the help message. Replying
   `ACK <message id>` acknowledges a message; pressing 1 on a call does the same.
 - **New-funds hold.** Until your first top-up is 7 days old, total SMS and voice spend is capped
-  at $5 (PLAN §8: chargeback and SMS-pumping protection).
+  at $5 (protection against chargebacks and SMS pumping).
 - **Circuit breaker.** If Twilio's US prices rise above what SubEtha's prices assume, SMS and
   voice pause (`GET /v1/status` shows `telephony_circuit`) until prices are regenerated.
 - SMS bodies are cut to 459 characters (3 segments) and billed per segment; calls are billed per

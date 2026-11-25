@@ -15,24 +15,28 @@ in test mode), `http://localhost:8787` (`wrangler dev`).
 |---|---|
 | Publish (ntfy) | `PUT`/`POST /{topic}`, `POST /` (JSON), `GET /file/{id}/{name}` (attachments) |
 | Subscribe (ntfy) | `GET /{topics}/json`, `/sse`, `/raw`, `/ws`, `/auth`; `?poll=1`, `since`, `priority`, `tags` |
-| Meta | `GET /v1/health`, `/v1/status`, `/v1/prices`, `/v1/config` |
-| Account & billing | `GET`/`POST`/`PATCH /v1/account`, `GET /v1/balance`, `GET /v1/ledger`, `GET /v1/payments`, `GET /v1/payments/{id}/receipt`, `POST /v1/billing/checkout` |
+| Meta | `GET /v1/health`, `/v1/status`, `/v1/prices`, `/v1/prices/destinations`, `/v1/config` |
+| Sign-in | `POST /v1/dba/signin/start`, `/v1/dba/signin/finish`, `GET /auth/dba/callback` (devicebasedauth.org) |
+| Account & billing | `GET`/`POST`/`PATCH /v1/account`, `GET /v1/balance`, `/v1/ledger`, `/v1/usage`, `/v1/audit`, `/v1/payments`, `/v1/payments/{id}/receipt`, `POST /v1/billing/checkout` |
 | Tokens | `GET`/`POST /v1/tokens`, `DELETE /v1/tokens/{id}` |
-| Topics | `GET /v1/topics`, `GET`/`PUT /v1/topics/{topic}` |
+| Topics | `GET /v1/topics`, `GET`/`PUT`/`DELETE /v1/topics/{topic}` |
 | Traces & acks | `GET /v1/traces/{id}?topic=`, `POST /v1/ack` |
-| Endpoints | `GET`/`POST /v1/endpoints`, `POST /v1/endpoints/{id}/verify`, `DELETE /v1/endpoints/{id}` |
-| Subscriptions | `GET`/`POST /v1/subscriptions`, `DELETE /v1/subscriptions/{id}` |
-| Slack | `GET /v1/slack/install`, `GET /v1/slack/oauth`, `POST /v1/slack/bindings` |
-| Devices | `GET /v1/devices`, `PATCH`/`DELETE /v1/devices/{id}`, `POST /v1/devices/dba` (attach a signing key), `GET`/`DELETE /v1/dba/link`, `POST /v1/dba/link/start`, `/v1/dba/link/finish` (devicebasedauth.org). Retired (410): `POST /v1/devices`, `/v1/device/code`, `/approve`, `/token` |
-| Agents | `POST /mcp`, `GET /.well-known/oauth-protected-resource` |
-| Provider hooks | `POST /v1/hooks/stripe`, `/v1/hooks/twilio/sms`, `/v1/hooks/twilio/voice-ack`, `/v1/hooks/slack/events` |
+| Endpoints | `GET`/`POST /v1/endpoints`, `PATCH`/`DELETE /v1/endpoints/{id}`, `POST /v1/endpoints/{id}/verify`, `/v1/endpoints/{id}/test` |
+| Subscriptions | `GET`/`POST /v1/subscriptions`, `PATCH`/`DELETE /v1/subscriptions/{id}` |
+| Push credentials | `GET`/`POST /v1/push/credentials`, `PATCH`/`DELETE /v1/push/credentials/{id}` (your own APNs/FCM keys) |
+| Topic keys (E2EE) | `GET`/`PUT`/`DELETE /v1/keys` (wrapped topic keys) |
+| Slack | `GET /v1/slack/install`, `/v1/slack/oauth`, `/v1/slack/teams`, `GET`/`POST`/`DELETE /v1/slack/bindings` |
+| Devices | `GET /v1/devices`, `PATCH`/`DELETE /v1/devices/{id}`, `POST /v1/devices/dba` (attach a signing key), `GET`/`DELETE /v1/dba/link`, `POST /v1/dba/link/start`, `/v1/dba/link/finish` |
+| Agents | `GET`/`POST /mcp`, `GET /.well-known/oauth-protected-resource` (and `…/mcp`) |
+| Provider hooks | `POST /v1/hooks/stripe`, `/v1/hooks/clerk`, `/v1/hooks/slack/events`, `/v1/hooks/twilio/sms`, `/whatsapp`, `/voice-ack`, `/voice-status` |
 | Local only | `POST /v1/dev/bootstrap` |
 
 ## Conventions
 
 - **Auth:** `Authorization: Bearer <token>`; HTTP Basic with an empty user and the token as the
-  password; `?auth=<base64url("Bearer <token>")>`; or device request signatures
-  ([Devices](devices.md#signed-requests)).
+  password; `?auth=<base64url("Bearer <token>")>`; a devicebasedauth.org device credential
+  (`Authorization: DBA …` + `DPoP`); or device request signatures
+  ([Credentials](tokens.md#credentials), [Devices](devices.md)).
 - **Money** is integer micro-dollars in responses (`*_usd_micros`); request fields that take
   dollars are named `*_usd`.
 - **Times** are Unix seconds in messages and milliseconds in control-plane records

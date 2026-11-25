@@ -6,7 +6,7 @@ relay_url = "https://subetha.us"
 
 # API token used to publish and subscribe. Prefer the environment variable named by
 # token_env (default SUBETHA_TOKEN) over writing the token here.
-# token = "tk_..."
+# token = "se_..."
 token_env = "SUBETHA_TOKEN"
 
 # Where LXMF identities (one per topic), LXMF router storage, and subscriber state live.

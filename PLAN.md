@@ -41,8 +41,8 @@ Guiding principles:
 |---|---|---|
 | Hosting | Cloudflare | Cloudflare (Workers, Durable Objects, D1, R2, Queues, KV, Email Routing, Containers) |
 | Payments | Stripe, prepaid account balance, no subscription | Same |
-| Human auth | Clerk | Clerk (web console, OAuth for MCP/Slack installs) |
-| Device auth | devicebasedauth.org | devicebasedauth.org for device enrollment and identity **(A — see open question 1)** |
+| Human auth | Clerk | devicebasedauth.org sign-in; Clerk optional (also the OAuth server for MCP clients where configured) |
+| Device auth | devicebasedauth.org | devicebasedauth.org for device enrollment and identity (D5) |
 | Pricing | Thin margin, never negative | Same, enforced by automated pricing invariants (§8) |
 | Dev focus | API docs, working samples, built-in tools | Same, plus SDKs for 6+ platforms and sample apps |
 | Core difference | — | **Device-to-device, transport-agnostic, location-agnostic delivery** |
@@ -53,8 +53,8 @@ Guiding principles:
 
 | Concept | Description |
 |---|---|
-| **Account** | A Clerk user or org. Holds the balance, owns topics, devices, tokens, and policies. |
-| **Device** | Any endpoint running the SDK or registered to receive messages: browser tab, phone, server, ESP32, CLI, agent. It has an Ed25519 identity key (enrolled through devicebasedauth.org; see open question 1) and declares the **capabilities** (transports) it can reach. |
+| **Account** | Signed in with devicebasedauth.org (or a Clerk user or org). Holds the balance, owns topics, devices, tokens, and policies. |
+| **Device** | Any endpoint running the SDK or registered to receive messages: browser tab, phone, server, ESP32, CLI, agent. It is enrolled at devicebasedauth.org (D5), may attach an Ed25519 key, and declares the **capabilities** (transports) it can reach. |
 | **Endpoint** | A non-SDK destination bound to a topic: an email address, phone number, Slack channel, webhook URL, LXMF address, or MCP agent inbox. Paid outbound endpoints must be **verified** (confirmation code) to prevent abuse. |
 | **Topic** | The rendezvous point. Namespaced `@handle/name`, or an unguessable `t_<128-bit>` name for ntfy-style "secret URL" topics. Topics carry policies and an optional E2EE key. |
 | **Subscription** | (Device or Endpoint) × Topic, plus a filter (priority, tags) and delivery preferences. |
@@ -150,7 +150,7 @@ owner sees this only in the trace.
 | Slack | relay | in/out | Slack app (OAuth install), Events API in, `chat.postMessage` out | bind channel ↔ topic |
 | Twilio SMS / MMS / WhatsApp | relay | in/out | Twilio REST + inbound webhook | US A2P 10DLC registration needed (started in Phase 0); verified numbers only |
 | Twilio Voice | relay | out (+DTMF ack) | TwiML `<Say>` | escalation target for alarms |
-| MCP | relay | in/out | Remote MCP server at `mcp.subetha.us` (Streamable HTTP, OAuth via Clerk). Tools: `publish`, `poll`, `wait_for_message`, `list_topics`, `create_topic`, `estimate_cost` | agents are devices too |
+| MCP | relay | in/out | Remote MCP server at `mcp.subetha.us` (Streamable HTTP; API tokens, or OAuth via Clerk where configured). Tools: `publish`, `poll`, `wait_for_message`, `list_topics`, `create_topic`, `estimate_cost` | agents are devices too |
 | Reticulum / LXMF | gateway | in/out | Python RNS + LXMF daemon in Cloudflare Containers (or a small VPS), linked to the relay by WebSocket. Each topic can be given an LXMF destination | BYO gateway supported |
 | Bluetooth LE | edge | in/out | SDK: GATT service plus advertising; store-and-forward mesh; Web Bluetooth where supported | iOS background limits apply |
 | Audio | edge | in/out | SDK data-over-sound modem (ggwave-style FSK, MIT-licensed lib or own) | short payloads, ids, wake-ups |
@@ -167,7 +167,7 @@ Each transport is a module that implements one interface (`capabilities()`, `sen
 
 ```
              ┌──────────── subetha.us (Workers static assets: site, docs, console) ────────────┐
- clients ───▶│ api Worker (Hono): REST + ntfy-compat, auth (Clerk JWT | API token | device sig) │
+ clients ───▶│ api Worker (Hono): REST + ntfy-compat, auth (API token | DBA device | device sig | Clerk) │
              └──────┬──────────────┬─────────────────┬──────────────────┬──────────────────────┘
                     │              │                 │                  │
              TopicDO (per topic)  AccountDO        D1 (accounts,      KV (token→account cache,
@@ -265,7 +265,8 @@ the route plan and cost estimate without charging.
 - **API tokens:** scoped and revocable: `publish:@alice/*`, `subscribe:@alice/doorbell`, transport
   allow-lists, spend caps (per day / total), expiry, IP or origin restrictions. Browser-safe
   **publishable tokens** for web pages are tied to an origin and a single topic with a tight cap.
-- **MCP / Slack:** OAuth 2.1 with Clerk as the authorization server.
+- **MCP:** API tokens, or OAuth 2.1 with Clerk as the authorization server where Clerk is configured.
+- **Slack:** the Slack app's own OAuth install.
 - **E2EE (optional):** per-topic symmetric keys shared out-of-band (QR) or wrapped to device keys.
   The relay routes ciphertext.
 
@@ -424,18 +425,17 @@ subetha.us.
 | D2 | Who pays for delivery | **Topic owner** pays for fan-out and delivery; the publisher pays for the publish. |
 | D3 | SDK architecture | **Rust core + bindings** (UniFFI, flutter_rust_bridge, uniffi-bindgen-react-native), plus a hand-written TS SDK for the web. |
 | D4 | Early transports | **All of:** email + Slack + MCP, Twilio SMS/voice (US), Reticulum gateway, BLE/audio/QR edge, run as parallel tracks (§14). |
-| D5 | Device auth (was open question 1) | **devicebasedauth.org replaces subetha's own enrollment** (2026-11-24). Devices enroll there for the first-party audience `subetha.us` (operator pays its online decisions and sign-ins); subetha verifies their device-bound credentials offline with the vendored `@devicebasedauth/verify` (`workers/api/src/dba.ts`). An account links one DBA account over OpenID Connect; that account's devices act as the account's devices within their grants (`subetha:publish`, `subetha:subscribe`, topics as resources). A DBA device may attach an Ed25519 key (E2EE, signed messages), stopped when its DBA credential is revoked. The device-code flow and direct registration answer 410. Humans sign in with Clerk, or with devicebasedauth.org directly (OIDC + PKCE, no Clerk; 2026-11-25): that reaches the linked account or creates one, with a 30-day revocable `admin` token as the session. Every SDK (TS, Swift, Kotlin, Dart, Python) takes a DBA device's headers and attaches signing keys. |
+| D5 | Device and human auth | **devicebasedauth.org (DBA) for devices and sign-in.** Devices enroll there for the first-party audience `subetha.us` (operator pays its online decisions and sign-ins); subetha verifies their device-bound credentials offline with the vendored `@devicebasedauth/verify` (`workers/api/src/dba.ts`). An account links one DBA account over OpenID Connect; that account's devices act as the account's devices within their grants (`subetha:publish`, `subetha:subscribe`, topics as resources). A DBA device may attach an Ed25519 key (E2EE, signed messages), stopped when its DBA credential is revoked. Humans sign in with DBA directly (OIDC + PKCE, no Clerk), which reaches the linked account or creates one, with a 30-day revocable `admin` token as the session; Clerk sign-in is optional. Every SDK (TS, Swift, Kotlin, Dart, Python) takes a DBA device's headers and attaches signing keys. |
 
 ### Still open
-1. ~~devicebasedauth.org~~: decided, D5.
 2. **GitHub Pages domain:** `curtcox.github.io/subetha`, or a subdomain such as `dev.subetha.us`?
 3. **Refunds:** can unused balance be refunded (minus processing fees), or is it non-refundable
    credit? This affects how Stripe fees are passed through.
 4. **Code sharing with hashbin:** should SubEtha reuse hashbin.org's stack/modules (billing ledger,
    Clerk integration, docs tooling)? If so, please grant read access to `curtcox/hashbin.org` so
    the plan can match it.
-5. **Entity and accounts:** is `subetha.us` already on Cloudflare? Is there a business entity for
-   Twilio A2P 10DLC registration? Do Stripe, Clerk, Twilio, Apple, and Google developer accounts
-   exist?
+5. **Entity and accounts:** is there a business entity for Twilio A2P 10DLC registration? Do
+   Stripe, Twilio, Apple, and Google developer accounts exist? (`subetha.us` is on Cloudflare and
+   production is deployed; Clerk is optional since D5.)
 6. **Topic namespace:** global ntfy-style names (`subetha.us/anything`) in addition to
    `@handle/…` and `t_<random>`? Global names are friendlier but invite squatting and collisions.

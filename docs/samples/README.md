@@ -6,7 +6,7 @@ tested code can't drift apart. Don't paste code into `docs/*.md`; add a file her
 
 | Directory | Contents | How CI checks it |
 |---|---|---|
-| `ts/` | TypeScript, each exporting `run({ baseUrl, token, topic, fetch })` | **Run** against the Worker (Miniflare, via `SELF.fetch`) in `workers/api/test/samples.test.ts`, with assertions on the result |
+| `ts/` | TypeScript, each exporting `run({ baseUrl, token, topic, fetch, dba })` (`dba` is a stand-in devicebasedauth.org device) | **Run** against the Worker (Miniflare, via `SELF.fetch`) in `workers/api/test/samples.test.ts`, with assertions on the result |
 | `curl/` | Shell scripts using `curl` (and `jq`, `websocat` where noted) | `bash -n` in `test/samples.test.ts` |
 | `python/` | Python SDK and standard-library snippets | `python -m py_compile` in `test/samples.test.ts` |
 | `web/` | HTML and browser JavaScript | `node --check` / page structure in `test/samples.test.ts` |

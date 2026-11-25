@@ -20,8 +20,8 @@ It speaks ntfy's wire protocol, so this works:
 | Deliver to push, email, Slack, SMS, voice, webhooks, or LXMF | [Transports](transports.md) |
 | Know what it costs and how the balance works | [Pricing & billing](pricing.md) |
 | Hand out safe credentials and set topic rules | [Tokens & policies](tokens.md) |
-| Enroll phones, Pis, and CLIs as devices | [Devices](devices.md) |
-| Use the TypeScript, Python, or Rust SDKs, the CLI, or web components | [SDKs & CLI](sdks.md) |
+| Enroll phones, Pis, browsers, and CLIs as devices | [Devices](devices.md) |
+| Use the SDKs (TypeScript, Python, Swift, Kotlin, Dart, React Native, Rust core), the CLI, or web components | [SDKs & CLI](sdks.md) |
 | Connect an AI agent | [Agents (MCP, llms.txt)](agents.md) |
 | Run locally, or bridge your own transport | [Self-hosting & gateways](self-hosting.md) |
 | Look up a route, header, or error code | [API reference](api.md) |

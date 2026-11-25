@@ -56,7 +56,8 @@ With the SDK:
 
 ## Authentication
 
-Send `Authorization: Bearer <token>`. For clients that can't (browsers' `EventSource` and
+Send `Authorization: Bearer <token>`, or, from a [device](devices.md), its devicebasedauth.org
+credential or a signed request. For clients that can't (browsers' `EventSource` and
 `WebSocket`, some ntfy apps), use HTTP Basic with an empty user name, or `?auth=`:
 
 <!-- include: samples/curl/ntfy-auth.sh -->

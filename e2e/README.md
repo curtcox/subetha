@@ -5,6 +5,8 @@ Worker under `wrangler dev`. `serve.mjs` builds the SDK bundle and the site, app
 migrations to a fresh state directory (`e2e/.state`), and starts `wrangler dev` on port 8788,
 with Twilio pointed at a local mock (`mock-twilio.mjs`, on the port two above) that records each
 SMS and call and lists them at `GET /__calls?to=+1…`.
+devicebasedauth.org is mocked too (`mock-dba.mjs`: sign-in, linking, device credentials, and
+status lists), and the relay's `DBA_ISSUER` points at it.
 Each test creates its own account through the local-only `/v1/dev/bootstrap` endpoint.
 
 ```bash
@@ -31,8 +33,14 @@ What's covered:
 - a scoped token made in the console, which can publish only where its scope allows;
 - E2EE: a topic key made in the console is wrapped to an enrolled device; the console encrypts
   what it sends and decrypts its inbox, the relay stores ciphertext, and the device opens the key;
-- device enrollment: the device-code link opens the Devices tab with the code filled in, the
-  approved device publishes with signed requests, and revoking it in the console locks it out;
+- signing in with devicebasedauth.org (against `e2e/mock-dba.mjs`): a new account picks its
+  handle, and a sign-in that didn't start in the same tab is refused;
+- devices through devicebasedauth.org: linking from the console, a DBA device publishing within its
+  grants until it's paused or revoked there, and this browser enrolling, attaching a key, signing
+  messages, unwrapping E2EE keys, and revoking itself;
+- attachments uploaded from Compose and downloaded from the inbox; inbox filters and trace links;
+  topic policy controls, billing limits, and publishable-token embed snippets;
+- Stripe top-ups with printable receipts, and auto-recharge settings;
 - escalation through the real delivery queue: an urgent message nobody acks goes to SMS after
   2 s and to a voice call after 4 s (verification codes for both are read back from the mock
   Twilio), a signed keypress callback acks it, and the call-status callback settles the call;

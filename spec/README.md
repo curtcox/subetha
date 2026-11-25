@@ -109,8 +109,8 @@ other field (including `sender` and `sig`) as received.
 
 ### 5.1 Wrapped topic keys
 
-A topic key can be handed to an enrolled device through the relay by sealing it to the device's
-identity key. The relay stores and serves wrapped keys but can't open them.
+A topic key can be handed to a device through the relay by sealing it to the device's attached
+Ed25519 key (§8.2). The relay stores and serves wrapped keys but can't open them.
 
 ```jsonc
 {
@@ -179,14 +179,17 @@ SubEtha headers: `X-Route-Mode` (`any|fast|all|cheap`), `X-Max-Cost` (USD, decim
 `X-Hops`, `X-Expires`, `Idempotency-Key`, `X-Dry-Run: 1`, `X-Sender`, `X-Signature`,
 `X-Message-Id`, `X-Time`.
 
-Auth: `Authorization: Bearer <token>` (API token or Clerk session JWT), or ntfy-style
-`?auth=<base64("Bearer <token>")>`, or HTTP Basic with an empty username and the token as the
-password (for ntfy clients).
+Auth: `Authorization: Bearer <token>` (an API token, an MCP OAuth access token, or a Clerk session
+JWT where Clerk is configured), or ntfy-style `?auth=<base64("Bearer <token>")>`, or HTTP Basic
+with an empty username and the token as the password (for ntfy clients). A devicebasedauth.org
+device sends its device-bound credential instead (`Authorization: DBA <credential>` and a `DPoP`
+proof of its key, or a DBA access token), for the audience `subetha.us`; it acts within its grants
+(`subetha:publish`, `subetha:subscribe`, with topic names or `@handle/*` prefixes as resources).
 
 ### 8.1 Device-signed requests
 
-An enrolled device authenticates by signing each request with its Ed25519 key (no bearer
-token). It sends:
+A device with an attached key (§8.2) authenticates by signing each request with that Ed25519 key
+(no bearer token). It sends:
 
 | Header | Value |
 |---|---|
@@ -229,12 +232,25 @@ header they set, lowercased and sorted by name, skipping `Authorization`, `Host`
 `Accept-Encoding` (HTTP stacks set or rewrite these; none is covered). The order doesn't
 matter to the relay; the convention makes signatures reproducible (`vectors/requests.json`).
 
-The relay accepts each signature once, and only from an enrolled, unrevoked device. The host is
+The relay accepts each signature once, and only from an attached, unrevoked key whose DBA credential is still valid. The host is
 signed, so a staging signature isn't valid in production.
 
 *Deprecated:* `subetha-req-v1` (no `X-Device-Signed-Headers`) signs
 `subetha-req-v1\nMETHOD\nhost\npath?query\ntime\nnonce\nhex(sha256(body))`. The relay still
 accepts it for requests that carry no covered header.
+
+### 8.2 Attaching a signing key
+
+A devicebasedauth.org device with grants for `subetha:publish` and `subetha:subscribe` on every
+topic attaches an Ed25519 key with `POST /v1/devices/dba`, authenticated with its DBA credential:
+
+```jsonc
+{ "device_id": "dev_…", "time": 1763750000, "proof": "…", "name": "garage-pi", "capabilities": ["ws", "lan"] }
+```
+
+`proof` is base64url(Ed25519(`"subetha-enroll-v1\n" + device_id + "\n" + time`)) by the key named
+in `device_id`, with `time` within 300 s of the relay's clock. Revoking the DBA credential stops
+the key too.
 
 ## 9. Errors
 

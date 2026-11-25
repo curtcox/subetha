@@ -54,9 +54,6 @@ credential stops it too. Every SDK does this for a client built with the device'
 **Devices → This browser → Enroll this browser** in the console and bare `subetha login` in the
 CLI (through the `dba` CLI).
 
-subetha's own device-code flow (`/v1/device/code`, `/approve`, `/token`) and direct registration
-(`POST /v1/devices`) are retired and answer `410`.
-
 ## Signed requests
 
 Every request signed with an attached key carries:

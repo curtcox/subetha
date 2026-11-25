@@ -7,10 +7,10 @@ SubEtha has a small vocabulary. Once these click, the rest of the API follows.
 | **Account** | Holds the prepaid balance and owns topics, devices, endpoints, tokens, and policies. |
 | **Topic** | The rendezvous point. Publishers and subscribers only ever name topics. |
 | **Message** | An ntfy-compatible JSON envelope plus SubEtha extensions. |
-| **Device** | Something running an SDK with its own Ed25519 key: a phone, a browser, a Pi, a CLI, an agent. |
+| **Device** | A phone, browser, Pi, CLI, or agent enrolled at devicebasedauth.org with its own key, acting for your account within the grants you gave it. It can attach an Ed25519 key for signing and E2EE. |
 | **Endpoint** | A non-SDK destination: an email address, a phone number, a Slack channel, a webhook URL, a push token, an LXMF address. |
 | **Subscription** | Topic → endpoint, with filters and an optional escalation delay. |
-| **Transport** | A path a message can take: `ws`, `sse`, `poll`, `webpush`, `apns`, `fcm`, `webhook`, `email`, `slack`, `sms`, `voice`, `mcp`, `lxmf`, and the edge transports `ble`, `audio`, `qr`, `lan`. |
+| **Transport** | A path a message can take: `ws`, `sse`, `poll`, `webpush`, `apns`, `fcm`, `webhook`, `email`, `slack`, `sms`, `voice`, `whatsapp`, `mcp`, `lxmf`, and the edge transports `ble`, `audio`, `qr`, `lan`. |
 | **Trace** | Per-message record of the route plan, each delivery attempt, acks, and cost. Only the topic owner sees it. |
 
 ## Topics
@@ -71,8 +71,9 @@ and its [JSON Schema](https://github.com/curtcox/subetha/blob/main/spec/schema/m
 There are two ways to receive:
 
 - **Devices** run an SDK and connect: a WebSocket, an SSE or NDJSON stream, or polling. Live
-  delivery is cheap, and SDKs ack messages so escalation stops. A device has its own key and can
-  sign messages and requests ([Devices](devices.md)).
+  delivery is cheap, and SDKs ack messages so escalation stops. A device enrolled at
+  devicebasedauth.org needs no stored token, and with an attached key it can sign messages and
+  requests ([Devices](devices.md)).
 - **Endpoints** are destinations the relay pushes to: push tokens, email addresses, phone
   numbers, Slack channels, webhooks, LXMF addresses. The topic owner adds them and subscribes
   them to topics. Paid destinations a third party could be spammed through (email, SMS, voice)

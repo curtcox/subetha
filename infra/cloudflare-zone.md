@@ -1,8 +1,8 @@
 # Cloudflare zone: subetha.us
 
 Declarative Terraform for these settings lives in [`infra/terraform/`](terraform/README.md); this
-page documents the same settings for applying by hand. Open question 5 in PLAN.md (is `subetha.us`
-on Cloudflare yet?) must be settled first.
+page documents the same settings for applying by hand. The zone is on Cloudflare, and production
+is deployed to it.
 
 ## Hostnames
 

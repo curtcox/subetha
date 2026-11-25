@@ -37,7 +37,8 @@ plus `request()` for any other route. Useful options:
 | `token` | Bearer token (or a `() => Promise<string \| null>` provider for rotating JWTs). |
 | `deviceKey` | Sign every publish ([signed messages](publishing.md#signed-messages)). |
 | `signer`, `verifyEnvelope` | Sign and check signatures with something other than WebCrypto Ed25519, e.g. the Rust core in React Native (`createClient({ core, deviceSeed })` in `@subetha/react-native`). |
-| `signRequests: true` | Authenticate with device signatures instead of a token ([Devices](devices.md)). |
+| `dba` | Authenticate as a devicebasedauth.org device: anything with `headers(method, url)`, such as `new DBA()` from devicebasedauth.org's browser SDK ([Devices](devices.md)). `attachDeviceKey(key)` then attaches a signing key. |
+| `signRequests: true` | Authenticate with device signatures (an attached key) instead of a token ([Devices](devices.md#signed-requests)). |
 | `topicKeys` | Per-topic E2EE keys: messages to those topics are encrypted, received ones decrypted. `loadTopicKeys()` adds the ones [shared with this device](publishing.md#sharing-keys-with-devices) (in React Native, pass `unwrapper: coreKeyUnwrapper(core, seed)` and `wrapper: coreKeyWrapper(core)`; in Swift and Kotlin, `CoreDeviceSigner.unwrapTopicKey` and `CoreKeyWrap.wrap`). |
 | `fetch`, `WebSocket` | Bring your own (tests, older runtimes). |
 
@@ -77,7 +78,8 @@ they're visible to anyone who views the page.
 
 <!-- include: samples/python/signed.py -->
 
-`Client.publish` uses ntfy headers for simple messages and switches to JSON for signed messages,
+`Client(dba=…)` authenticates as a devicebasedauth.org device and `attach_device_key()` attaches
+a signing key ([Devices](devices.md)). `Client.publish` uses ntfy headers for simple messages and switches to JSON for signed messages,
 extension fields, or text that can't travel in a header. Errors raise `SubEthaError` with `code`,
 `http`, `message`, and `body`.
 
@@ -93,7 +95,7 @@ generated from it; see [`BINDINGS.md`](https://github.com/curtcox/subetha/blob/m
 
 ## Mobile SDKs (Swift, Kotlin, Flutter, React Native)
 
-All four mobile SDKs share the same API shape (`publish`, `publishFile`, `estimate`, `poll`, `subscribe`, `ack`, `setTopicKey`, wrapped topic keys, and control-plane helpers) and optionally link `subetha-core` for Ed25519 signing, E2EE, store-and-forward outbox, and edge transports (BLE, audio, animated QR, LAN):
+All four mobile SDKs share the same API shape (`publish`, `publishFile`, `estimate`, `poll`, `subscribe`, `ack`, `setTopicKey`, wrapped topic keys, control-plane helpers, and devicebasedauth.org devices through a `dba` header provider with `attachDeviceKey`) and optionally link `subetha-core` for Ed25519 signing, E2EE, store-and-forward outbox, and edge transports (BLE, audio, animated QR, LAN):
 
 - **Swift (`sdk/swift`)**: `SubEtha(token: ...)` + `SubEthaCore` (UniFFI). See [`sdk/swift/README.md`](https://github.com/curtcox/subetha/blob/main/sdk/swift/README.md) and [`samples/ios`](https://github.com/curtcox/subetha/tree/main/samples/ios).
 - **Kotlin / Android (`sdk/kotlin`)**: `SubEtha(token = ...)` + `subetha-core` (UniFFI). See [`sdk/kotlin/README.md`](https://github.com/curtcox/subetha/blob/main/sdk/kotlin/README.md) and [`samples/android`](https://github.com/curtcox/subetha/tree/main/samples/android).

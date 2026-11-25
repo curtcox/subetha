@@ -125,7 +125,7 @@ def _header_safe(s: str) -> bool:
 class Client:
     """A synchronous SubEtha client.
 
-    >>> c = Client(token="tk_...")
+    >>> c = Client(token="se_...")
     >>> c.publish("@alice/doorbell", "Opened", title="Front door", priority="high")
     >>> for msg in c.subscribe("@alice/doorbell"):
     ...     print(msg["message"])

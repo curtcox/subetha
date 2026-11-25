@@ -44,14 +44,9 @@ npx wrangler queues create subetha-delivery-staging
 npx wrangler queues create subetha-delivery-dlq-staging
 ```
 
-Then put the printed ids into `workers/api/wrangler.jsonc` under `env.staging`:
-
-| Placeholder | Value |
-|---|---|
-| `REPLACE_WITH_STAGING_D1_ID` | `database_id` from `wrangler d1 create subetha-staging` |
-| `REPLACE_WITH_STAGING_KV_ID` | `id` from `wrangler kv namespace create subetha-cache-staging` |
-| `REPLACE_WITH_PRODUCTION_D1_ID` | `database_id` from `wrangler d1 create subetha-production` |
-| `REPLACE_WITH_PRODUCTION_KV_ID` | `id` from `wrangler kv namespace create subetha-cache-production` |
+Then put the printed ids into `workers/api/wrangler.jsonc` under that environment. Production's
+are already there; staging still has the placeholders `REPLACE_WITH_STAGING_D1_ID` (the
+`database_id`) and `REPLACE_WITH_STAGING_KV_ID` (the KV `id`).
 
 These ids aren't secret; commit them. The deploy workflow skips an environment (with a warning)
 while its placeholders are still there.
@@ -60,8 +55,8 @@ Other bindings need no creation step:
 
 - **Durable Objects** (`TopicDO`, `AccountDO`) are created by the first deploy (migration tag `v1`).
 - **Rate limits** (`RL_AUTH` 600/min per credential, `RL_ANON` 60/min per IP) use
-  `namespace_id`s `3001`/`3002` (cronly already uses `1001`); these must be unique among rate-limit bindings in the account,
-  so change them if another Worker already uses them.
+  `namespace_id`s `3001`/`3002`. These must be unique among rate-limit bindings in the
+  Cloudflare account (another Worker there uses `1001`), so change them if they collide.
 - **Cron**: `17 3 * * *` (daily rent metering, freeze/cleanup, Stripe reconciliation, Twilio price
   check, expired-attachment cleanup).
 - **Custom domains** (`staging.subetha.us`; `subetha.us` and `mcp.subetha.us` for production)

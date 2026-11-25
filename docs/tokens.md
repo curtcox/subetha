@@ -7,9 +7,11 @@ and caps) and **topic policies** (rules attached to a topic).
 
 | Credential | How it's sent | For |
 |---|---|---|
-| API token `se_…` | `Authorization: Bearer se_…` (or Basic with an empty user, or `?auth=`) | scripts, servers, agents, web pages |
-| Clerk session | `Authorization: Bearer eyJ…` | the web console |
-| Device signature | `X-Device-Id`, `X-Device-Time`, `X-Device-Signature` | [enrolled devices](devices.md) |
+| API token `se_…` | `Authorization: Bearer se_…` (or Basic with an empty user, or `?auth=`) | scripts, servers, agents, web pages; the console's session after signing in with devicebasedauth.org (an `admin` token that expires in 30 days, listed under Tokens) |
+| devicebasedauth.org device | `Authorization: DBA …` and `DPoP: …` | [devices](devices.md), within their grants |
+| Device signature | `X-Device-Id`, `X-Device-Time`, `X-Device-Nonce`, `X-Device-Signed-Headers`, `X-Device-Signature` | devices with an [attached key](devices.md#signing-keys-e2ee-and-signed-messages) |
+| OAuth access token | `Authorization: Bearer …` | [MCP clients](agents.md) (where Clerk is configured) |
+| Clerk session | `Authorization: Bearer eyJ…` | the web console, where Clerk is configured |
 
 All requests are rate limited: 600 per minute per credential, 60 per minute per IP without one.
 Over the limit you get `429 rate_limited` with `Retry-After`.
@@ -23,7 +25,7 @@ Over the limit you get `429 rate_limited` with `Retry-After`.
 | Field | Meaning |
 |---|---|
 | `scopes` | What the token may do (below). Required. |
-| `transports` | Allow-list of transports its publishes may use, e.g. no `sms`/`voice`. |
+| `transports`, `deny_transports` | Allow- and deny-lists of transports its publishes may use, e.g. deny `sms` and `voice`. |
 | `daily_cap_usd`, `total_cap_usd` | Spend caps for everything charged to the token. |
 | `origins` | Makes it a [publishable token](#publishable-tokens). |
 | `ips` | Client addresses or CIDR ranges it works from, e.g. `["203.0.113.0/24", "2001:db8::/32"]` (up to 32). Requests from anywhere else get `403 forbidden`. |
@@ -43,7 +45,7 @@ The secret is returned once. `GET /v1/tokens` lists tokens without secrets, and
 | `subscribe:@alice/doorbell` | Read one topic. |
 | `publish:t_…` | One secret topic. |
 
-A token can't create a token with more power than it has (only `admin` tokens create tokens).
+Only `admin` tokens create tokens, and a token can't create one with more power than it has: its scopes, caps, expiry, transports, origins, and IPs bound the new token's.
 
 ### Publishable tokens
 
@@ -69,6 +71,7 @@ can cost you. Use one for [`<subetha-feed>` / `<subetha-send>`](sdks.md#web-comp
 | `public_publish` | Anyone may publish without credentials. Charged to you, within the anonymous limits. |
 | `anon_rate_per_min` | Anonymous publishes per minute (default 60). |
 | `anon_daily_cap_micros` | Daily cap on what anonymous publishes may cost you (default $1). |
+| `rate_per_min`, `burst` | Topic-wide publish rate limit (messages per minute) and burst size, for every publisher. |
 | `public_read` | Anyone may subscribe to this namespaced topic. (Secret topics are always readable by name.) |
 | `allowed_publishers`, `allowed_readers` | Extra account, token, or device ids allowed to publish / read. |
 | `require_signature` | Reject messages without a valid device signature. |
@@ -77,7 +80,7 @@ can cost you. Use one for [`<subetha-feed>` / `<subetha-send>`](sdks.md#web-comp
 | `max_cost_per_message_micros` | Drop deliveries beyond this cost per message. |
 | `daily_cap_micros`, `monthly_cap_micros` | Daily and monthly caps on owner-side spend for this topic (deliveries and reads). |
 | `retention_s` | How long messages are kept (default 12 h, up to 30 days). Longer costs more rent. |
-| `quiet_hours` | `{"start": "22:00", "end": "07:00"}` (UTC): paid transports are suppressed. |
+| `quiet_hours` | `{"start": "22:00", "end": "07:00", "tz": "America/Chicago"}` (`tz` is an IANA zone, default UTC): paid transports are suppressed. |
 | `email_senders` | Who may publish by [inbound email](transports.md#email): addresses, `@domain`, or `*`. |
 | `paused` | Kill switch: reject publishes. |
 

@@ -14,7 +14,7 @@ pytest sdk/python
 ```python
 from subetha import Client, SubEthaError
 
-c = Client("https://subetha.us", token="tk_...")
+c = Client("https://subetha.us", token="se_...")
 c.publish("@alice/doorbell", "Opened", title="Front door", priority="high", tags=["door"])
 c.publish("@alice/doorbell", "Opened", route={"mode": "cheap", "deny": ["sms"]}, dry_run=True)
 

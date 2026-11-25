@@ -17,6 +17,10 @@ sub.close();
 - **Transports.** RN's `fetch` can't stream response bodies, so the JSON-stream transport can't
   work there. `subscribe()` picks WebSocket for a single topic and polling for several
   (`rnTransport`). Pass `transport` to override.
+- **devicebasedauth.org devices.** `createClient({ dba })` takes the same `dba` header provider
+  as the TS SDK ([docs/devices.md](../../docs/devices.md)). To attach a signing key on Hermes,
+  sign the proof with the Rust core: `const p = core.enrollmentProof(seed, BigInt(now))`, then
+  `client.request("POST", "/v1/devices/dba", { device_id: p.deviceId, time: Number(p.time), proof: p.proof })`.
 - **Device keys / E2EE.** The JS SDK signs with WebCrypto Ed25519 and encrypts with its own
   XChaCha20. Hermes has no `crypto.subtle`, so use the Rust core there (below), or a
   WebCrypto polyfill.

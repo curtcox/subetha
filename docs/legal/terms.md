@@ -40,7 +40,7 @@ You must follow the [Acceptable Use Policy](aup.md). In particular, you may send
 email only to recipients who have consented, and we require recipients to verify paid endpoints.
 
 ## 5. Third-party services
-Delivery depends on providers we don't control (Cloudflare, Stripe, Clerk, Apple, Google, Slack,
+Delivery depends on providers we don't control (Cloudflare, Stripe, devicebasedauth.org, Clerk, Apple, Google, Slack,
 Twilio, email providers, Reticulum networks). Their terms may apply to you when you connect them
 (for example, installing the Slack app). Edge transports (Bluetooth, audio, QR, LAN) run on your
 devices; we don't operate them.

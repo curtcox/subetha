@@ -38,7 +38,7 @@ holds topic keys. Attachments and click URLs are appended as links.
 ```bash
 pip install -e sdk/python -e "gateways/reticulum[rns]"   # from the repo root
 cp gateways/reticulum/gateway.example.toml gateway.toml   # edit topics
-export SUBETHA_TOKEN=tk_...                               # token with publish+subscribe on the topics
+export SUBETHA_TOKEN=se_...                               # token with publish+subscribe on the topics
 subetha-reticulum --config gateway.toml
 ```
 
@@ -83,7 +83,7 @@ Build from the repository root, since the image also installs the local Python S
 ```bash
 docker build -f gateways/reticulum/Dockerfile -t subetha-reticulum .
 docker run -d --name subetha-reticulum --restart unless-stopped \
-  -e SUBETHA_TOKEN=tk_... \
+  -e SUBETHA_TOKEN=se_... \
   -v subetha-reticulum-data:/data \
   -v "$PWD/gateway.toml:/config/gateway.toml:ro" \
   -v "$PWD/reticulum:/config/reticulum:ro" \

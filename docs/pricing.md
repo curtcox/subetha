@@ -115,7 +115,7 @@ Plus a kill switch at every level: `paused` on a topic policy, on a device (`PAT
 With a zero balance, every paid action fails with 402 before it runs. Rent for devices and
 endpoints is charged daily; when it can't be paid the account is marked **frozen** (records are
 kept). After 30 days frozen, its endpoints and subscriptions are deleted and its devices revoked.
-A top-up before then unfreezes it at the next daily run. If the account has an email address,
+A top-up before then unfreezes it immediately. If the account has an email address,
 it gets a notice when it's frozen, a warning 7 days before the deletion date, and a notice when
 the deletion happens (each one is also in the audit log as `account.notice`).
 

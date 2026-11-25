@@ -120,8 +120,8 @@ If you sign *and* encrypt, the SDK encrypts first and signs the ciphertext.
 
 ### Sharing keys with devices
 
-Instead of copying the key to each device by hand, the owner can seal it to enrolled devices'
-identity keys and leave the sealed copies on the relay ([spec §5.1](https://github.com/curtcox/subetha/blob/main/spec/README.md#51-wrapped-topic-keys)).
+Instead of copying the key to each device by hand, the owner can seal it to devices'
+[attached keys](devices.md#signing-keys-e2ee-and-signed-messages) and leave the sealed copies on the relay ([spec §5.1](https://github.com/curtcox/subetha/blob/main/spec/README.md#51-wrapped-topic-keys)).
 Each device fetches only the copies addressed to it, with a signed request, and opens them with
 its own key; the relay can't. To rotate, share a new `kid`: devices switch to the newest one the
 next time they load keys (the SDK holds one key per topic, so messages sent under the old `kid`
@@ -131,7 +131,7 @@ have kept the old key).
 <!-- include: samples/ts/key-sharing.ts#snippet -->
 
 In the console, **Topics → End-to-end encryption keys** does the same without code: **New key**
-makes a key, wraps it for the enrolled devices you tick, and shows it once so you can share it by
+makes a key, wraps it for the devices you tick, and shows it once so you can share it by
 hand. The console then encrypts what it sends to the topic and decrypts its inbox. Keys pasted
 under **Keys in this browser** work the same way; they're kept in memory unless you choose to
 remember them in the browser's local storage.

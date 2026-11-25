@@ -13,8 +13,6 @@ endpoints, and authenticated webhooks and devices. Regression tests are in
 | 2 | Medium | Signed messages are accepted for 7 days but stored only for the retention period. A captured signed message could be replayed after it was purged, and the owner paid again. | Signed ids are remembered for the whole acceptance window. A replay gets 409. |
 | 3 | Medium | Token and OAuth-client spend caps didn't apply to polls or stream backlogs. | `capTokenRead` tracks read spend against the caller token's caps. |
 | 4 | Medium | The topic daily cap was read before cross-DO awaits and written after them, so concurrent publishes could exceed it. Read-side spend had the same race. | The counters are checked and incremented with no await in between, and rolled back on failure. |
-| 5 | Medium | `/v1/device/code` (unauthenticated) stored unbounded `capabilities`, and codes were never deleted. | Size limits, one pending code per device, and the daily cron deletes expired codes. |
-| 6 | Medium | `POST /v1/devices` registered any device id without proof of key possession, and device ids are public. Approving a device held by another account reported success. | The enrollment proof is required. Approving returns 409 and leaves the code pending. |
 | 7 | Low | The 5-attempt limit on endpoint verification was check-then-increment. | One conditional `UPDATE … WHERE verify_attempts < 5`. |
 | 8 | Low | Web Push endpoints skipped the webhook host checks and followed redirects. | Same host checks as webhooks, and `redirect: "manual"`. |
 | 10 | Low | Repeating an `Idempotency-Key` was free and not rate limited. | Charged as an API request, and rate limited when anonymous. |

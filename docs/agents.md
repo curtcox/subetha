@@ -41,8 +41,10 @@ the topics it needs, with a daily cap and no `sms`/`voice` unless you mean it. F
 [MCP authorization spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
 can connect with no token at all. An unauthenticated request gets a 401 whose
 `WWW-Authenticate` header points at `/.well-known/oauth-protected-resource` (RFC 9728); that
-names SubEtha's authorization server (Clerk), where you sign in with your SubEtha login and
-approve the client. The client then sends the access token it got as a bearer token.
+names SubEtha's authorization server, where you sign in and approve the client. The client then
+sends the access token it got as a bearer token. OAuth sign-in is offered only on deployments
+that configure Clerk as the authorization server (`authorization_servers` in that document is
+empty otherwise); everywhere else, use an API token.
 
 An OAuth-connected client is deliberately limited:
 
